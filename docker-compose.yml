@@ -1,0 +1,154 @@
+# Cairn — single-node deployment.
+#
+#   ./install.sh && docker compose up -d && docker compose logs migrate
+#
+# The admin password is printed once by the `migrate` container (FR-A-03).
+#
+# Optional components are Compose profiles (NFR-D-02) so the base stack stays
+# small: --profile scale (Qdrant), --profile gpu (embedding server),
+# --profile ocr, --profile functions (gVisor sandbox). None exist until their
+# module ships; the placeholders are documented in docs/06-ops/01-deployment.md.
+
+name: cairn
+
+x-app: &app
+  build:
+    context: .
+    dockerfile: deploy/docker/Dockerfile
+  image: cairn:local
+  restart: unless-stopped
+  env_file: [.env]
+  depends_on:
+    postgres: {condition: service_healthy}
+    redis: {condition: service_healthy}
+    migrate: {condition: service_completed_successfully}
+  security_opt: ["no-new-privileges:true"]
+  read_only: true
+  tmpfs: ["/tmp"]
+  networks: [default]
+
+services:
+  # --------------------------------------------------------------- data stores
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cairn}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-cairn}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # Real healthcheck, not a port probe: `depends_on: service_healthy` is what
+      # prevents the "API starts, Postgres isn't ready, crash loop" first-run
+      # experience that makes a product feel broken before it has done anything.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cairn} -d ${POSTGRES_DB:-cairn}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks: [default]
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [default]
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-cairn}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [default]
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.1
+    profiles: [scale]
+    restart: unless-stopped
+    volumes:
+      - qdrantdata:/qdrant/storage
+    networks: [default]
+
+  # ------------------------------------------------------------------ migrate
+  # ONE-SHOT. Runs migrations under an advisory lock, then bootstraps the admin.
+  # Everything else gates on `service_completed_successfully`, so N API replicas
+  # can never race the schema (NFR-D-03) or create N admins (FR-A-02).
+  migrate:
+    <<: *app
+    depends_on:
+      postgres: {condition: service_healthy}
+    command: ["cairn", "migrate", "--and-bootstrap"]
+    restart: "no"
+
+  # ---------------------------------------------------------------- api tiers
+  api-control:
+    <<: *app
+    environment:
+      CAIRN_ROLE: control
+    expose: ["8000"]
+    deploy:
+      replicas: 1
+
+  # The tier you scale. Phase 0 mounts no data-plane routes yet; it is present
+  # from the start so the topology, routing, and scaling story are exercised.
+  api-data:
+    <<: *app
+    environment:
+      CAIRN_ROLE: data
+    expose: ["8000"]
+    deploy:
+      replicas: 2
+
+  # ------------------------------------------------------------------- ingress
+  # Builds the SPA and serves it alongside the API reverse proxy, so the browser
+  # talks to a single origin. That is not just tidiness: the session cookie is
+  # SameSite=Lax and the CSRF check compares Origin against Host.
+  web:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.web
+    image: cairn-web:local
+    restart: unless-stopped
+    depends_on: [api-control, api-data]
+    ports:
+      - "${CAIRN_HTTP_PORT:-8080}:8080"
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks: [default]
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:
+  qdrantdata:
+
+networks:
+  default:
+    driver: bridge
+  # Phase 4: the Function sandbox lives here. `internal: true` means the
+  # container physically cannot route to postgres/redis/minio/qdrant, so an
+  # escape from the interpreter still reaches nothing (FR-M-04).
+  sandbox_net:
+    driver: bridge
+    internal: true

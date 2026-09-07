@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Environment — NEVER commit. Contains CAIRN_MASTER_KEY.
+.env
+.env.*
+!.env.example
+
+# Local data
+/data/
+*.db
+*.sqlite3
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Frontend
+node_modules/
+apps/web/dist/
+apps/web/*.tsbuildinfo
+
+# Generated from the live API; regenerate with `make web-api`.
+# Committed on purpose so CI can diff against the spec (T-M16-02).
+!apps/web/src/api/schema.d.ts
+!apps/web/openapi.json

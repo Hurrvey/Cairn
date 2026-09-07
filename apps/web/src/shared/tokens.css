@@ -1,0 +1,67 @@
+/* Design tokens.
+ *
+ * Deliberately few. A restrained palette and one spacing scale is what keeps a
+ * data-dense admin UI legible; every extra token is another chance for two
+ * screens to disagree.
+ */
+
+:root {
+  --cairn-accent: #3d6b4f;
+  --cairn-accent-strong: #2d5340;
+
+  --cairn-surface: #ffffff;
+  --cairn-surface-sunken: #f6f7f6;
+  --cairn-border: #e3e6e3;
+
+  --cairn-text: #16211b;
+  --cairn-text-muted: #67736c;
+
+  --cairn-success: #2f7d4f;
+  --cairn-warning: #a86a1c;
+  --cairn-danger: #b5433a;
+
+  --cairn-space-2: 6px;
+  --cairn-space-3: 10px;
+  --cairn-space-4: 16px;
+  --cairn-space-5: 22px;
+  --cairn-space-6: 30px;
+  --cairn-space-7: 44px;
+
+  /* Element Plus overrides so the component library follows our palette
+     rather than the other way round. */
+  --el-color-primary: var(--cairn-accent);
+  --el-color-success: var(--cairn-success);
+  --el-color-warning: var(--cairn-warning);
+  --el-color-danger: var(--cairn-danger);
+  --el-border-radius-base: 6px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+  color: var(--cairn-text);
+  background: var(--cairn-surface-sunken);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--cairn-accent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--cairn-accent);
+  outline-offset: 2px;
+}

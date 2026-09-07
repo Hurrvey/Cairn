@@ -1,0 +1,173 @@
+[project]
+name = "cairn"
+version = "0.1.0"
+description = "Cairn — Knowledge Base Platform / RAG Infrastructure Server"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+
+dependencies = [
+    # web
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "gunicorn>=23.0.0",
+    "python-multipart>=0.0.12",
+    # validation / config
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.6.0",
+    "email-validator>=2.2.0",
+    # database
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30.0",
+    "alembic>=1.14.0",
+    # cache
+    "redis>=5.2.0",
+    # http
+    "httpx>=0.27.2",
+    # security
+    "argon2-cffi>=23.1.0",
+    # observability
+    "structlog>=24.4.0",
+    "prometheus-client>=0.21.0",
+    # cli
+    "typer>=0.13.0",
+]
+
+[project.optional-dependencies]
+otel = [
+    "opentelemetry-sdk>=1.28.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.28.0",
+    "opentelemetry-instrumentation-fastapi>=0.49b0",
+    "opentelemetry-instrumentation-asyncpg>=0.49b0",
+]
+
+[project.scripts]
+cairn = "cairn.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",
+    "pytest-timeout>=2.3.0",
+    "testcontainers[postgres,redis]>=4.8.0",
+    "ruff>=0.7.0",
+    "mypy>=1.13.0",
+    "import-linter>=2.1",
+    "pip-audit>=2.7.3",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cairn", "apps"]
+
+# ---------------------------------------------------------------------------
+# ruff
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "apps", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes
+    "I",         # isort
+    "N",         # pep8-naming
+    "UP",        # pyupgrade
+    "B",         # bugbear
+    "C4",        # comprehensions
+    "SIM",       # simplify
+    "TCH",       # type-checking imports
+    "RUF",       # ruff-specific
+    "S",         # bandit
+    "ASYNC",     # async correctness
+    "FIX",       # untagged TODO/FIXME  (NFR-M: `TODO(name):` required)
+]
+ignore = [
+    "S101",   # assert — used extensively in tests, and for mypy narrowing
+    "B008",   # function call in default arg — FastAPI Depends() idiom
+
+    # Annotations in this codebase are evaluated at RUNTIME by Pydantic,
+    # SQLAlchemy (`Mapped[...]`), and FastAPI. Moving those imports into
+    # `if TYPE_CHECKING:` blocks breaks model construction at import time, so
+    # these rules produce only false positives here.
+    "TC001", "TC002", "TC003",
+
+    # Our exception class names mirror the API error `code` they carry
+    # (`NotFound` -> RESOURCE_NOT_FOUND). The code is the published contract;
+    # appending `Error` to every class would make the mapping harder to read
+    # without changing anything a client sees.
+    "N818",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S105", "S106", "S311"]  # hardcoded test credentials are intentional
+"migrations/**" = ["N999", "E501"]
+
+# S608 flags f-strings used to build SQL. In these two modules the only
+# interpolated values are module-level column-list constants and clause
+# fragments assembled from a fixed vocabulary; every user-supplied value is a
+# bound parameter. The alternative — string-concatenating the same constants —
+# would satisfy the linter without changing anything about safety, while making
+# the queries harder to read. The check stays on everywhere else.
+"src/cairn/tasks/repository.py" = ["S608"]
+"src/cairn/platform/query.py" = ["S608"]
+
+# A table name cannot be a bind parameter, so the pgvector driver interpolates
+# `Namespace.key()` into DDL and DML. That value is validated against
+# `_SAFE_IDENTIFIER` at construction (see vectorstore/base.py), and every
+# user-supplied value in these queries is a bound parameter.
+"src/cairn/vectorstore/pgvector.py" = ["S608"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["cairn", "apps"]
+
+# ---------------------------------------------------------------------------
+# mypy  (NFR-M-04: strict on the application package)
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+disallow_any_explicit = false      # `Any` allowed with a `# reason:` comment
+plugins = ["pydantic.mypy"]
+files = ["src/cairn", "apps"]
+
+[[tool.mypy.overrides]]
+# The `otel` extra is optional at runtime (telemetry.py guards the import), so
+# its stubs are not guaranteed to be installed.
+module = ["testcontainers.*", "argon2.*", "opentelemetry.*", "asyncpg.*"]
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+testpaths = ["tests"]
+addopts = "-q --strict-markers --strict-config"
+timeout = 120
+markers = [
+    "integration: requires Docker (postgres, redis) via testcontainers",
+    "contract: cross-implementation conformance; real drivers skip without infrastructure",
+    "slow: long-running",
+]
+
+[tool.coverage.run]
+source = ["src/cairn", "apps"]
+branch = true
+omit = ["*/migrations/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@overload",
+]

@@ -1,0 +1,126 @@
+; Module boundary enforcement — NFR-M-01, NFR-M-02.
+; See docs/01-architecture/04-module-boundaries.md
+;
+; ---------------------------------------------------------------------------
+; SCOPE NOTE (read before adding a module here)
+;
+; The `layers` contract below names ONLY modules that exist. Adding a module to
+; the layer stack is part of that module's own task, because that is the point
+; at which its real dependency shape is known.
+;
+; This is deliberate. Pre-declaring the full stack from the architecture
+; document surfaced three relationships the document does not resolve:
+;
+;   * M08 embedding -> M10 modelgw   (embedding is L2, modelgw is L3)
+;   * M02 authz     -> M15 platform  (both are documented as siblings)
+;   * M11 pipelines <-> M09 retrieval (mutual, resolved only by the
+;                                      runtime/service split inside M11)
+;
+; A whole-module layer stack cannot express the third at all. Rather than
+; contort the graph around modules nobody has written yet, each lands with its
+; own contract. Tracked in docs/01-architecture/04-module-boundaries.md §2.1.
+; ---------------------------------------------------------------------------
+
+[importlinter]
+root_package = cairn
+include_external_packages = True
+
+[importlinter:contract:layers]
+name = Cairn layered architecture
+type = layers
+layers =
+    cairn.catalog | cairn.identity
+    cairn.authz
+    cairn.platform
+    cairn.tasks
+    cairn.modelgw | cairn.objectstore | cairn.vectorstore
+    cairn.core
+exhaustive = False
+; ROUTERS ARE A PRESENTATION LAYER, and the module stack does not model one.
+;
+; Every router needs two things: its own module's service, and the authz guards.
+; For a module that sits *below* authz that is necessarily an upward import — so
+; the violation is in the layer model, not in the code. Routers contain no
+; domain logic; they translate HTTP to a service call and declare a guard.
+;
+; Recorded as finding G4 in docs/01-architecture/04-module-boundaries.md §2.1.
+; The structural fix is to move them under `apps/api/routers/`, which is what
+; Rule 6 ("entrypoints do the wiring") already implies.
+ignore_imports =
+    cairn.platform.router -> cairn.authz.deps
+    cairn.platform.router -> cairn.authz.model
+
+; ---------------------------------------------------------------------------
+; ACTIVATE WITH T-M09-01 (the first data-plane module).
+;
+; This is THE contract that matters most: it is the mechanical guard against the
+; data plane acquiring a control-plane dependency, which would silently remove
+; the ability to scale, deploy, or extract retrieval independently (ADR-0002).
+;
+; A `forbidden` contract cannot name modules that do not exist, so it stays
+; commented until `cairn.retrieval` lands. Uncommenting it is part of
+; T-M09-01's Definition of Done.
+;
+; [importlinter:contract:dataplane]
+; name = Data plane must not import control plane
+; type = forbidden
+; source_modules =
+;     cairn.retrieval
+;     cairn.mcpserver
+; forbidden_modules =
+;     cairn.identity
+;     cairn.catalog
+;     cairn.modelgw
+;     cairn.functions
+;     cairn.evaluation
+;     cairn.platform
+; ---------------------------------------------------------------------------
+
+[importlinter:contract:no_cross_orm]
+name = ORM models are module-private
+type = forbidden
+source_modules =
+    cairn.core
+    cairn.authz
+    cairn.tasks
+    cairn.modelgw
+    cairn.objectstore
+    cairn.vectorstore
+forbidden_modules =
+    cairn.identity.models
+    cairn.platform.models
+    cairn.catalog.models
+; Only DIRECT imports are a violation. `authz.deps -> platform.audit ->
+; platform.models` is exactly the intended shape: cross a boundary through the
+; owner's facade, and let the owner touch its own tables.
+allow_indirect_imports = True
+
+; Separate from the contract above only because a module cannot be both a source
+; and the owner of a forbidden module — `cairn.catalog` importing
+; `cairn.catalog.models` is the whole point of `cairn.catalog.models`.
+[importlinter:contract:no_cross_orm_catalog]
+name = Catalog reads other modules through their facades, not their tables
+type = forbidden
+source_modules =
+    cairn.catalog
+forbidden_modules =
+    cairn.identity.models
+    cairn.platform.models
+    cairn.tasks.models
+    cairn.modelgw.models
+allow_indirect_imports = True
+
+[importlinter:contract:core_is_domain_free]
+name = Core must not import any domain module
+type = forbidden
+source_modules =
+    cairn.core
+forbidden_modules =
+    cairn.identity
+    cairn.authz
+    cairn.platform
+    cairn.tasks
+    cairn.catalog
+    cairn.modelgw
+    cairn.objectstore
+    cairn.vectorstore

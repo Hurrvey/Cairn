@@ -1,0 +1,227 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.5.11"
+  # Test-only values. Real deployments generate these via install.sh.
+  CAIRN_MASTER_KEY: "dGVzdC1tYXN0ZXIta2V5LWZvci1jaS1vbmx5LTMyYnl0ZXM="
+  CAIRN_DATABASE_URL: "postgresql+asyncpg://cairn:cairn@localhost:5432/cairn_test"
+  CAIRN_REDIS_URL: "redis://localhost:6379/0"
+  CAIRN_LOG_FORMAT: "console"
+
+jobs:
+  # --- fast gates: fail in under a minute -----------------------------------
+  static:
+    name: lint · typecheck · boundaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --all-extras --dev
+
+      - name: ruff check
+        run: uv run ruff check src apps tests migrations
+      - name: ruff format
+        run: uv run ruff format --check src apps tests
+
+      - name: mypy --strict
+        run: uv run mypy
+
+      # NFR-M-01 / NFR-M-02. This is the mechanical guard against boundary
+      # erosion — in particular, the data plane importing the control plane.
+      - name: import-linter
+        run: uv run lint-imports --config .importlinter
+
+      # T-OPS-08 / FR-B-05. Deny-by-default only holds if every route actually
+      # declares a guard; a handler that forgets one looks exactly like a
+      # handler that is public on purpose.
+      - name: every route declares an authorization dependency
+        run: uv run python scripts/check_route_authz.py
+
+  # --- unit tests: no Docker needed ------------------------------------------
+  unit:
+    name: unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --all-extras --dev
+      - run: uv run pytest tests/unit tests/contract -v --cov --cov-report=xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-unit
+          path: coverage.xml
+
+  # --- integration: real Postgres and Redis ---------------------------------
+  integration:
+    name: integration tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: cairn
+          POSTGRES_PASSWORD: cairn
+          POSTGRES_DB: cairn_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U cairn"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+      redis:
+        image: redis:7.4-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --all-extras --dev
+
+      - name: migrate
+        run: uv run alembic upgrade head
+
+      - name: pytest
+        env:
+          CAIRN_TEST_USE_EXTERNAL_SERVICES: "1"
+        run: uv run pytest tests/integration -v --cov --cov-report=xml --cov-append
+
+      # NFR-M-03: coverage is a floor. A decrease fails the build.
+      - name: coverage gate
+        run: uv run coverage report --fail-under=80
+
+  # --- supply chain ----------------------------------------------------------
+  security:
+    name: dependencies · secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: astral-sh/setup-uv@v4
+        with: {version: "0.5.11"}
+      - run: uv python install 3.12
+      - run: uv sync --all-extras --dev
+
+      # NFR-SEC-11: high-severity vulnerabilities fail the build.
+      - name: pip-audit
+        run: uv run pip-audit --strict --desc
+
+      # RISK-11: GPL/AGPL must not enter the application image.
+      - name: licence scan
+        run: |
+          uv run python - <<'PY'
+          import sys
+          from importlib.metadata import distributions
+          BLOCKED = ("GPL-2.0", "GPL-3.0", "AGPL", "SSPL")
+          ALLOWED_EXCEPTIONS = set()   # documented exceptions live in the product brief
+          bad = []
+          for dist in distributions():
+              name = dist.metadata["Name"]
+              licence = (dist.metadata.get("License") or "") + " " + " ".join(
+                  c for c in dist.metadata.get_all("Classifier") or [] if "License" in c
+              )
+              if name in ALLOWED_EXCEPTIONS:
+                  continue
+              if any(b in licence for b in BLOCKED) and "LGPL" not in licence:
+                  bad.append(f"{name}: {licence.strip()}")
+          if bad:
+              print("Prohibited licences found in the application image:")
+              print("\n".join(f"  {b}" for b in bad))
+              sys.exit(1)
+          print("Licence scan passed.")
+          PY
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # --- frontend --------------------------------------------------------------
+  web:
+    name: web · typecheck · test · build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - run: npm ci --no-audit --no-fund
+
+      # T-M16-02: the generated client must match the spec the server publishes.
+      # Regenerating here and diffing catches a backend contract change that
+      # shipped without the frontend being updated — the failure mode that
+      # otherwise surfaces as a runtime type error in a user's browser.
+      - name: API client is in sync with the spec
+        run: npm run api:check
+
+      - run: npx vue-tsc --noEmit
+      - run: npx vitest run
+      - run: npx vite build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: apps/web/dist
+
+  # --- docker build ----------------------------------------------------------
+  build:
+    name: docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          push: false
+          load: true
+          tags: cairn:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: image runs as non-root
+        run: |
+          uid=$(docker run --rm --entrypoint id cairn:ci -u)
+          test "$uid" != "0" || { echo "image runs as root (NFR-SEC-12)"; exit 1; }
+          echo "runs as uid $uid"
+
+      - name: cli is wired up
+        run: docker run --rm --entrypoint cairn cairn:ci --help
+
+      - name: web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile.web
+          push: false
+          tags: cairn-web:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -1,0 +1,226 @@
+{
+  "common": {
+    "cancel": "取消",
+    "create": "创建",
+    "save": "保存",
+    "delete": "删除",
+    "done": "完成",
+    "close": "关闭"
+  },
+  "nav": {
+    "dashboard": "控制台",
+    "knowledge": "知识库",
+    "users": "用户",
+    "apiKeys": "API 密钥",
+    "audit": "审计日志",
+    "settings": "设置",
+    "phase": "第 {n} 阶段"
+  },
+  "secret": {
+    "onceTitle": "请立即复制 — 此内容仅显示一次",
+    "onceBody": "系统不会以可恢复的形式保存该值。一旦丢失，只能重新签发。",
+    "copy": "复制",
+    "copied": "已复制",
+    "acknowledge": "我已妥善保存"
+  },
+  "login": {
+    "tagline": "面向 Agent 的知识库平台",
+    "username": "用户名",
+    "password": "密码",
+    "submit": "登录",
+    "firstRunHint": "首次启动？初始管理员密码已在启动日志中打印一次：docker compose logs migrate"
+  },
+  "credentials": {
+    "title": "设置您的凭据",
+    "ledeInitial": "此账户正在使用系统生成的初始密码。请设置新的凭据后继续。",
+    "ledeAdminForced": "管理员已要求此账户更改凭据。请设置新的凭据后继续。",
+    "username": "用户名",
+    "usernameHint": "可选 — 保持不变即可沿用当前用户名。",
+    "currentPassword": "当前密码",
+    "newPassword": "新密码",
+    "confirmPassword": "确认新密码",
+    "submit": "保存并继续",
+    "signOut": "退出登录",
+    "rule": {
+      "length": "至少 {n} 个字符",
+      "classes": "至少包含 {n} 类：小写字母、大写字母、数字、符号",
+      "username": "不包含用户名",
+      "match": "两次输入的密码一致"
+    }
+  },
+  "dashboard": {
+    "welcome": "欢迎，{name}",
+    "phaseNotice": "当前部署运行于第 1 阶段。知识库、数据摄取与检索功能将在第 2 阶段提供。",
+    "admin": "管理员",
+    "signOut": "退出登录",
+    "available": "当前可用",
+    "comingLater": "后续阶段提供",
+    "phase": "第 {n} 阶段",
+    "shortcuts": {
+      "users": "创建账户并管理各自可访问的范围。",
+      "apiKeys": "为 Agent 与应用签发和吊销密钥。",
+      "audit": "记录所有凭据、权限与管理操作的变更。",
+      "settings": "访问策略、限流与数据保留。"
+    },
+    "modules": {
+      "knowledge": {
+        "title": "知识库",
+        "detail": "创建并配置知识库、存储后端与索引方式。"
+      },
+      "ingestion": {
+        "title": "数据摄取",
+        "detail": "上传文档、自动爬取网页、解析、分块与向量化。"
+      },
+      "retrieval": {
+        "title": "检索",
+        "detail": "混合检索、重排序，以及对外开放的检索 API。"
+      },
+      "mcp": {
+        "title": "MCP 服务",
+        "detail": "将知识库作为工具开放给任意 MCP 客户端。"
+      },
+      "models": {
+        "title": "模型供应商",
+        "detail": "接入 OpenAI、Claude、Gemini、Qwen、DeepSeek、Llama 及兼容接口。"
+      },
+      "pipelines": {
+        "title": "流水线",
+        "detail": "以版本化的图编排数据摄取与检索流程。"
+      }
+    }
+  },
+  "users": {
+    "title": "用户",
+    "subtitle": "管理员负责平台管理；普通用户在被授权的知识库范围内工作。",
+    "new": "新建用户",
+    "username": "用户名",
+    "email": "邮箱",
+    "displayName": "显示名称",
+    "role": "角色",
+    "status": "状态",
+    "lastLogin": "最近登录",
+    "never": "从未",
+    "you": "（本人）",
+    "active": "正常",
+    "disabled": "已停用",
+    "mustChange": "待更改凭据",
+    "permissions": "权限",
+    "forceChange": "强制改密",
+    "disable": "停用",
+    "enable": "启用",
+    "confirmDelete": "确认删除此账户？其 API 密钥与授权也将一并吊销。",
+    "createdTitle": "账户已创建",
+    "initialPasswordFor": "{name} 的初始密码",
+    "initialPasswordHint": "请直接交给该用户。首次登录时必须更改，因此这是一次性交接凭据，而非您需要保管的密码。"
+  },
+  "grants": {
+    "title": "权限 — {name}",
+    "effective": "生效权限",
+    "effectiveHint": "系统实际评估的结果，已包含角色隐含能力与权限蕴含关系（kb:manage 可满足 kb:read）。",
+    "held": "授权记录",
+    "heldHint": "实际写入的授权行。吊销其中一条即可收回相应访问权限。",
+    "workspaceWide": "工作空间级",
+    "resource": "资源",
+    "resourceType": "资源类型",
+    "resourceId": "资源 ID",
+    "permissions": "权限",
+    "add": "新增授权",
+    "grant": "授权",
+    "revoke": "吊销",
+    "none": "尚未授予任何权限。",
+    "breakGlass": "紧急访问，{at} 到期"
+  },
+  "keys": {
+    "title": "API 密钥",
+    "subtitle": "Agent 与应用访问检索 API 的凭据。",
+    "new": "新建密钥",
+    "showAll": "全部用户",
+    "name": "名称",
+    "scopes": "权限范围",
+    "usage": "使用情况",
+    "status": "状态",
+    "active": "有效",
+    "revoked": "已吊销",
+    "revoke": "吊销",
+    "calls": "{n} 次调用",
+    "neverUsed": "从未使用",
+    "scopedTo": "限定 {n} 个知识库",
+    "allOwnerKbs": "所属用户可访问的全部知识库",
+    "knowledgeBases": "知识库",
+    "knowledgeBasesHint": "留空表示覆盖所属用户可访问的全部知识库；其访问范围收窄时，密钥也会自动收窄。",
+    "scopesHint": "密钥权限永远不会超过其所属用户；每次请求都会重新计算两者的交集。",
+    "rateLimit": "限流（次/分钟）",
+    "ipAllowlist": "IP 白名单（CIDR）",
+    "confirmRevoke": "确认吊销此密钥？所有副本将立即停止接受该密钥。",
+    "createdTitle": "密钥已创建",
+    "keyFor": "{name} 的 API 密钥",
+    "keyHint": "请立即存入密钥管理系统。系统仅保存其哈希值，无法再次显示。",
+    "intersectionExplainer": "密钥的生效权限是其权限范围与所属用户权限的交集，且每次请求都会重新计算。因此收回某位用户的访问权限时，其签发的所有密钥都会立即随之收窄，无需任何清理。"
+  },
+  "audit": {
+    "title": "审计日志",
+    "subtitle": "仅追加。记录所有凭据变更、权限变更与管理操作。",
+    "export": "导出 JSONL",
+    "when": "时间",
+    "actor": "操作者",
+    "action": "操作",
+    "outcome": "结果",
+    "source": "来源",
+    "detail": "详情",
+    "hide": "收起",
+    "actionPrefix": "操作前缀，例如 grant.",
+    "actorId": "操作者 ID",
+    "loadMore": "加载更多",
+    "end": "已到末尾。",
+    "empty": "没有符合筛选条件的记录。",
+    "quick": {
+      "all": "全部",
+      "auth": "登录",
+      "user": "账户",
+      "grant": "授权",
+      "breakGlass": "紧急访问",
+      "apikey": "API 密钥",
+      "denied": "拒绝记录"
+    }
+  },
+  "settings": {
+    "title": "设置",
+    "subtitle": "工作空间策略。标记为「热更新」的项立即生效，其余需要重启。",
+    "saved": "设置已保存。",
+    "restartNeeded": "以下设置需要重启后才会生效：{keys}",
+    "hot": "热更新",
+    "restart": "需重启",
+    "accessTitle": "管理员对知识库内容的访问权限",
+    "access": {
+      "break_glass": {
+        "label": "紧急访问（推荐）",
+        "detail": "管理员可管理知识库，但需开启一个有时限、须填写理由的窗口才能读取其内容。该授权会被审计，并通知知识库所有者。"
+      },
+      "on_grant": {
+        "label": "仅在显式授权时",
+        "detail": "只有在知识库所有者直接授权的情况下，管理员才能读取内容。"
+      },
+      "always": {
+        "label": "始终允许",
+        "detail": "管理员可读取所有知识库的内容。适用于单一团队的部署；在多团队共用场景下会带来合规问题。"
+      }
+    },
+    "breakGlassTtl": "紧急访问时长（分钟）",
+    "defaultRpm": "默认限流（次/分钟）",
+    "auditRetention": "审计保留期（天）",
+    "sessionTtl": "会话有效期（分钟）",
+    "queuesTitle": "任务队列",
+    "queuesHint": "「最早就绪时长」才是关键信号 — 仅看队列深度可能看起来正常，而某个任务正卡在饱和的工作空间之后。",
+    "queue": "队列",
+    "ready": "就绪",
+    "oldestReady": "最早就绪时长"
+  },
+  "notFound": {
+    "detail": "该页面不存在。",
+    "home": "返回控制台"
+  },
+  "errors": {
+    "network": "无法连接到服务器。请确认 Cairn 正在运行。",
+    "unexpected": "发生了未知错误，请重试。"
+  }
+}

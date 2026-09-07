@@ -1,0 +1,226 @@
+{
+  "common": {
+    "cancel": "Cancel",
+    "create": "Create",
+    "save": "Save",
+    "delete": "Delete",
+    "done": "Done",
+    "close": "Close"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "knowledge": "Knowledge bases",
+    "users": "Users",
+    "apiKeys": "API keys",
+    "audit": "Audit log",
+    "settings": "Settings",
+    "phase": "Phase {n}"
+  },
+  "secret": {
+    "onceTitle": "Copy this now — it is shown only once",
+    "onceBody": "This value is not stored in a recoverable form. If you lose it you will have to issue a new one.",
+    "copy": "Copy",
+    "copied": "Copied",
+    "acknowledge": "I have saved this somewhere safe"
+  },
+  "login": {
+    "tagline": "Knowledge base platform for Agents",
+    "username": "Username",
+    "password": "Password",
+    "submit": "Sign in",
+    "firstRunHint": "First run? The initial administrator password was printed once in the startup logs: docker compose logs migrate"
+  },
+  "credentials": {
+    "title": "Set your credentials",
+    "ledeInitial": "This account is using a generated initial password. Choose new credentials to continue.",
+    "ledeAdminForced": "An administrator has required a credential change on this account. Choose new credentials to continue.",
+    "username": "Username",
+    "usernameHint": "Optional — leave as-is to keep the current username.",
+    "currentPassword": "Current password",
+    "newPassword": "New password",
+    "confirmPassword": "Confirm new password",
+    "submit": "Save and continue",
+    "signOut": "Sign out",
+    "rule": {
+      "length": "At least {n} characters",
+      "classes": "At least {n} of: lowercase, uppercase, digit, symbol",
+      "username": "Does not contain the username",
+      "match": "Both passwords match"
+    }
+  },
+  "dashboard": {
+    "welcome": "Welcome, {name}",
+    "phaseNotice": "This deployment is running Phase 1. Knowledge bases, ingestion, and retrieval arrive in Phase 2.",
+    "admin": "Administrator",
+    "signOut": "Sign out",
+    "available": "Available now",
+    "comingLater": "Arriving in later phases",
+    "phase": "Phase {n}",
+    "shortcuts": {
+      "users": "Create accounts and manage what each one can reach.",
+      "apiKeys": "Issue and revoke keys for Agents and applications.",
+      "audit": "Every credential, permission, and administrative change.",
+      "settings": "Access policy, rate limits, and retention."
+    },
+    "modules": {
+      "knowledge": {
+        "title": "Knowledge bases",
+        "detail": "Create and configure knowledge bases, storage backends, and indexing."
+      },
+      "ingestion": {
+        "title": "Ingestion",
+        "detail": "Upload documents, crawl the web, parse, chunk, and embed."
+      },
+      "retrieval": {
+        "title": "Retrieval",
+        "detail": "Hybrid search, reranking, and the public retrieval API."
+      },
+      "mcp": {
+        "title": "MCP server",
+        "detail": "Expose knowledge bases as tools to any MCP client."
+      },
+      "models": {
+        "title": "Model providers",
+        "detail": "Connect OpenAI, Claude, Gemini, Qwen, DeepSeek, Llama, and compatible endpoints."
+      },
+      "pipelines": {
+        "title": "Pipelines",
+        "detail": "Compose ingestion and retrieval as versioned graphs."
+      }
+    }
+  },
+  "users": {
+    "title": "Users",
+    "subtitle": "Administrators manage the platform; regular users work inside the knowledge bases they are granted.",
+    "new": "New user",
+    "username": "Username",
+    "email": "Email",
+    "displayName": "Display name",
+    "role": "Role",
+    "status": "Status",
+    "lastLogin": "Last sign-in",
+    "never": "Never",
+    "you": "(you)",
+    "active": "Active",
+    "disabled": "Disabled",
+    "mustChange": "Credential change pending",
+    "permissions": "Permissions",
+    "forceChange": "Force change",
+    "disable": "Disable",
+    "enable": "Enable",
+    "confirmDelete": "Delete this account? Their API keys and grants are revoked too.",
+    "createdTitle": "Account created",
+    "initialPasswordFor": "Initial password for {name}",
+    "initialPasswordHint": "Give this to the user directly. They must change it at first sign-in, so it is a handover credential rather than one you keep."
+  },
+  "grants": {
+    "title": "Permissions — {name}",
+    "effective": "Effective permissions",
+    "effectiveHint": "What the system actually evaluates, after role-implied capabilities and implication (kb:manage satisfies kb:read).",
+    "held": "Grants",
+    "heldHint": "The individual rows that were written down. Revoke one of these to remove access.",
+    "workspaceWide": "Workspace-wide",
+    "resource": "Resource",
+    "resourceType": "Resource type",
+    "resourceId": "Resource ID",
+    "permissions": "Permissions",
+    "add": "Add a grant",
+    "grant": "Grant",
+    "revoke": "Revoke",
+    "none": "No permissions granted.",
+    "breakGlass": "Break-glass, expires {at}"
+  },
+  "keys": {
+    "title": "API keys",
+    "subtitle": "How Agents and applications authenticate to the retrieval API.",
+    "new": "New key",
+    "showAll": "All users",
+    "name": "Name",
+    "scopes": "Scopes",
+    "usage": "Usage",
+    "status": "Status",
+    "active": "Active",
+    "revoked": "Revoked",
+    "revoke": "Revoke",
+    "calls": "{n} calls",
+    "neverUsed": "Never used",
+    "scopedTo": "Scoped to {n} knowledge base(s)",
+    "allOwnerKbs": "All knowledge bases the owner can reach",
+    "knowledgeBases": "Knowledge bases",
+    "knowledgeBasesHint": "Leave blank to cover every knowledge base the owner can reach — the key then narrows automatically as their access does.",
+    "scopesHint": "A key can never exceed its owner's own permissions; the intersection is recomputed on every request.",
+    "rateLimit": "Rate limit (requests/minute)",
+    "ipAllowlist": "IP allowlist (CIDR)",
+    "confirmRevoke": "Revoke this key? It stops working immediately across every replica.",
+    "createdTitle": "Key created",
+    "keyFor": "API key for {name}",
+    "keyHint": "Store this in your secret manager now. Only its hash is kept, so it cannot be shown again.",
+    "intersectionExplainer": "A key's effective permissions are the intersection of its scopes with its owner's permissions, recomputed at every request. Revoking a user's access therefore narrows every key they issued — instantly, with no cleanup."
+  },
+  "audit": {
+    "title": "Audit log",
+    "subtitle": "Append-only. Every credential change, permission change, and administrative action.",
+    "export": "Export JSONL",
+    "when": "When",
+    "actor": "Actor",
+    "action": "Action",
+    "outcome": "Outcome",
+    "source": "Source",
+    "detail": "Detail",
+    "hide": "Hide",
+    "actionPrefix": "Action prefix, e.g. grant.",
+    "actorId": "Actor ID",
+    "loadMore": "Load more",
+    "end": "End of results.",
+    "empty": "No entries match these filters.",
+    "quick": {
+      "all": "All",
+      "auth": "Sign-in",
+      "user": "Accounts",
+      "grant": "Grants",
+      "breakGlass": "Break-glass",
+      "apikey": "API keys",
+      "denied": "Denials"
+    }
+  },
+  "settings": {
+    "title": "Settings",
+    "subtitle": "Workspace policy. Changes marked hot take effect immediately; the rest need a restart.",
+    "saved": "Settings saved.",
+    "restartNeeded": "These settings need a restart to take effect: {keys}",
+    "hot": "hot",
+    "restart": "restart",
+    "accessTitle": "Administrator access to knowledge base content",
+    "access": {
+      "break_glass": {
+        "label": "Break-glass (recommended)",
+        "detail": "Administrators manage knowledge bases but cannot read their content without opening a time-boxed, reasoned window. The grant is audited and the owner is notified."
+      },
+      "on_grant": {
+        "label": "On explicit grant",
+        "detail": "Administrators read content only where a knowledge base owner has granted it to them directly."
+      },
+      "always": {
+        "label": "Always",
+        "detail": "Administrators can read every knowledge base's content. Appropriate for a single-team deployment; a compliance problem for a shared one."
+      }
+    },
+    "breakGlassTtl": "Break-glass window (minutes)",
+    "defaultRpm": "Default rate limit (requests/minute)",
+    "auditRetention": "Audit retention (days)",
+    "sessionTtl": "Session lifetime (minutes)",
+    "queuesTitle": "Task queues",
+    "queuesHint": "Oldest-ready age is the signal that matters — depth alone can look healthy while one task sits behind a saturated workspace.",
+    "queue": "Queue",
+    "ready": "Ready",
+    "oldestReady": "Oldest ready"
+  },
+  "notFound": {
+    "detail": "That page does not exist.",
+    "home": "Back to the dashboard"
+  },
+  "errors": {
+    "network": "The server could not be reached. Check that Cairn is running.",
+    "unexpected": "Something went wrong. Try again."
+  }
+}
