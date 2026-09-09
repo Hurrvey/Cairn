@@ -61,11 +61,14 @@ async def clean_database(_migrated: None) -> AsyncIterator[None]:
 
     maker = get_sessionmaker()
     async with maker() as session:
-        # `chunk` is listed explicitly: it deliberately carries no foreign key
-        # to `knowledge_base` (see 0006_catalog), so CASCADE does not reach it
-        # and rows would survive into the next test.
+        # `task` and `chunk` deliberately carry no foreign keys to workspace
+        # or knowledge_base, so CASCADE does not reach them. List both explicitly
+        # or catalog-created tasks/chunks survive into subsequent tests.
         await session.execute(
-            text('TRUNCATE chunk, audit_log, session, "user", workspace RESTART IDENTITY CASCADE')
+            text(
+                'TRUNCATE task, chunk, audit_log, session, "user", workspace '
+                "RESTART IDENTITY CASCADE"
+            )
         )
         await session.commit()
 

@@ -150,7 +150,7 @@ async def _upload(catalog: CatalogService, admin: Principal, kb_id, name="a.pdf"
             content_hash=(digest * 64)[:64],
             size_bytes=1024,
             mime_type="application/pdf",
-            object_key=f"raw/{name}",
+            object_key=f"{admin.workspace_id}/{kb_id}/originals/{(digest * 64)[:64]}",
         ),
     )
 
@@ -443,7 +443,7 @@ async def test_chunk_config_change_flags_a_required_rebuild(
     await catalog.activate_index_version(kb.id, 1)
 
     updated = await catalog.update_kb(
-        admin, kb.id, UpdateKbSpec(chunk_config=ChunkConfig(child_size=256))
+        admin, kb.id, UpdateKbSpec(chunk_config=ChunkConfig(child_tokens=256))
     )
     # Surfaced so the UI can prompt, rather than leaving the user wondering why
     # their new chunk size changed nothing.
@@ -636,3 +636,53 @@ async def test_binding_health_is_verified_at_creation(
 async def test_missing_kb_is_a_not_found(catalog: CatalogService) -> None:
     with pytest.raises(NotFound):
         await catalog.get_kb(uuid4())
+
+
+async def test_parser_chunker_specs_round_trip_with_parent_links(
+    admin: Principal, catalog: CatalogService, kb
+) -> None:
+    """TC-M07-08/12, NFR-R-06: actual parser/chunker output survives catalog writes and replay."""
+    import tiktoken
+
+    from cairn.embedding.tokenizers import TiktokenTokenizer
+    from cairn.ingestion.base import ParseContext
+    from cairn.ingestion.chunkers import DocumentChunker
+    from cairn.ingestion.registry import get_parser_registry
+
+    registration = await _upload(catalog, admin, kb.id, name="guide.md")
+    assert registration.document is not None
+    document_id = registration.document.id
+    parsed = await get_parser_registry().parse(
+        ("# Guide\n\n## Topic\n\n" + "知识检索保留引用。" * 40).encode(),
+        mime="text/markdown",
+        ctx=ParseContext(language="zh", source_url="https://example.org/guide"),
+    )
+    tokenizer = TiktokenTokenizer(
+        tiktoken.Encoding(
+            name="chunk-db-byte",
+            pat_str=r"(?s).",
+            mergeable_ranks={bytes([token_id]): token_id for token_id in range(256)},
+            special_tokens={},
+        )
+    )
+    chunker = DocumentChunker(document_id=document_id, tokenizer=tokenizer, index_version=1)
+    cfg = ChunkConfig(child_tokens=128, child_overlap=16, parent_tokens=384)
+    specs = await chunker.chunk(parsed, cfg)
+    assert await catalog.replace_chunks(kb.id, document_id, 1, specs) == len(specs)
+    saved = await catalog.list_chunks(kb.id, document_id, index_version=1, limit=200)
+    assert len(saved) == len(specs)
+    expected = {spec.id: spec for spec in specs}
+    parents = {spec.id for spec in specs if not spec.metadata["embed"]}
+    for item in saved:
+        spec = expected[item.id]
+        assert item.document_id == document_id
+        assert item.parent_id == spec.parent_id
+        assert item.content == spec.content
+        assert item.token_count == spec.token_count
+        assert item.metadata == spec.metadata
+        if item.metadata["embed"]:
+            assert item.parent_id in parents
+    assert await catalog.replace_chunks(
+        kb.id, document_id, 1, await chunker.chunk(parsed, cfg)
+    ) == len(specs)
+    assert await catalog.list_chunks(kb.id, document_id, index_version=1, limit=200) == saved

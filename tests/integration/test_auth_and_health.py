@@ -62,8 +62,8 @@ async def test_unknown_user_timing_is_comparable(
         )
         return time.perf_counter() - start
 
-    known = min(await timed("admin") for _ in range(3))
-    unknown = min(await timed("nobody-here") for _ in range(3))
+    known = min([await timed("admin") for _ in range(3)])
+    unknown = min([await timed("nobody-here") for _ in range(3)])
 
     ratio = max(known, unknown) / max(min(known, unknown), 1e-6)
     assert ratio < 3.0, f"timing differs by {ratio:.1f}x — enumeration is possible"
@@ -125,7 +125,9 @@ async def test_logout_revokes_the_session(client: httpx.AsyncClient, active_admi
     await client.post("/v1/auth/login", json={"username": "admin", "password": active_admin})
     assert (await client.get("/v1/me")).status_code == 200
 
-    logout = await client.post("/v1/auth/logout")
+    logout = await client.post(
+        "/v1/auth/logout", headers={"X-CSRF-Token": client.cookies["cairn_csrf"]}
+    )
     assert logout.status_code == 204
 
     assert (await client.get("/v1/me")).status_code == 401

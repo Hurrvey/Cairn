@@ -12,6 +12,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     SmallInteger,
@@ -28,7 +29,14 @@ from sqlalchemy.orm import Mapped, mapped_column
 from cairn.core.db import Base
 from cairn.core.ids import new_uuid
 
-__all__ = ["Chunk", "Document", "KbIndexVersion", "KnowledgeBase", "StorageBinding"]
+__all__ = [
+    "Chunk",
+    "Document",
+    "DocumentIngestion",
+    "KbIndexVersion",
+    "KnowledgeBase",
+    "StorageBinding",
+]
 
 DOCUMENT_STATES = (
     "registered",
@@ -269,6 +277,48 @@ class Document(Base):
             "state": self.state,
             "revision": self.revision,
         }
+
+
+class DocumentIngestion(Base):
+    __tablename__ = "document_ingestion"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["kb_id", "index_version"],
+            ["kb_index_version.kb_id", "kb_index_version.version"],
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "state IN ('registered','parsed','chunked','embedded','indexed','failed')",
+            name="state",
+        ),
+        CheckConstraint("revision > 0", name="revision_positive"),
+        CheckConstraint("index_version > 0", name="index_version_positive"),
+        CheckConstraint("point_count >= 0", name="point_count_nonnegative"),
+        Index("ix_document_ingestion_build_state", "kb_id", "index_version", "state"),
+    )
+
+    document_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True),
+        ForeignKey("document.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    revision: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kb_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), nullable=False)
+    index_version: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source_content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="registered")
+    parsed_object_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    chunks_object_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    embeddings_object_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    prior_embeddings_object_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    point_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    stale_point_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
 
 
 class Chunk(Base):

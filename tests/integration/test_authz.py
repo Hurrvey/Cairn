@@ -361,7 +361,9 @@ async def test_key_plaintext_is_returned_once_and_only_the_hash_is_stored(
     assert raw.endswith(stored["last_four"])
 
 
-async def test_revocation_takes_effect_immediately(authz: AuthzService, admin: Principal) -> None:
+async def test_revocation_takes_effect_immediately(
+    authz: AuthzService, admin: Principal, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """TC-M02-16 — the TTL bounds ordinary permission drift, but a revoked key
     has to stop working now, not in 60 seconds."""
     from cairn.authz.dataplane import DataPlaneAuthz
@@ -374,15 +376,8 @@ async def test_revocation_takes_effect_immediately(authz: AuthzService, admin: P
     dataplane = DataPlaneAuthz(cache)
     await dataplane.authenticate_api_key(raw)  # warms the cache
 
-    # Point the service's invalidation at the same cache instance.
-    import cairn.authz.dataplane as dp
-
-    original = dp.get_dataplane_authz
-    dp.get_dataplane_authz = lambda: dataplane  # type: ignore[assignment]
-    try:
-        await authz.revoke_api_key(admin, key.id)
-    finally:
-        dp.get_dataplane_authz = original  # type: ignore[assignment]
+    monkeypatch.setattr("cairn.authz.service.get_dataplane_authz", lambda: dataplane)
+    await authz.revoke_api_key(admin, key.id)
 
     with pytest.raises(ApiKeyInvalid):
         await dataplane.authenticate_api_key(raw)

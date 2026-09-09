@@ -24,14 +24,29 @@ from cairn.core.telemetry import task_enqueued_total
 from cairn.tasks.dto import (
     QUEUE_PROFILES,
     DocumentTaskProgress,
+    TaskContext,
     TaskSpec,
     TaskStatus,
 )
 from cairn.tasks.repository import TaskRepository
 
-__all__ = ["RETRYABLE_CODES", "TERMINAL_CODES", "TaskService", "get_task_service", "next_delay"]
+__all__ = [
+    "RETRYABLE_CODES",
+    "TERMINAL_CODES",
+    "TaskLeaseLostError",
+    "TaskService",
+    "get_task_service",
+    "next_delay",
+]
 
 log = get_logger(__name__)
+
+
+class TaskLeaseLostError(RuntimeError):
+    def __init__(self, task_id: int) -> None:
+        super().__init__(f"task {task_id} lease is no longer owned by this attempt")
+        self.task_id = task_id
+
 
 #: A retryable failure is transient: the same input may succeed later.
 RETRYABLE_CODES = frozenset(
@@ -145,6 +160,17 @@ class TaskService:
         self, session: AsyncSession, specs: Sequence[TaskSpec]
     ) -> list[int | None]:
         return [await self.enqueue(session, spec) for spec in specs]
+
+    async def lock_owned_task(self, session: AsyncSession, context: TaskContext) -> dict[str, Any]:
+        row = await self._repo.lock_owned_task(
+            session,
+            task_id=context.task_id,
+            worker_id=context.worker_id,
+            attempt=context.attempt,
+        )
+        if row is None:
+            raise TaskLeaseLostError(context.task_id)
+        return row
 
     async def notify(self, queue: str) -> None:
         """Signal waiting workers. Best-effort: a lost NOTIFY costs one poll

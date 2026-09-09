@@ -135,12 +135,16 @@ layouts):
 | --- | --- | --- |
 | **Docling** (IBM) | **MIT** ✅ | Table fidelity, reading order, speed |
 | pypdfium2 + custom layout | Apache/BSD ✅ | Baseline speed, quality floor |
-| MinerU | AGPL ⚠️ | Quality ceiling; requires sidecar-container isolation |
+| MinerU | Version-dependent; current upstream has commercial-restricted additional terms ⚠️ | Quality ceiling; explicit licence review required before distribution |
 | PyMuPDF | AGPL/commercial ⚠️ | Speed; requires a licence decision (`RISK-11`) |
 
 Scoring: table-structure F1, reading-order correctness, pages/second, licence risk.
 **Docling is the presumed default** precisely because it is MIT — see
 [technology stack §7](../01-architecture/02-technology-stack.md).
+
+The [2026-09-07 checkpoint](../04-plan/05-parser-spike.md) pins the inspected
+licence sources and records the still-open 30-document quality gate. A permissive
+top-level licence does not establish the licences of model weights or dependencies.
 
 Output must be normalized Markdown with tables as GFM tables, plus a `layout.json` carrying
 per-block bounding boxes and page numbers for citation (`FR-F-07`).
@@ -154,6 +158,22 @@ heartbeats. Results are cached by page image hash so a retry does not redo compl
 ---
 
 ## 5. Chunking (`FR-F-05..07`)
+
+Implementation checkpoint (2026-09-07): `DocumentChunker` implements `fixed`,
+`recursive`, `markdown` and `parent_child`. Construct it with `document_id`, an
+explicitly loaded model `tokenizer`, and `index_version`, then call `chunk(doc, cfg)`
+for catalog `ChunkSpec` values. `semantic` and `custom` remain unsupported.
+See [rules, identity and validation](../04-plan/08-chunking-implementation.md).
+This is not worker pipeline wiring. Parents carry `metadata.embed=false`; a
+future embedding handler must honor that marker. Citation metadata retains all
+contributing block ranges; oversized protected tables are explicitly flagged.
+
+Continuation (2026-09-08): see the [execution ledger](../04-plan/15-execution-ledger.md) for the
+current accepted scope. Semantic and custom library strategies now have validated implementations;
+the chunk worker composes semantic with the selected embedding service and accepts custom only through
+an explicit scoped resolver. Parse/chunk/embed/index normal paths, failure fencing and incremental
+source replacement have real-service tests. Full-KB fan-out/re-embedding lifecycle, PDF/OCR quality
+and production M12 sandbox execution remain open; the overall knowledge-base E2E gate is not closed.
 
 | Strategy | Description | Use for |
 | --- | --- | --- |
@@ -322,8 +342,11 @@ cores ≈ 70 hours; on 64 cores ≈ 9 hours.
 | `PARSE_UNSUPPORTED_MIME` | parse | ❌ | "This file type is not supported." |
 | `PARSE_TIMEOUT` | parse | ✅ | "Processing took too long and will be retried." |
 | `PARSE_EMPTY_CONTENT` | parse | ❌ | "No extractable text was found. If this is a scan, enable OCR." |
+| `PARSE_TOO_LARGE` | parse | ❌ | "The file exceeds the configured parsing size limit." |
 | `OCR_FAILED` | ocr | ✅ | |
 | `CHUNK_CONFIG_INVALID` | chunk | ❌ | "The chunking configuration is invalid." |
+| `CHUNK_UNSUPPORTED_STRATEGY` | chunk | ❌ | "The configured chunking strategy is not available." |
+| `CHUNK_BUDGET_EXCEEDED` | chunk | ❌ | "The chunk token budget cannot accommodate the heading and source text." |
 | `EMBED_PROVIDER_ERROR` | embed | ✅ | "The embedding provider is unavailable." |
 | `EMBED_QUOTA_EXCEEDED` | embed | ❌ | "The embedding token quota has been exhausted." |
 | `INDEX_DIMENSION_MISMATCH` | index | ❌ | Internal — indicates a bug; alert. |

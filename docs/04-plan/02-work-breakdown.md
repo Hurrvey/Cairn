@@ -7,6 +7,29 @@
 Every task in the project, with ID, estimate, dependencies, requirement traceability, and a
 completion condition. This is the document you hand to a developer or an Agent.
 
+**2026-09-07 continuation:** see [verification and remaining work](06-continuation-verification.md)
+and the [T-M07-01 checkpoint](05-parser-spike.md). T-M07-02's parser foundation and
+T-M07-05's four text-format adapters are implemented; the PDF quality gate and
+worker pipeline remain open. The baseline estimates below are not completion claims.
+
+**2026-09-07 chunking increment:** T-M07-07/08/09 now have implementations and
+verification described in [chunking continuation](08-chunking-implementation.md).
+Fixed, recursive, Markdown and parent-child chunkers are library components;
+semantic/custom strategies, language detection, PDF/Office/OCR and worker
+parse → chunk → embed → index wiring remain open. FR-F-05 and the Phase 2
+end-to-end gate are not closed by these changes.
+
+**2026-09-08 continuation:** the [execution ledger](15-execution-ledger.md) is the current
+restart/acceptance record. Office adapters and automatic language resolution have passed focused
+independent checks; a real TEI/MiniLM initial-index/query/source-replacement test also passed.
+The bounded pipeline safety/recovery repair package and advanced semantic/custom validation are
+independently accepted. Semantic now uses the real model through the worker; custom execution requires
+an explicitly injected scoped executor (the M12 production sandbox remains open). PDF/OCR and the
+genuine 30-document PDF evaluation remain open; two full-KB rebuild regressions are still failing.
+See the [lifecycle acceptance package](16-lifecycle-acceptance-plan.md) for unimplemented full-KB
+rebuild, manual re-embedding and retirement. Neither this note nor a passing normal-path test
+marks M07 or the knowledge-base end-to-end gate complete.
+
 ---
 
 ## How to use this document

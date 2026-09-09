@@ -32,7 +32,12 @@ def build_worker(queue: str) -> TaskWorker:
 
         register_maintenance_handlers(worker)
 
-    # Phase 2 registers parse/chunk/embed/index here; Phase 3 adds fetch/ocr.
+    if queue in {"parse", "chunk", "embed", "index"}:
+        from cairn.ingestion.pipeline import register_pipeline_handlers
+        from cairn.ingestion.runtime import get_pipeline_runtime
+
+        register_pipeline_handlers(worker, get_pipeline_runtime().pipeline)
+
     return worker
 
 
@@ -43,7 +48,9 @@ async def _run(queue: str) -> None:
         await worker.run()
     finally:
         from cairn.core.cache import close_cache
+        from cairn.ingestion.runtime import close_pipeline_runtime
 
+        await close_pipeline_runtime()
         await close_cache()
         await dispose_engine()
 

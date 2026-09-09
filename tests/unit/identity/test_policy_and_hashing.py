@@ -82,6 +82,29 @@ def test_policy_view__is_serialisable_for_the_client(policy: PasswordPolicy) -> 
     assert "lowercase" in view.classes
 
 
+def test_generated_password_retries_candidates_rejected_by_policy(
+    policy: PasswordPolicy, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    candidates = iter(["a" * 24, "Wei-Should-Be-Rejected-99", "Random-Good-Password-99!"])
+    monkeypatch.setattr("cairn.identity.policy.new_token", lambda length: next(candidates))
+    assert policy.generate(username="wei") == "Random-Good-Password-99!"
+
+
+def test_generated_password_honors_custom_length_and_all_character_classes() -> None:
+    policy = PasswordPolicy(
+        AuthSettings(password_min_length=48, password_max_length=48, password_require_classes=4)
+    )
+    password = policy.generate(username="admin")
+    assert len(password) == 48
+    policy.validate(password, username="admin")
+
+
+def test_impossible_password_policy_fails_without_looping() -> None:
+    policy = PasswordPolicy(AuthSettings(password_min_length=48, password_max_length=24))
+    with pytest.raises(PasswordPolicyViolation):
+        policy.generate(username="admin")
+
+
 # --- hashing -----------------------------------------------------------------
 
 

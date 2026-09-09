@@ -173,9 +173,11 @@ handshake.
 
 ### 🟠 RISK-11 — AGPL contamination from parsing libraries (L3 × I4 = 12)
 
-**Description.** PyMuPDF and MinerU are AGPL-3.0. Importing either in-process would impose AGPL
-on Cairn, which conflicts with the intended Apache-2.0 licence. This is a legal risk, not a
-technical one, and it is easy to walk into unnoticed.
+**Description.** PyMuPDF's AGPL/commercial licensing and version-dependent MinerU terms
+require review before distribution with Apache-2.0 Cairn. The MinerU snapshot inspected on
+2026-09-07 uses Apache-2.0 plus commercial-restricted additional terms, not plain AGPL;
+see the [version-pinned checkpoint](05-parser-spike.md). A sidecar boundary does not
+automatically discharge licence obligations. Dependencies and model weights also need review.
 
 **Mitigation**
 - `T-M07-01` spike explicitly scores licence risk, with **Docling (MIT)** and **pypdfium2

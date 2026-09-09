@@ -122,11 +122,11 @@ Versions are **minimums**, pinned exactly in lockfiles. Changing any row marked
 | --- | --- | --- |
 | MinIO server | AGPL-3.0 | Shipped as a separate unmodified container, not linked. S3 is offered as an alternative. Reviewed: Platform lead. |
 | PyMuPDF | AGPL-3.0 **or** commercial | ⚠️ **`RISK-11` — blocking decision required in Phase 2.** Options: (a) purchase a commercial licence, (b) use `pypdfium2` (Apache-2.0/BSD) as the baseline extractor, (c) isolate PyMuPDF into a separately-distributed optional container. Owner: Platform lead. Do not build on PyMuPDF until resolved. |
-| MinerU | AGPL-3.0 | Same treatment — run as a separate parser sidecar container, not imported in-process. Alternative: **Docling (MIT)**, which is the preferred default for this reason. |
+| MinerU | Version-dependent; inspected upstream has Apache-2.0 plus commercial-restricted terms | Excluded pending explicit licence review; a sidecar does not waive obligations. See the [version-pinned checkpoint](../04-plan/05-parser-spike.md). **Docling (MIT)** remains the preferred evaluation candidate. |
 
 > **Action:** the Phase 2 parser spike (`T-M07-01`) MUST evaluate Docling (MIT) and pypdfium2
 > (permissive) as the primary path precisely to avoid the AGPL exposure. Treat MinerU/PyMuPDF
-> as fallback options requiring the container-isolation pattern.
+> as fallback options requiring version-specific licence review before any distribution.
 
 ## 8. Version pinning policy
 

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cairn.catalog.models import (
     Chunk,
     Document,
+    DocumentIngestion,
     KbIndexVersion,
     KnowledgeBase,
     StorageBinding,
@@ -136,13 +137,14 @@ class CatalogRepository:
         return row
 
     async def get_index_version(
-        self, session: AsyncSession, kb_id: UUID, version: int
+        self, session: AsyncSession, kb_id: UUID, version: int, *, for_update: bool = False
     ) -> KbIndexVersion | None:
-        row: KbIndexVersion | None = await session.scalar(
-            select(KbIndexVersion).where(
-                KbIndexVersion.kb_id == kb_id, KbIndexVersion.version == version
-            )
+        stmt = select(KbIndexVersion).where(
+            KbIndexVersion.kb_id == kb_id, KbIndexVersion.version == version
         )
+        if for_update:
+            stmt = stmt.with_for_update()
+        row: KbIndexVersion | None = await session.scalar(stmt)
         return row
 
     async def list_index_versions(self, session: AsyncSession, kb_id: UUID) -> list[KbIndexVersion]:
@@ -237,6 +239,32 @@ class CatalogRepository:
         )
         return document
 
+    async def add_document_ingestion(
+        self, session: AsyncSession, run: DocumentIngestion
+    ) -> DocumentIngestion:
+        session.add(run)
+        await session.flush()
+        return run
+
+    async def get_document_ingestion(
+        self,
+        session: AsyncSession,
+        document_id: UUID,
+        revision: int,
+        index_version: int,
+        *,
+        for_update: bool = False,
+    ) -> DocumentIngestion | None:
+        stmt = select(DocumentIngestion).where(
+            DocumentIngestion.document_id == document_id,
+            DocumentIngestion.revision == revision,
+            DocumentIngestion.index_version == index_version,
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        row: DocumentIngestion | None = await session.scalar(stmt)
+        return row
+
     async def list_documents(
         self,
         session: AsyncSession,
@@ -309,6 +337,59 @@ class CatalogRepository:
             stmt = stmt.where(Chunk.ordinal > after_ordinal)
         return list((await session.scalars(stmt.order_by(Chunk.ordinal).limit(limit))).all())
 
+    async def ingestion_chunks(
+        self, session: AsyncSession, kb_id: UUID, document_id: UUID, index_version: int
+    ) -> list[Chunk]:
+        return list(
+            (
+                await session.scalars(
+                    select(Chunk)
+                    .where(
+                        Chunk.kb_id == kb_id,
+                        Chunk.document_id == document_id,
+                        Chunk.index_version == index_version,
+                    )
+                    .order_by(Chunk.ordinal)
+                )
+            ).all()
+        )
+
+    async def pending_ingestions(
+        self, session: AsyncSession, kb_id: UUID, index_version: int
+    ) -> int:
+        return int(
+            await session.scalar(
+                select(func.count())
+                .select_from(DocumentIngestion)
+                .join(Document, Document.id == DocumentIngestion.document_id)
+                .where(
+                    Document.revision == DocumentIngestion.revision,
+                    Document.deleted_at.is_(None),
+                    Document.state != "deleting",
+                    DocumentIngestion.kb_id == kb_id,
+                    DocumentIngestion.index_version == index_version,
+                    DocumentIngestion.state.not_in(("indexed", "failed")),
+                )
+            )
+            or 0
+        )
+
+    async def ingestion_point_total(
+        self, session: AsyncSession, kb_id: UUID, index_version: int, *, indexed_only: bool
+    ) -> int:
+        stmt = select(func.coalesce(func.sum(DocumentIngestion.point_count), 0)).where(
+            Document.id == DocumentIngestion.document_id,
+            Document.revision == DocumentIngestion.revision,
+            Document.deleted_at.is_(None),
+            Document.state != "deleting",
+            DocumentIngestion.state != "failed",
+            DocumentIngestion.kb_id == kb_id,
+            DocumentIngestion.index_version == index_version,
+        )
+        if indexed_only:
+            stmt = stmt.where(DocumentIngestion.state == "indexed")
+        return int(await session.scalar(stmt) or 0)
+
     async def get_chunk(
         self, session: AsyncSession, kb_id: UUID, chunk_id: UUID, *, for_update: bool = False
     ) -> Chunk | None:
@@ -319,20 +400,21 @@ class CatalogRepository:
         return chunk
 
     async def edited_chunks(
-        self, session: AsyncSession, kb_id: UUID, document_id: UUID
+        self,
+        session: AsyncSession,
+        kb_id: UUID,
+        document_id: UUID,
+        index_version: int | None = None,
     ) -> list[Chunk]:
         """Manual edits, so a reindex can carry them forward (FR-F-09)."""
-        return list(
-            (
-                await session.scalars(
-                    select(Chunk).where(
-                        Chunk.kb_id == kb_id,
-                        Chunk.document_id == document_id,
-                        Chunk.is_edited.is_(True),
-                    )
-                )
-            ).all()
+        stmt = select(Chunk).where(
+            Chunk.kb_id == kb_id,
+            Chunk.document_id == document_id,
+            Chunk.is_edited.is_(True),
         )
+        if index_version is not None:
+            stmt = stmt.where(Chunk.index_version == index_version)
+        return list((await session.scalars(stmt.order_by(Chunk.ordinal))).all())
 
     async def chunk_hashes(
         self, session: AsyncSession, kb_id: UUID, document_id: UUID, index_version: int

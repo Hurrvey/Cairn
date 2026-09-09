@@ -385,7 +385,7 @@ class IdentityService:
         password therefore never creates an account whose long-term credentials
         both of them know.
         """
-        password = spec.password or new_token(12)
+        password = spec.password or self._policy.generate(username=spec.username)
         async with transaction() as session:
             if await self._repo.username_taken(session, actor.workspace_id, spec.username):
                 raise UsernameTaken("That username is already in use.")

@@ -16,6 +16,7 @@ from cairn.core.config import AuthSettings
 from cairn.core.errors import FieldError
 from cairn.identity.dto import PasswordPolicyView
 from cairn.identity.errors import PasswordPolicyViolation
+from cairn.identity.hashing import new_token
 
 __all__ = ["PasswordPolicy"]
 
@@ -43,6 +44,20 @@ def _common_passwords() -> frozenset[str]:
 @dataclass
 class PasswordPolicy:
     settings: AuthSettings
+
+    def generate(self, *, username: str) -> str:
+        """Generate a CSPRNG password that satisfies the same policy as user input."""
+        length = min(max(24, self.settings.password_min_length), self.settings.password_max_length)
+        if length < self.settings.password_min_length:
+            raise PasswordPolicyViolation("The configured password length limits conflict.")
+        for _ in range(128):
+            password = new_token((length * 3 + 3) // 4)[:length]
+            try:
+                self.validate(password, username=username)
+            except PasswordPolicyViolation:
+                continue
+            return password
+        raise PasswordPolicyViolation("Could not generate a password satisfying the policy.")
 
     def to_view(self) -> PasswordPolicyView:
         return PasswordPolicyView(

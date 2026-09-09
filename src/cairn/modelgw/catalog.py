@@ -14,7 +14,14 @@ from sqlalchemy import select
 from cairn.core.db import session_scope, transaction
 from cairn.core.errors import Conflict, NotFound, ValidationFailed
 from cairn.core.logging import get_logger
-from cairn.modelgw.dto import Capability, ModelRef, ModelView, ProviderView, RegisterModelSpec
+from cairn.modelgw.dto import (
+    Capability,
+    EmbeddingRuntimeRef,
+    ModelRef,
+    ModelView,
+    ProviderView,
+    RegisterModelSpec,
+)
 from cairn.modelgw.models import Model, ModelProvider
 
 __all__ = ["SUPPORTED_FAMILIES", "ModelCatalog", "get_model_catalog"]
@@ -211,6 +218,23 @@ class ModelCatalog:
             raise ValidationFailed(f"{model.display_name!r} has no declared dimension.")
 
         return await self.get_ref(model_id)
+
+    async def get_embedding_runtime(self, model_id: UUID) -> EmbeddingRuntimeRef:
+        async with session_scope() as session:
+            model = await session.get(Model, model_id)
+            if model is None or model.capability != "embedding" or not model.is_enabled:
+                raise NotFound("Embedding model not found.")
+            provider = await session.get(ModelProvider, model.provider_id)
+            if provider is None or not provider.is_enabled:
+                raise NotFound("Embedding provider not found.")
+        return EmbeddingRuntimeRef(
+            model=await self.get_ref(model_id),
+            provider_id=provider.id,
+            provider_family=provider.family,
+            base_url=provider.base_url,
+            config=dict(provider.config or {}),
+            has_credentials=provider.secret_ref is not None,
+        )
 
 
 def _provider_view(provider: ModelProvider, *, model_count: int) -> ProviderView:

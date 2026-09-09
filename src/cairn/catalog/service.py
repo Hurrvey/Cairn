@@ -44,7 +44,15 @@ from cairn.catalog.errors import (
     KbIndexInProgress,
     KbNotReady,
 )
-from cairn.catalog.models import Chunk, Document, KbIndexVersion, KnowledgeBase, StorageBinding
+from cairn.catalog.ingestion import source_key_in_scope
+from cairn.catalog.models import (
+    Chunk,
+    Document,
+    DocumentIngestion,
+    KbIndexVersion,
+    KnowledgeBase,
+    StorageBinding,
+)
 from cairn.catalog.repository import CatalogRepository
 from cairn.core.cache import Cache, get_cache
 from cairn.core.db import session_scope, transaction
@@ -625,12 +633,14 @@ class CatalogService:
         "document exists but nothing will ever process it" state is unreachable.
         """
         async with transaction() as session:
-            kb = await self._repo.get_kb(session, kb_id, for_update=False)
+            kb = await self._repo.get_kb(session, kb_id, for_update=True)
             if kb is None:
                 raise NotFound("Knowledge base not found.")
             if kb.status in ("deleting", "archived"):
                 raise KbNotReady(f"This knowledge base is {kb.status}.")
 
+            if not source_key_in_scope(spec.object_key, workspace_id=kb.workspace_id, kb_id=kb.id):
+                raise ValidationFailed("The source object key is outside this document's scope.")
             existing = await self._repo.get_document_by_hash(session, kb_id, spec.content_hash)
             if existing is not None and existing.deleted_at is None:
                 # Not an error. Re-uploading identical content is the expected
@@ -661,6 +671,35 @@ class CatalogService:
                 ),
             )
 
+            if kb.building_index_version is not None:
+                index_version = kb.building_index_version
+            elif kb.active_index_version is not None:
+                index_version = kb.active_index_version
+            else:
+                index_version = 1
+                kb.building_index_version = index_version
+                kb.status = "indexing"
+                await self._repo.add_index_version(
+                    session,
+                    KbIndexVersion(
+                        kb_id=kb.id,
+                        version=index_version,
+                        workspace_id=kb.workspace_id,
+                        state="building",
+                    ),
+                )
+
+            await self._repo.add_document_ingestion(
+                session,
+                DocumentIngestion(
+                    document_id=document.id,
+                    revision=document.revision,
+                    kb_id=kb.id,
+                    index_version=index_version,
+                    source_content_hash=document.content_hash,
+                ),
+            )
+
             await self._tasks.enqueue(
                 session,
                 TaskSpec(
@@ -669,7 +708,7 @@ class CatalogService:
                     workspace_id=kb.workspace_id,
                     kb_id=kb_id,
                     document_id=document.id,
-                    payload={"revision": document.revision},
+                    payload={"revision": document.revision, "index_version": index_version},
                     dedupe_key=f"parse:{document.id}:{document.revision}",
                 ),
             )
@@ -801,6 +840,23 @@ class CatalogService:
             document.progress_pct = 0
             document.revision += 1  # a fresh revision frees the dedupe key
 
+            kb = await self._repo.get_kb(session, document.kb_id, for_update=True)
+            if kb is None:
+                raise NotFound("Knowledge base not found.")
+            index_version = kb.building_index_version or kb.active_index_version
+            if index_version is None:
+                raise Conflict("The knowledge base has no index version available for retry.")
+            await self._repo.add_document_ingestion(
+                session,
+                DocumentIngestion(
+                    document_id=document.id,
+                    revision=document.revision,
+                    kb_id=document.kb_id,
+                    index_version=index_version,
+                    source_content_hash=document.content_hash,
+                ),
+            )
+
             await self._tasks.enqueue(
                 session,
                 TaskSpec(
@@ -809,7 +865,10 @@ class CatalogService:
                     workspace_id=document.workspace_id,
                     kb_id=document.kb_id,
                     document_id=doc_id,
-                    payload={"revision": document.revision},
+                    payload={
+                        "revision": document.revision,
+                        "index_version": index_version,
+                    },
                     dedupe_key=f"parse:{doc_id}:{document.revision}",
                 ),
             )
@@ -857,7 +916,7 @@ class CatalogService:
                             edit.content_hash if edit is not None else spec.content_hash
                         ),
                         "token_count": spec.token_count,
-                        "metadata": spec.metadata,
+                        "chunk_metadata": spec.metadata,
                         "is_edited": edit is not None,
                     }
                 )

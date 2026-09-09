@@ -4,8 +4,8 @@
 > management, indexing, and retrieval. Agents and applications are **clients**; Cairn is
 > the **server** that produces, stores, indexes, and serves knowledge.
 
-**Status:** Phase 0–1 complete; Phase 2 in progress (storage drivers and catalog landed).
-**Documentation date:** 2026-08-28 · **Code status date:** 2026-09-03
+**Status:** Phase 2 in progress; knowledge-base E2E gate remains open.
+**Documentation baseline date:** 2026-08-28 · **Code status date:** 2026-09-08
 
 ---
 
@@ -26,14 +26,30 @@ these modules are implemented, typechecked (`mypy --strict`), and boundary-enfor
 | M04/M05 storage | `ObjectStore` and `VectorStore` protocols, local + pgvector drivers, **137-test conformance suite** |
 | M10 modelgw | Model/provider registry (the lookup half; invocation is Phase 3) |
 | M03 catalog | Knowledge bases, documents, chunks, blue/green index versions, storage bindings, runtime publication |
+| M07 ingestion | Text + Office parsers, language detection, built-in/semantic/custom chunking, four-stage workers; bounded acceptance only |
+| M08 embedding | Model-bound tokenizers, dense TEI/Infinity adapters, batching/cache/retry; actual TEI pipeline test |
 | M16 web UI | Login, forced-change dialog, users, API keys, grants, audit, settings |
 
-Not yet started: M07 ingestion, M08 embedding, M09 retrieval, M11 pipelines,
+Not yet started: M09 retrieval, M11 pipelines,
 M12 functions, M13 MCP, M14 evaluation.
 
-**Caveat:** the integration suite (114 tests) requires PostgreSQL and Redis and has only
-ever been executed in CI job services — it was authored in an environment without Docker.
-The unit and contract suites (188 tests) run everywhere.
+**Historical verification checkpoint (2026-09-07):** the previously unexecuted integration suite ran against
+real PostgreSQL 16 + pgvector and Redis. The full storage contract suite also runs on
+the real pgvector driver rather than skipping it. This uncovered and fixed the missing
+migration driver, task-claim SQL/ordering/fairness defects and stale test setup.
+That checkpoint passed **400 tests**, with **81.47%** combined statement/branch coverage,
+above the unchanged **80%** gate. Frontend: **27 tests**, typecheck and production build pass.
+These historical checks are not the status of the expanded current worktree. Current pipeline and
+advanced-chunking packages have independent acceptance, including real TEI, PostgreSQL/pgvector and
+Redis, but the broader backend still has known lifecycle failures and PDF/OCR collection errors.
+
+**Still open:** PDF/OCR adapters and the genuine 30-document PDF quality gate, full-KB rebuild/manual
+re-embedding/retirement, and the production M12 custom-function sandbox. The default custom worker
+fails closed unless an explicit scoped executor is injected. The overall knowledge-base E2E gate is
+not complete. The current restart point is the [execution ledger](docs/04-plan/15-execution-ledger.md).
+See also the
+[parser checkpoint](docs/04-plan/05-parser-spike.md) and
+[continuation verification record](docs/04-plan/06-continuation-verification.md).
 
 **Start here → [`docs/README.md`](docs/README.md)** (documentation map and reading order)
 

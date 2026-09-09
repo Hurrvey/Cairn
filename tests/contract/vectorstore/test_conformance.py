@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from uuid import UUID, uuid4
 
 import pytest
@@ -173,8 +174,8 @@ async def test_namespaces_are_isolated(store) -> None:  # type: ignore[no-untype
     await store.ensure_namespace(v2, NamespaceSpec(dim=DIM))
     try:
         shared_id = new_uuid()
-        await store.upsert(v1, [Point(id=shared_id, dense=vec(1.0), payload={"content": "v1"})])
-        await store.upsert(v2, [Point(id=shared_id, dense=vec(1.0), payload={"content": "v2"})])
+        await store.upsert(v1, [replace(point({"content": "v1"}), id=shared_id)])
+        await store.upsert(v2, [replace(point({"content": "v2"}), id=shared_id)])
 
         assert (await store.fetch(v1, [shared_id]))[0].payload["content"] == "v1"
         assert (await store.fetch(v2, [shared_id]))[0].payload["content"] == "v2"
@@ -191,8 +192,8 @@ async def test_namespaces_are_isolated(store) -> None:  # type: ignore[no-untype
 
 
 async def test_dense_search_ranks_by_similarity(store, namespace) -> None:  # type: ignore[no-untyped-def]
-    near = Point(id=new_uuid(), dense=vec(1.0, 0.0), payload={"content": "near"})
-    far = Point(id=new_uuid(), dense=vec(0.0, 1.0), payload={"content": "far"})
+    near = point({"content": "near"}, dense=vec(1.0, 0.0))
+    far = point({"content": "far"}, dense=vec(0.0, 1.0))
     await store.upsert(namespace, [near, far])
 
     hits = await store.search(namespace, VectorQuery(dense=vec(1.0, 0.05), top_k=2))
@@ -203,10 +204,7 @@ async def test_dense_search_ranks_by_similarity(store, namespace) -> None:  # ty
 async def test_top_k_bounds_the_result_set(store, namespace) -> None:  # type: ignore[no-untyped-def]
     await store.upsert(
         namespace,
-        [
-            Point(id=new_uuid(), dense=vec(1.0, i / 10), payload={"content": str(i)})
-            for i in range(10)
-        ],
+        [point({"content": str(i)}, dense=vec(1.0, i / 10)) for i in range(10)],
     )
     hits = await store.search(namespace, VectorQuery(dense=vec(1.0), top_k=3))
     assert len(hits) == 3
@@ -216,8 +214,8 @@ async def test_score_threshold_excludes_weak_matches(store, namespace) -> None: 
     await store.upsert(
         namespace,
         [
-            Point(id=new_uuid(), dense=vec(1.0, 0.0), payload={"content": "near"}),
-            Point(id=new_uuid(), dense=vec(-1.0, 0.0), payload={"content": "opposite"}),
+            point({"content": "near"}, dense=vec(1.0, 0.0)),
+            point({"content": "opposite"}, dense=vec(-1.0, 0.0)),
         ],
     )
     hits = await store.search(
@@ -241,15 +239,13 @@ async def test_lexical_search_finds_what_dense_search_misses(store, namespace) -
     await store.upsert(
         namespace,
         [
-            Point(
-                id=new_uuid(),
+            point(
+                {"content": "The XR-2200 controller requires firmware 4.1."},
                 dense=vec(0.0, 1.0),
-                payload={"content": "The XR-2200 controller requires firmware 4.1."},
             ),
-            Point(
-                id=new_uuid(),
+            point(
+                {"content": "General information about hardware maintenance."},
                 dense=vec(1.0, 0.0),
-                payload={"content": "General information about hardware maintenance."},
             ),
         ],
     )

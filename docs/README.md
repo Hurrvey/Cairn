@@ -95,6 +95,16 @@ acceptance criteria.
 | [02-work-breakdown.md](04-plan/02-work-breakdown.md) | **Full WBS: every task with ID, module, deps, estimate, acceptance** |
 | [03-team-and-workflow.md](04-plan/03-team-and-workflow.md) | Streams, ownership, branching, PR rules, Definition of Done, **Agent protocol** |
 | [04-risk-register.md](04-plan/04-risk-register.md) | Risks, likelihood/impact, mitigation, owner, trigger |
+| [05-parser-spike.md](04-plan/05-parser-spike.md) | PDF candidate/licensing checkpoint; genuine 30-document quality gate still open |
+| [06-continuation-verification.md](04-plan/06-continuation-verification.md) | Historical service-backed verification and continuation links |
+| [07-embedding-implementation.md](04-plan/07-embedding-implementation.md) | Dense embedding/tokenizer implementation checkpoint |
+| [08-chunking-implementation.md](04-plan/08-chunking-implementation.md) | Basic chunker rules, identity and source provenance |
+| [09-worker-pipeline.md](04-plan/09-worker-pipeline.md) | Four-stage worker and ordered repair/acceptance evidence |
+| [10-office-language.md](04-plan/10-office-language.md) | Office parser and language-resolution scope and limits |
+| [11-advanced-chunking.md](04-plan/11-advanced-chunking.md) | Semantic/custom implementation and ordered safety validation |
+| [13-ingestion-completion-coordination.md](04-plan/13-ingestion-completion-coordination.md) | Serial worker ownership and acceptance rules |
+| [15-execution-ledger.md](04-plan/15-execution-ledger.md) | **Current restart point: step log, accepted scope, failures, resources and next action** |
+| [16-lifecycle-acceptance-plan.md](04-plan/16-lifecycle-acceptance-plan.md) | Pending rebuild/re-embed/retry/retirement package and regression matrix |
 
 ### 05 — Quality
 

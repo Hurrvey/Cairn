@@ -162,6 +162,25 @@ async def test_claim_respects_priority_then_fifo(
     assert [int(r["id"]) for r in rows] == [high, second_high, low]
 
 
+async def test_claim_skips_locked_candidates_without_hiding_other_ready_tasks(
+    service: TaskService, repo: TaskRepository, workspace_id: UUID
+) -> None:
+    async with transaction() as session:
+        await repo.set_workspace_concurrency(session, workspace_id, 1000)
+        for _ in range(20):
+            await service.enqueue(session, spec(workspace_id))
+
+    async with transaction() as locking_session:
+        await locking_session.execute(
+            text("SELECT id FROM task ORDER BY priority DESC, id LIMIT 5 FOR UPDATE")
+        )
+        async with transaction() as claiming_session:
+            rows = await repo.claim(
+                claiming_session, queue="parse", batch=5, worker_id="w", lease=timedelta(minutes=5)
+            )
+        assert [row["id"] for row in rows] == [6, 7, 8, 9, 10]
+
+
 async def test_claim_skips_tasks_scheduled_for_the_future(
     service: TaskService, repo: TaskRepository, workspace_id: UUID
 ) -> None:
@@ -271,7 +290,10 @@ async def test_heartbeat_protects_a_long_task_from_the_reaper(
         task_id = await service.enqueue(session, spec(workspace_id))
     async with transaction() as session:
         await repo.claim(session, queue="parse", batch=1, worker_id="w", lease=timedelta(seconds=1))
-        await repo.heartbeat(session, task_id, timedelta(minutes=30))
+        assert task_id is not None
+        await repo.heartbeat(
+            session, task_id=task_id, worker_id="w", attempt=1, lease=timedelta(minutes=30)
+        )
 
     reaped, _ = await reap_and_reconcile(repo)
     assert reaped == 0

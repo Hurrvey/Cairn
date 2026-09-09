@@ -29,7 +29,7 @@ from cairn.core.telemetry import (
 )
 from cairn.tasks.dto import QUEUE_PROFILES, TaskContext, TaskResult
 from cairn.tasks.repository import TaskRepository
-from cairn.tasks.service import is_retryable, next_delay
+from cairn.tasks.service import TaskLeaseLostError, is_retryable, next_delay
 
 __all__ = ["TaskHandler", "TaskWorker", "worker_identity"]
 
@@ -205,13 +205,18 @@ class TaskWorker:
 
             if result.ok:
                 async with transaction() as session:
-                    await self._repo.finish(
+                    applied = await self._repo.finish(
                         session,
                         task_id=task_id,
-                        workspace_id=workspace_id,
+                        worker_id=self.worker_id,
+                        attempt=int(row["attempt"]),
                         state="done",
                         error_detail=result.detail,
                     )
+                if not applied:
+                    outcome = "lease_lost"
+                    log.warning("task.lease_lost", task_id=task_id)
+                    return
                 outcome = "done"
                 log.info("task.completed", detail=result.detail)
             else:
@@ -228,6 +233,9 @@ class TaskWorker:
                 )
                 outcome = "failed"
 
+        except TaskLeaseLostError:
+            outcome = "lease_lost"
+            log.warning("task.lease_lost", task_id=task_id)
         except asyncio.CancelledError:
             log.warning("task.cancelled_at_shutdown", task_id=task_id)
             raise
@@ -255,11 +263,28 @@ class TaskWorker:
 
         async def heartbeat(extend: timedelta | None = None) -> None:
             async with transaction() as session:
-                await self._repo.heartbeat(session, task_id, extend or self.profile.lease)
+                applied = await self._repo.heartbeat(
+                    session,
+                    task_id=task_id,
+                    worker_id=self.worker_id,
+                    attempt=int(row["attempt"]),
+                    lease=extend or self.profile.lease,
+                )
+            if not applied:
+                raise TaskLeaseLostError(task_id)
 
         async def progress(done: int, total: int | None) -> None:
             async with transaction() as session:
-                await self._repo.set_progress(session, task_id, done, total)
+                applied = await self._repo.set_progress(
+                    session,
+                    task_id=task_id,
+                    worker_id=self.worker_id,
+                    attempt=int(row["attempt"]),
+                    done=done,
+                    total=total,
+                )
+            if not applied:
+                raise TaskLeaseLostError(task_id)
 
         payload = row["payload"]
         return TaskContext(
@@ -293,14 +318,18 @@ class TaskWorker:
         if retryable and not exhausted:
             delay = next_delay(attempt)
             async with transaction() as session:
-                await self._repo.reschedule(
+                applied = await self._repo.reschedule(
                     session,
                     task_id=task_id,
-                    workspace_id=workspace_id,
+                    worker_id=self.worker_id,
+                    attempt=attempt,
                     delay=delay,
                     error_code=error_code,
                     error_detail=detail,
                 )
+            if not applied:
+                log.warning("task.lease_lost", task_id=task_id)
+                return
             log.warning(
                 "task.retrying",
                 error_code=error_code,
@@ -310,14 +339,18 @@ class TaskWorker:
             return
 
         async with transaction() as session:
-            await self._repo.finish(
+            applied = await self._repo.finish(
                 session,
                 task_id=task_id,
-                workspace_id=workspace_id,
+                worker_id=self.worker_id,
+                attempt=attempt,
                 state="failed",
                 error_code=error_code,
                 error_detail=detail,
             )
+        if not applied:
+            log.warning("task.lease_lost", task_id=task_id)
+            return
         log.error(
             "task.dead_lettered",
             error_code=error_code,

@@ -6,13 +6,14 @@ PostgreSQL; a cold or unavailable cache costs latency, not correctness.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from typing import Protocol, runtime_checkable
 
 from redis.asyncio import Redis
 
 from cairn.core.config import Settings, get_settings
 
-__all__ = ["Cache", "InMemoryCache", "RedisCache", "close_cache", "get_cache"]
+__all__ = ["BulkCache", "Cache", "InMemoryCache", "RedisCache", "close_cache", "get_cache"]
 
 
 @runtime_checkable
@@ -23,6 +24,12 @@ class Cache(Protocol):
     async def delete(self, key: str) -> None: ...
     async def incr(self, key: str, ttl: int) -> int: ...
     async def ping(self) -> bool: ...
+
+
+@runtime_checkable
+class BulkCache(Cache, Protocol):
+    async def mget(self, keys: Sequence[str]) -> list[bytes | None]: ...
+    async def mset(self, values: Mapping[str, bytes], ttl: int) -> None: ...
 
 
 class RedisCache:
@@ -40,6 +47,23 @@ class RedisCache:
 
     async def set(self, key: str, value: bytes, ttl: int) -> None:
         await self._client.set(key, value, ex=ttl)
+
+    async def mget(self, keys: Sequence[str]) -> list[bytes | None]:
+        if not keys:
+            return []
+        values = await self._client.mget(list(keys))
+        return [
+            value if value is None or isinstance(value, bytes) else str(value).encode()
+            for value in values
+        ]
+
+    async def mset(self, values: Mapping[str, bytes], ttl: int) -> None:
+        if not values:
+            return
+        async with self._client.pipeline(transaction=False) as pipe:
+            for key, value in values.items():
+                pipe.set(key, value, ex=ttl)
+            await pipe.execute()
 
     async def set_if_absent(self, key: str, value: bytes, ttl: int) -> bool:
         return bool(await self._client.set(key, value, ex=ttl, nx=True))
@@ -88,6 +112,13 @@ class InMemoryCache:
 
     async def set(self, key: str, value: bytes, ttl: int) -> None:
         self._data[key] = (value, self._now() + ttl)
+
+    async def mget(self, keys: Sequence[str]) -> list[bytes | None]:
+        return [await self.get(key) for key in keys]
+
+    async def mset(self, values: Mapping[str, bytes], ttl: int) -> None:
+        for key, value in values.items():
+            await self.set(key, value, ttl)
 
     async def set_if_absent(self, key: str, value: bytes, ttl: int) -> bool:
         if await self.get(key) is not None:

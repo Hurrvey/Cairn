@@ -84,6 +84,18 @@ class TaskSettings(BaseModel):
     default_workspace_concurrency: int = 16
 
 
+class EmbeddingSettings(BaseModel):
+    cache_ttl_s: int = Field(default=604800, ge=1)
+    cache_enabled: bool = True
+    query_timeout_s: float = Field(default=2, gt=0)
+    document_timeout_s: float = Field(default=30, gt=0)
+    max_concurrency: int = Field(default=8, ge=1)
+    max_retries: int = Field(default=3, ge=0, le=10)
+    circuit_failure_threshold: int = Field(default=5, ge=1)
+    circuit_window_s: float = Field(default=60, gt=0)
+    circuit_reset_s: float = Field(default=30, gt=0)
+
+
 class TelemetrySettings(BaseModel):
     otlp_endpoint: str | None = None
     metrics_enabled: bool = True
@@ -116,6 +128,7 @@ class Settings(BaseSettings):
     auth: AuthSettings = Field(default_factory=AuthSettings)
     http: HttpSettings = Field(default_factory=HttpSettings)
     tasks: TaskSettings = Field(default_factory=TaskSettings)
+    embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
     objectstore: ObjectStoreSettings = Field(default_factory=ObjectStoreSettings)
     telemetry: TelemetrySettings = Field(default_factory=TelemetrySettings)
 

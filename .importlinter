@@ -29,6 +29,8 @@ include_external_packages = True
 name = Cairn layered architecture
 type = layers
 layers =
+    cairn.ingestion
+    cairn.embedding
     cairn.catalog | cairn.identity
     cairn.authz
     cairn.platform
@@ -116,6 +118,8 @@ type = forbidden
 source_modules =
     cairn.core
 forbidden_modules =
+    cairn.ingestion
+    cairn.embedding
     cairn.identity
     cairn.authz
     cairn.platform
@@ -124,3 +128,31 @@ forbidden_modules =
     cairn.modelgw
     cairn.objectstore
     cairn.vectorstore
+
+[importlinter:contract:embedding_is_dataplane_safe]
+name = Embedding must not import control-plane services or database libraries
+type = forbidden
+source_modules =
+    cairn.embedding
+forbidden_modules =
+    cairn.identity
+    cairn.catalog
+    cairn.modelgw
+    cairn.platform
+    cairn.tasks
+    cairn.core.db
+    sqlalchemy
+    asyncpg
+
+[importlinter:contract:ingestion_uses_facades]
+name = Ingestion accesses other modules through facades, not ORM models
+type = forbidden
+source_modules =
+    cairn.ingestion
+forbidden_modules =
+    cairn.catalog.models
+    cairn.identity.models
+    cairn.modelgw.models
+    cairn.platform.models
+    cairn.tasks.models
+allow_indirect_imports = True

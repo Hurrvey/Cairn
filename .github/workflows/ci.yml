@@ -102,10 +102,12 @@ jobs:
       - name: migrate
         run: uv run alembic upgrade head
 
-      - name: pytest
+      # Run the complete suite here: coverage files from the separate unit job
+      # are not present in this runner. This also exercises real pgvector contracts.
+      - name: pytest with service-backed contracts and combined coverage
         env:
           CAIRN_TEST_USE_EXTERNAL_SERVICES: "1"
-        run: uv run pytest tests/integration -v --cov --cov-report=xml --cov-append
+        run: uv run pytest tests -v --cov --cov-report=xml
 
       # NFR-M-03: coverage is a floor. A decrease fails the build.
       - name: coverage gate

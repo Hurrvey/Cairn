@@ -97,14 +97,26 @@ is structurally impossible here.
 ### 4.2 Claiming with fair scheduling
 
 ```sql
-WITH picked AS (
+WITH candidates AS (
+  SELECT eligible.id
+    FROM workspace_runtime wr
+    CROSS JOIN LATERAL (
+      SELECT queued.id
+        FROM task queued
+       WHERE queued.workspace_id = wr.workspace_id
+         AND queued.queue = :queue AND queued.state = 'ready'
+         AND queued.run_after <= now()
+       ORDER BY queued.priority DESC, queued.id
+       LIMIT GREATEST(0, wr.concurrency_limit - wr.running)
+    ) eligible
+   WHERE wr.running < wr.concurrency_limit
+), picked AS (
   SELECT t.id
     FROM task t
-    JOIN workspace_runtime wr ON wr.workspace_id = t.workspace_id
+    JOIN candidates candidate ON candidate.id = t.id
    WHERE t.queue = :queue
      AND t.state = 'ready'
      AND t.run_after <= now()
-     AND wr.running < wr.concurrency_limit        -- ← fairness, O(1) via the counter table
    ORDER BY t.priority DESC, t.id                 -- FIFO within a priority band
    LIMIT :batch
      FOR UPDATE OF t SKIP LOCKED
@@ -123,11 +135,18 @@ Then, in the same transaction:
 
 > **Why the counter table rather than a correlated subquery.** Counting running tasks per
 > workspace inline is a subquery executed per candidate row — at 100k queued tasks it dominates
-> the claim. A maintained counter makes fairness a single indexed join. Without fairness, one
+> the claim. A maintained counter bounds each workspace's candidate set. Without fairness, one
 > workspace uploading 50k documents blocks every other workspace behind it, which is the
 > defining failure of naive FIFO queues in multi-tenant systems.
 
 `SKIP LOCKED` gives exactly-once claiming with no coordinator and no distributed lock.
+
+The service sorts returned rows by descending priority, then id: SQL `RETURNING`
+does not promise the CTE's ordering. Counters are updated in stable workspace-id
+order to avoid lock-order inversions between workers. The candidate limit uses
+remaining workspace capacity rather than batch size so a locked batch prefix
+does not hide later eligible tasks. Caps remain soft across concurrent claim
+transactions; strict global admission would require additional serialization.
 
 Wakeups use `LISTEN/NOTIFY` on `cairn_task_{queue}`, with a 1 s poll as the safety net — so
 latency is not bounded by the poll interval, but a missed notification is not fatal.

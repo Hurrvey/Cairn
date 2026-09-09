@@ -4,33 +4,29 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Any
 from uuid import UUID
 
-__all__ = ["Capability", "ModelRef", "ModelView", "ProviderView", "RegisterModelSpec"]
+from cairn.core.modelref import Capability, ModelRef
 
-Capability = Literal["chat", "embedding", "rerank"]
+__all__ = [
+    "Capability",
+    "EmbeddingRuntimeRef",
+    "ModelRef",
+    "ModelView",
+    "ProviderView",
+    "RegisterModelSpec",
+]
 
 
 @dataclass(frozen=True, slots=True)
-class ModelRef:
-    """The only model representation that crosses a module boundary.
-
-    Carries no credential and no provider configuration — just what a caller
-    needs to embed, rerank, or generate. That is what lets it be cached and
-    handed to the data plane without dragging the gateway along.
-    """
-
-    id: UUID
+class EmbeddingRuntimeRef:
+    model: ModelRef
+    provider_id: UUID
     provider_family: str
-    model_key: str
-    capability: Capability
-    dimension: int | None = None
-    max_input_tokens: int | None = None
-    normalize: bool = True
-    query_prefix: str | None = None
-    optimal_batch_size: int = 64
-    tokenizer_id: str | None = None
+    base_url: str | None
+    config: dict[str, Any]
+    has_credentials: bool
 
 
 @dataclass(frozen=True, slots=True)

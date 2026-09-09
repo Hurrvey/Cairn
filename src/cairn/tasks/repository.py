@@ -26,6 +26,7 @@ _TASK_COLUMNS = """
     dedupe_key, error_code, error_detail, progress_done, progress_total,
     created_at, started_at, finished_at
 """
+_CLAIM_COLUMNS = ", ".join(f"t.{column.strip()}" for column in _TASK_COLUMNS.split(","))
 
 # One statement: pick candidate rows, lock them, and flip them to running.
 #
@@ -36,22 +37,34 @@ _TASK_COLUMNS = """
 #                                   50k queued documents starves every other.
 #   ORDER BY priority DESC, id   -> FIFO within a priority band.
 #
-# The fairness cap is soft: a single batch may overshoot `concurrency_limit` by
-# up to the batch size, because the counter is read once per scan rather than
-# per claimed row. Bounded overshoot is fine — the purpose is preventing
-# starvation, not exact accounting.
+# Each workspace contributes no more than its remaining capacity to a batch.
+# Concurrent transactions can still observe the same counter, so the cap is
+# soft across workers rather than a globally serialized admission lock.
 
 # `_TASK_COLUMNS`, a module constant. Every value is a bound parameter.
 _CLAIM_SQL = text(
     f"""
-    WITH picked AS (
+    WITH candidates AS (
+        SELECT eligible.id
+          FROM workspace_runtime wr
+          CROSS JOIN LATERAL (
+              SELECT queued.id, queued.priority
+                FROM task queued
+               WHERE queued.workspace_id = wr.workspace_id
+                 AND queued.queue = :queue
+                 AND queued.state = 'ready'
+                 AND queued.run_after <= now()
+               ORDER BY queued.priority DESC, queued.id
+               LIMIT GREATEST(0, wr.concurrency_limit - wr.running)
+          ) eligible
+         WHERE wr.running < wr.concurrency_limit
+    ), picked AS (
         SELECT t.id
           FROM task t
-          JOIN workspace_runtime wr ON wr.workspace_id = t.workspace_id
+          JOIN candidates candidate ON candidate.id = t.id
          WHERE t.queue = :queue
            AND t.state = 'ready'
            AND t.run_after <= now()
-           AND wr.running < wr.concurrency_limit
          ORDER BY t.priority DESC, t.id
          LIMIT :batch
            FOR UPDATE OF t SKIP LOCKED
@@ -64,7 +77,7 @@ _CLAIM_SQL = text(
            lease_until = now() + make_interval(secs => :lease_seconds)
       FROM picked p
      WHERE t.id = p.id
-    RETURNING {_TASK_COLUMNS}
+    RETURNING {_CLAIM_COLUMNS}
     """
 )
 
@@ -130,6 +143,7 @@ class TaskRepository:
             },
         )
         rows = [dict(row) for row in result.mappings().all()]
+        rows.sort(key=lambda row: (-row["priority"], row["id"]))
         if rows:
             await self._adjust_running(session, Counter(str(r["workspace_id"]) for r in rows))
         return rows
@@ -137,7 +151,7 @@ class TaskRepository:
     async def _adjust_running(
         self, session: AsyncSession, deltas: Counter[str], *, sign: int = 1
     ) -> None:
-        for workspace_id, count in deltas.items():
+        for workspace_id, count in sorted(deltas.items()):
             await session.execute(
                 text(
                     "UPDATE workspace_runtime SET running = GREATEST(0, running + :delta) "
@@ -151,78 +165,150 @@ class TaskRepository:
         session: AsyncSession,
         *,
         task_id: int,
-        workspace_id: UUID,
+        worker_id: str,
+        attempt: int,
         state: str,
         error_code: str | None = None,
         error_detail: str | None = None,
-    ) -> None:
-        await session.execute(
+    ) -> bool:
+        result = await session.execute(
             text(
                 """
                 UPDATE task
                    SET state = :state, finished_at = now(), lease_until = NULL,
                        worker_id = NULL, error_code = :error_code,
                        error_detail = :error_detail
-                 WHERE id = :task_id
+                 WHERE id = :task_id AND state = 'running'
+                   AND worker_id = :worker_id AND attempt = :attempt
+                   AND lease_until > clock_timestamp()
+                RETURNING workspace_id
                 """
             ),
             {
                 "state": state,
                 "task_id": task_id,
+                "worker_id": worker_id,
+                "attempt": attempt,
                 "error_code": error_code,
                 "error_detail": error_detail,
             },
         )
+        workspace_id = result.scalar_one_or_none()
+        if workspace_id is None:
+            return False
         await self._adjust_running(session, Counter({str(workspace_id): 1}), sign=-1)
+        return True
 
     async def reschedule(
         self,
         session: AsyncSession,
         *,
         task_id: int,
-        workspace_id: UUID,
+        worker_id: str,
+        attempt: int,
         delay: timedelta,
         error_code: str | None,
         error_detail: str | None,
-    ) -> None:
-        await session.execute(
+    ) -> bool:
+        result = await session.execute(
             text(
                 """
                 UPDATE task
                    SET state = 'ready', lease_until = NULL, worker_id = NULL,
-                       run_after = now() + make_interval(secs => :delay_seconds),
-                       error_code = :error_code, error_detail = :error_detail
-                 WHERE id = :task_id
+                        run_after = now() + make_interval(secs => :delay_seconds),
+                        error_code = :error_code, error_detail = :error_detail
+                 WHERE id = :task_id AND state = 'running'
+                   AND worker_id = :worker_id AND attempt = :attempt
+                   AND lease_until > clock_timestamp()
+                RETURNING workspace_id
                 """
             ),
             {
                 "task_id": task_id,
+                "worker_id": worker_id,
+                "attempt": attempt,
                 "delay_seconds": int(delay.total_seconds()),
                 "error_code": error_code,
                 "error_detail": error_detail,
             },
         )
+        workspace_id = result.scalar_one_or_none()
+        if workspace_id is None:
+            return False
         await self._adjust_running(session, Counter({str(workspace_id): 1}), sign=-1)
+        return True
 
-    async def heartbeat(self, session: AsyncSession, task_id: int, lease: timedelta) -> None:
-        await session.execute(
+    async def heartbeat(
+        self,
+        session: AsyncSession,
+        *,
+        task_id: int,
+        worker_id: str,
+        attempt: int,
+        lease: timedelta,
+    ) -> bool:
+        result = await session.execute(
             text(
-                "UPDATE task SET lease_until = now() + make_interval(secs => :secs) "
-                "WHERE id = :task_id AND state = 'running'"
+                "UPDATE task SET lease_until = clock_timestamp() + make_interval(secs => :secs) "
+                "WHERE id = :task_id AND state = 'running' "
+                "AND worker_id = :worker_id AND attempt = :attempt "
+                "AND lease_until > clock_timestamp() RETURNING id"
             ),
-            {"task_id": task_id, "secs": int(lease.total_seconds())},
+            {
+                "task_id": task_id,
+                "worker_id": worker_id,
+                "attempt": attempt,
+                "secs": int(lease.total_seconds()),
+            },
         )
+        return result.first() is not None
 
     async def set_progress(
-        self, session: AsyncSession, task_id: int, done: int, total: int | None
-    ) -> None:
-        await session.execute(
+        self,
+        session: AsyncSession,
+        *,
+        task_id: int,
+        worker_id: str,
+        attempt: int,
+        done: int,
+        total: int | None,
+    ) -> bool:
+        result = await session.execute(
             text(
                 "UPDATE task SET progress_done = :done, progress_total = "
-                "COALESCE(:total, progress_total) WHERE id = :task_id"
+                "COALESCE(:total, progress_total) WHERE id = :task_id "
+                "AND state = 'running' AND worker_id = :worker_id "
+                "AND attempt = :attempt AND lease_until > clock_timestamp() RETURNING id"
             ),
-            {"task_id": task_id, "done": done, "total": total},
+            {
+                "task_id": task_id,
+                "worker_id": worker_id,
+                "attempt": attempt,
+                "done": done,
+                "total": total,
+            },
         )
+        return result.first() is not None
+
+    async def lock_owned_task(
+        self,
+        session: AsyncSession,
+        *,
+        task_id: int,
+        worker_id: str,
+        attempt: int,
+    ) -> dict[str, Any] | None:
+        result = await session.execute(
+            text(
+                f"SELECT {_TASK_COLUMNS} FROM task "
+                "WHERE id = :task_id AND state = 'running' "
+                "AND worker_id = :worker_id AND attempt = :attempt "
+                "AND lease_until > clock_timestamp() FOR UPDATE"
+            ),
+            {"task_id": task_id, "worker_id": worker_id, "attempt": attempt},
+        )
+        row = result.mappings().first()
+        return dict(row) if row else None
 
     # --- maintenance --------------------------------------------------------
 
