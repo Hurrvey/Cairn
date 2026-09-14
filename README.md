@@ -41,10 +41,16 @@ That checkpoint passed **400 tests**, with **81.47%** combined statement/branch 
 above the unchanged **80%** gate. Frontend: **27 tests**, typecheck and production build pass.
 These historical checks are not the status of the expanded current worktree. Current pipeline and
 advanced-chunking packages have independent acceptance, including real TEI, PostgreSQL/pgvector and
-Redis, but the broader backend still has known lifecycle failures and PDF/OCR collection errors.
+Redis. The September14 bounded manual chunk reembedding increment also passed independent
+review: the expanded backend has **761 passing tests**, no assertion failures,
+**2 PDF/OCR collection errors**, and **85.18%**
+coverage. The full test command is still nonzero; unimplemented lifecycle flows remain open.
 
-**Still open:** PDF/OCR adapters and the genuine 30-document PDF quality gate, full-KB rebuild/manual
-re-embedding/retirement, and the production M12 custom-function sandbox. The default custom worker
+**Still open:** PDF/OCR adapters and the genuine 30-document PDF quality gate,
+general stage recovery/purge/retirement, broader cache ordering, and the production
+M12 custom-function sandbox. Bounded fan-out, manual reembedding and building-version cleanup are
+accepted, not the whole
+knowledge-base lifecycle. The default custom worker
 fails closed unless an explicit scoped executor is injected. The overall knowledge-base E2E gate is
 not complete. The current restart point is the [execution ledger](docs/04-plan/15-execution-ledger.md).
 See also the

@@ -92,6 +92,9 @@ class KnowledgeBase(Base):
         CheckConstraint(f"status IN {KB_STATUSES}", name="status"),
         CheckConstraint("metric IN ('cosine','dot','l2')", name="metric"),
         CheckConstraint("embedding_dim > 0", name="embedding_dim_positive"),
+        CheckConstraint(
+            "index_version_high_water >= 0", name="index_version_high_water_nonnegative"
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=new_uuid)
@@ -134,6 +137,9 @@ class KnowledgeBase(Base):
     #: `building`; the switch is one atomic UPDATE.
     active_index_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     building_index_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: Durable allocator state. Historical version rows may be purged, but this
+    #: value is never decremented, so a namespace identity is never reused.
+    index_version_high_water: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     owner_user_id: Mapped[UUID] = mapped_column(
         PgUUID(as_uuid=True), ForeignKey("user.id"), nullable=False
@@ -174,6 +180,16 @@ class KbIndexVersion(Base):
     __table_args__ = (
         CheckConstraint(f"state IN {INDEX_STATES}", name="state"),
         CheckConstraint("layout IN ('shared','dedicated')", name="layout"),
+        CheckConstraint(
+            "(snapshot_unavailable AND config_snapshot IS NULL) OR "
+            "(NOT snapshot_unavailable AND config_snapshot IS NOT NULL)",
+            name="snapshot_coherent",
+        ),
+        CheckConstraint(
+            "enrollment_state IN ('scanning','reconciling','complete')",
+            name="enrollment_state",
+        ),
+        CheckConstraint("enrollment_generation >= 0", name="enrollment_generation_nonnegative"),
         # At most one build in flight per knowledge base. Two concurrent
         # rebuilds would race to flip `active_index_version`, and the loser's
         # namespace would leak.
@@ -194,6 +210,15 @@ class KbIndexVersion(Base):
     state: Mapped[str] = mapped_column(String(16), nullable=False, default="building")
     layout: Mapped[str] = mapped_column(String(16), nullable=False, default="shared")
     physical_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    #: Credential-free, immutable version provenance. NULL is reserved for
+    #: legacy rows whose exact historical configuration cannot be proven.
+    config_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    snapshot_unavailable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    enrollment_state: Mapped[str] = mapped_column(String(16), nullable=False, default="complete")
+    enrollment_cursor: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True), nullable=True)
+    enrollment_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     chunk_total: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     chunk_done: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
@@ -307,6 +332,7 @@ class DocumentIngestion(Base):
     index_version: Mapped[int] = mapped_column(Integer, primary_key=True)
     source_content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     state: Mapped[str] = mapped_column(String(16), nullable=False, default="registered")
+    prior_parsed_object_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     parsed_object_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     chunks_object_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     embeddings_object_key: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -332,6 +358,15 @@ class Chunk(Base):
 
     __tablename__ = "chunk"
     __table_args__ = (
+        CheckConstraint("edit_generation >= 0", name="edit_generation_nonnegative"),
+        CheckConstraint(
+            "reembed_applied_generation >= 0",
+            name="reembed_applied_generation_nonnegative",
+        ),
+        CheckConstraint(
+            "reembed_applied_generation <= edit_generation",
+            name="reembed_generation_order",
+        ),
         Index("ix_chunk_document", "kb_id", "document_id", "index_version"),
         Index("ix_chunk_hash", "kb_id", "content_hash"),
         {"postgresql_partition_by": "HASH (kb_id)"},
@@ -359,6 +394,12 @@ class Chunk(Base):
     #: A manual fix to a badly-parsed table must survive the next reindex, or
     #: the user loses the work every time chunking is retuned.
     is_edited: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    edit_generation: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    reembed_applied_generation: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

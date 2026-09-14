@@ -1,5 +1,11 @@
 # Worker ingestion pipeline
 
+September 10 continuation: later lifecycle work and current validation are tracked in
+`19-reindex-fanout-implementation.md` and ledger15 L54 onward. The September8 implementation and
+pending-acceptance statements below are historical. Do not use this older package's scope to infer
+that current advanced chunking or reindex fan-out is absent; equally, it does not accept PDF/OCR,
+manual chunk reembedding, general purge, retirement or the whole knowledge-base E2E gate.
+
 Coordinator acceptance (2026-09-08): the repair package was independently rerun together with
 Office worker scenarios and actual TEI/MiniLM inference: **48 passed, no skips**. Targeted Ruff,
 focused mypy (7 source files) and all 6 import contracts passed. The worker was closed after delivery.

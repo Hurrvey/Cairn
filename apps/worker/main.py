@@ -28,9 +28,11 @@ def build_worker(queue: str) -> TaskWorker:
     )
 
     if queue == "maintain":
+        from cairn.catalog.reindex import register_reindex_handlers
         from cairn.platform.maintenance import register_maintenance_handlers
 
         register_maintenance_handlers(worker)
+        register_reindex_handlers(worker)
 
     if queue in {"parse", "chunk", "embed", "index"}:
         from cairn.ingestion.pipeline import register_pipeline_handlers

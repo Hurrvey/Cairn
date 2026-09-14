@@ -2,6 +2,13 @@
 
 **Date:** 2026-09-07 · **Status:** licence reconnaissance complete; quality gate OPEN.
 
+**Continuation note (2026-09-09):** The engine-independent delivery description in section 3 is
+the historical September 7 checkpoint, not current worker status. Office/language, advanced
+chunking and bounded parse-to-index worker composition have since been accepted; see
+`15-execution-ledger.md` for evidence and remaining lifecycle limitations. PDF/OCR implementation
+and the genuine annotated 30-document quality gate are still OPEN. The licence observations below
+remain tied to the explicitly inspected September 7 snapshots; they are not a new release audit.
+
 This resumes Claude session `9d9ddebd-3ba8-4607-8976-b90680a04ffb`, whose last
 completed increment was the Phase 2b catalog. Git initialization and the directory
 rename to `D:\code\Cairn` have already happened. No repository, package name, or
@@ -56,7 +63,7 @@ Before closing T-M07-01:
 5. Apply the existing table F1 threshold of 0.85 and report failures by document
    category, not just aggregate averages. Record a version-pinned decision.
 
-## 3. Work delivered without prematurely choosing a PDF engine
+## 3. Historical September 7 delivery without prematurely choosing a PDF engine
 
 The engine-independent part of T-M07-02 and T-M07-05 now exists:
 

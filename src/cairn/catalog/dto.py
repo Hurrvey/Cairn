@@ -12,6 +12,7 @@ That friction is deliberate — it is what stops the boundary eroding one
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
@@ -25,12 +26,14 @@ from cairn.modelgw.dto import ModelRef
 __all__ = [
     "BindingRef",
     "BindingRefModel",
+    "ChunkReembedTarget",
     "ChunkSpec",
     "ChunkView",
     "CreateKbSpec",
     "DocumentRegistration",
     "DocumentView",
     "IndexProgressView",
+    "IndexVersionConfig",
     "IndexVersionView",
     "KnowledgeBaseRuntime",
     "KnowledgeBaseView",
@@ -132,6 +135,38 @@ class KnowledgeBaseRuntime(BaseModel):
     status: KbStatus
 
 
+class IndexVersionConfig(BaseModel):
+    """Credential-free embedding and chunk provenance owned by one version."""
+
+    model_config = ConfigDict(frozen=True)
+
+    embedding_model: ModelRef
+    metric: Literal["cosine", "dot", "l2"]
+    chunk_config: ChunkConfig
+
+
+@dataclass(frozen=True, slots=True)
+class ChunkReembedTarget:
+    workspace_id: UUID
+    kb_id: UUID
+    document_id: UUID
+    chunk_id: UUID
+    revision: int
+    index_version: int
+    edit_generation: int
+    reembed_applied_generation: int
+    content: str
+    content_hash: str
+    parent_id: UUID | None
+    metadata: dict[str, Any]
+    embedding_model: ModelRef
+    metric: Literal["cosine", "dot", "l2"]
+    vector_binding: BindingRef
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "metadata", deepcopy(self.metadata))
+
+
 @dataclass(frozen=True, slots=True)
 class CreateKbSpec:
     name: str
@@ -206,6 +241,7 @@ class IndexVersionView:
     started_at: datetime
     completed_at: datetime | None
     error: str | None
+    config: IndexVersionConfig | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -5,14 +5,20 @@ from __future__ import annotations
 import asyncio
 import unicodedata
 from base64 import urlsafe_b64encode
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from hashlib import sha256
 from typing import cast
 from uuid import UUID, uuid4
 
-from cairn.catalog.dto import BindingRef, ChunkSpec
-from cairn.catalog.ingestion import CatalogIngestionFacade, IngestionRun, source_key_in_scope
+from cairn.catalog.dto import BindingRef, ChunkReembedTarget, ChunkSpec
+from cairn.catalog.ingestion import (
+    CatalogIngestionFacade,
+    IngestionOwnershipError,
+    IngestionRun,
+    source_key_in_scope,
+)
 from cairn.core.errors import CairnError
 from cairn.core.logging import get_logger
 from cairn.core.modelref import ModelRef
@@ -29,16 +35,17 @@ from cairn.ingestion.artifacts import (
     encode_embedding_manifest,
     encode_parse_manifest,
 )
-from cairn.ingestion.base import ParseContext
+from cairn.ingestion.base import ParseContext, ParsedDocument
 from cairn.ingestion.chunkers import DocumentChunker
 from cairn.ingestion.custom import CustomChunkExecutor
 from cairn.ingestion.registry import ParserRegistry
 from cairn.ingestion.semantic import EmbeddingServiceSemanticEmbedding
 from cairn.objectstore.base import ObjectStore
+from cairn.objectstore.errors import ObjectNotFound, ObjectTooLarge
 from cairn.tasks.dto import TaskContext, TaskResult
 from cairn.tasks.service import TaskLeaseLostError
 from cairn.tasks.worker import TaskWorker
-from cairn.vectorstore.base import Metric, Namespace, NamespaceSpec, Point, VectorStore
+from cairn.vectorstore.base import Hit, Metric, Namespace, NamespaceSpec, Point, VectorStore
 from cairn.vectorstore.filters import Compare
 
 log = get_logger(__name__)
@@ -75,7 +82,7 @@ class PreparedEmbedding:
 
 ObjectStoreResolver = Callable[[BindingRef], Awaitable[ObjectStore]]
 VectorStoreResolver = Callable[[BindingRef], Awaitable[VectorStore]]
-EmbeddingResolver = Callable[[UUID], Awaitable[PreparedEmbedding]]
+EmbeddingResolver = Callable[[ModelRef], Awaitable[PreparedEmbedding]]
 CustomExecutorResolver = Callable[[IngestionRun], Awaitable[CustomChunkExecutor]]
 
 
@@ -104,16 +111,19 @@ class IngestionPipeline:
                 run.object_key, workspace_id=run.workspace_id, kb_id=run.kb_id
             ):
                 raise SourceIntegrityError()
+            await self._prepared_embedding(run)
             store = await self._resources.object_store_for(run.object_binding)
-            source = await store.get_bytes(
-                run.object_key, max_bytes=self._resources.max_source_bytes
-            )
-            self._verify_source(run, source)
-            parsed = await self._resources.parsers.parse(
-                source,
-                mime=run.mime_type,
-                ctx=ParseContext(source_url=run.source_url),
-            )
+            parsed = await self._reuse_parsed(run, store)
+            if parsed is None:
+                source = await store.get_bytes(
+                    run.object_key, max_bytes=self._resources.max_source_bytes
+                )
+                self._verify_source(run, source)
+                parsed = await self._resources.parsers.parse(
+                    source,
+                    mime=run.mime_type,
+                    ctx=ParseContext(source_url=run.source_url),
+                )
             await context.heartbeat()
             manifest = ParseManifest(
                 document_id=run.document_id,
@@ -149,7 +159,7 @@ class IngestionPipeline:
                 )
             )
             _verify_manifest_identity(run, parsed)
-            prepared = await self._resources.embedding_for(run.embedding_model_id)
+            prepared = await self._prepared_embedding(run)
             semantic = (
                 EmbeddingServiceSemanticEmbedding(
                     prepared.service, prepared.model, prepared.binding_fingerprint
@@ -226,7 +236,7 @@ class IngestionPipeline:
                 )
             )
             _verify_manifest_identity(run, chunks)
-            prepared = await self._resources.embedding_for(run.embedding_model_id)
+            prepared = await self._prepared_embedding(run)
             previous = await self._previous_embeddings(run, store)
             manifest = await create_embedding_manifest(
                 document_id=run.document_id,
@@ -254,6 +264,55 @@ class IngestionPipeline:
             raise
         except Exception as exc:
             return await self._failed(context, "embed", exc)
+
+    async def handle_chunk_reembed(self, context: TaskContext) -> TaskResult:
+        try:
+            target = await self._catalog.load_chunk_reembed(context)
+            if target is None:
+                return TaskResult.skipped("stale manual chunk edit")
+            prepared = await self._resources.embedding_for(target.embedding_model)
+            if prepared.model != target.embedding_model:
+                raise PipelineArtifactError(
+                    "The registered embedding model no longer matches the index version snapshot."
+                )
+            max_tokens = prepared.model.max_input_tokens
+            if max_tokens is None:
+                raise PipelineArtifactError("The embedding model has no input token limit.")
+            normalized = " ".join(unicodedata.normalize("NFKC", target.content).split())
+            actual_token_count = prepared.tokenizer.count(normalized)
+            if actual_token_count > max_tokens:
+                raise EmbeddingInputTooLarge()
+            vector_store = await self._resources.vector_store_for(target.vector_binding)
+            namespace = Namespace(target.kb_id, target.index_version)
+            expected_payload = _chunk_reembed_payload(target)
+            existing = await vector_store.fetch(namespace, [target.chunk_id])
+            vector: Sequence[float] | None = None
+            if not _chunk_reembed_hit_matches(existing, target, expected_payload):
+                embedded = await prepared.service.embed_documents(
+                    prepared.model, [target.content], batch_size=1
+                )
+                vector = embedded[0].values
+            async with self._catalog.chunk_reembed_mutation(context, target) as mutation:
+                if vector is not None:
+                    point = _chunk_reembed_point(target, vector)
+                    await mutation.apply(lambda: vector_store.upsert(namespace, [point]))
+                fetched = await mutation.apply(
+                    lambda: vector_store.fetch(namespace, [target.chunk_id])
+                )
+                if not _chunk_reembed_hit_matches(fetched, target, expected_payload):
+                    raise PipelineArtifactError(
+                        "The vector store returned a stale manual chunk payload."
+                    )
+                await mutation.commit(actual_token_count)
+            return TaskResult.success()
+        except IngestionOwnershipError:
+            return TaskResult.skipped("stale manual chunk edit")
+        except TaskLeaseLostError:
+            raise
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            return _manual_reembed_failure(exc)
 
     async def handle_index(self, context: TaskContext) -> TaskResult:
         try:
@@ -285,7 +344,7 @@ class IngestionPipeline:
             )
             _verify_manifest_identity(run, chunks)
             _verify_manifest_identity(run, embeddings)
-            prepared = await self._resources.embedding_for(run.embedding_model_id)
+            prepared = await self._prepared_embedding(run)
             if (
                 embeddings.binding_fingerprint != prepared.binding_fingerprint
                 or embeddings.dimension != prepared.model.dimension
@@ -330,12 +389,81 @@ class IngestionPipeline:
         except Exception as exc:
             return await self._failed(context, "index", exc)
 
+    async def handle_reindex_delete(self, context: TaskContext) -> TaskResult:
+        try:
+            if await self._catalog.is_deleted_activation_publication_retry(context):
+                assert context.kb_id is not None
+                await self._catalog.publish_runtime(context.kb_id)
+                return TaskResult.success("republished active reindex target")
+            async with self._catalog.deleted_index_mutation(context) as mutation:
+                target = mutation.target
+                vector_store = await self._resources.vector_store_for(target.vector_binding)
+                namespace = Namespace(target.kb_id, target.index_version)
+                await mutation.apply(
+                    lambda: vector_store.ensure_namespace(
+                        namespace,
+                        NamespaceSpec(
+                            dim=target.embedding_dim,
+                            metric=cast("Metric", target.metric),
+                        ),
+                    )
+                )
+                document_filter = Compare("document_id", "$eq", str(target.document_id))
+                await mutation.apply(lambda: vector_store.delete(namespace, filter=document_filter))
+                remaining = await mutation.apply(
+                    lambda: vector_store.count(namespace, document_filter)
+                )
+                if remaining:
+                    raise PipelineArtifactError(
+                        "Deleted document points remain in the building index."
+                    )
+                committed = await mutation.commit()
+            if committed.activated:
+                await self._catalog.publish_runtime(target.kb_id)
+            return TaskResult.success()
+        except IngestionOwnershipError:
+            return TaskResult.skipped("stale deleted-document cleanup")
+        except TaskLeaseLostError:
+            raise
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            return await self._failed(context, "index", exc)
+
     def _verify_source(self, run: IngestionRun, source: bytes) -> None:
         if (
             not source_key_in_scope(run.object_key, workspace_id=run.workspace_id, kb_id=run.kb_id)
             or sha256(source).hexdigest() != run.source_content_hash
         ):
             raise SourceIntegrityError()
+
+    async def _prepared_embedding(self, run: IngestionRun) -> PreparedEmbedding:
+        prepared = await self._resources.embedding_for(run.embedding_model)
+        if prepared.model != run.embedding_model:
+            raise PipelineArtifactError(
+                "The registered embedding model no longer matches the index version snapshot."
+            )
+        return prepared
+
+    async def _reuse_parsed(self, run: IngestionRun, store: ObjectStore) -> ParsedDocument | None:
+        key = run.prior_parsed_object_key
+        if key is None or not source_key_in_scope(
+            key, workspace_id=run.workspace_id, kb_id=run.kb_id
+        ):
+            return None
+        try:
+            manifest = decode_parse_manifest(
+                await store.get_bytes(key, max_bytes=self._resources.max_artifact_bytes)
+            )
+        except (OSError, ValueError, ObjectNotFound, ObjectTooLarge):
+            return None
+        if (
+            manifest.document_id != run.document_id
+            or manifest.revision != run.revision
+            or manifest.source_content_hash != run.source_content_hash
+        ):
+            return None
+        return manifest.parsed
 
     async def _previous_embeddings(
         self, run: IngestionRun, store: ObjectStore
@@ -397,6 +525,10 @@ def register_pipeline_handlers(worker: TaskWorker, pipeline: IngestionPipeline) 
     registration = handlers.get(worker.queue)
     if registration is not None:
         worker.register(*registration)
+    if worker.queue == "embed":
+        worker.register("chunk.reembed", pipeline.handle_chunk_reembed)
+    if worker.queue == "index":
+        worker.register("document.reindex_delete", pipeline.handle_reindex_delete)
 
 
 def _stage_artifact_key(run: IngestionRun, context: TaskContext, stage: str) -> str:
@@ -456,6 +588,60 @@ async def _verify_expected(
     for hit in fetched:
         if hit.payload.get("content_hash") != expected[hit.id].payload.get("content_hash"):
             raise PipelineArtifactError("The vector store returned stale point payloads.")
+
+
+def _chunk_reembed_payload(target: ChunkReembedTarget) -> dict[str, object]:
+    payload: dict[str, object] = deepcopy(target.metadata)
+    payload.update(
+        {
+            "chunk_id": str(target.chunk_id),
+            "content": target.content,
+            "content_hash": target.content_hash,
+            "document_id": str(target.document_id),
+            "index_version": target.index_version,
+            "kb_id": str(target.kb_id),
+            "parent_id": str(target.parent_id) if target.parent_id is not None else None,
+            "revision": target.revision,
+            "manual_edit_generation": target.edit_generation,
+        }
+    )
+    return payload
+
+
+def _chunk_reembed_point(target: ChunkReembedTarget, values: Sequence[float]) -> Point:
+    return Point(id=target.chunk_id, dense=values, payload=_chunk_reembed_payload(target))
+
+
+def _chunk_reembed_hit_matches(
+    hits: Sequence[Hit],
+    target: ChunkReembedTarget,
+    expected_payload: Mapping[str, object],
+) -> bool:
+    return bool(
+        len(hits) == 1
+        and hits[0].id == target.chunk_id
+        and dict(hits[0].payload) == dict(expected_payload)
+    )
+
+
+def _manual_reembed_failure(exc: Exception) -> TaskResult:
+    if isinstance(exc, CairnError):
+        return TaskResult.failure(
+            exc.code,
+            exc.title,
+            retryable=bool(getattr(exc, "retryable", False)),
+        )
+    if isinstance(exc, ValueError):
+        return TaskResult.failure(
+            PipelineArtifactError.code,
+            PipelineArtifactError.title,
+            retryable=False,
+        )
+    return TaskResult.failure(
+        "INGESTION_STAGE_ERROR",
+        "The ingestion stage could not be completed.",
+        retryable=True,
+    )
 
 
 async def create_embedding_manifest(

@@ -64,7 +64,7 @@ def test_maintenance_worker_registers_all_maintenance_handlers() -> None:
     from cairn.platform.maintenance import MAINTENANCE_KINDS
 
     worker = build_worker("maintain")
-    assert set(worker._handlers) == set(MAINTENANCE_KINDS)
+    assert set(worker._handlers) == {*MAINTENANCE_KINDS, "kb.reindex_fanout"}
     assert worker.queue == "maintain"
 
 
@@ -75,5 +75,10 @@ def test_ingestion_workers_register_their_stage_handler(queue: str) -> None:
 
     worker = build_worker(queue)
     assert worker.queue == queue
-    assert set(worker._handlers) == {f"document.{queue}"}
+    expected = {f"document.{queue}"}
+    if queue == "embed":
+        expected.add("chunk.reembed")
+    if queue == "index":
+        expected.add("document.reindex_delete")
+    assert set(worker._handlers) == expected
     assert worker._handlers[f"document.{queue}"].__name__ == f"handle_{queue}"

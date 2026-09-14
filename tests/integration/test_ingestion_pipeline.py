@@ -16,6 +16,7 @@ from sqlalchemy import text
 
 from cairn.authz.model import Principal
 from cairn.authz.service import AuthzService
+from cairn.catalog.config import ChunkConfig
 from cairn.catalog.dto import CreateKbSpec, UploadSpec
 from cairn.catalog.ingestion import CatalogIngestionFacade
 from cairn.catalog.service import CatalogService
@@ -139,6 +140,7 @@ async def _create_pipeline_document(
     *,
     source: bytes = b"# Pipeline\n\nA paragraph.",
     registered_hash: str | None = None,
+    chunk_config: ChunkConfig | None = None,
 ) -> tuple[CatalogService, Any, Any, bytes, str]:
     catalog = CatalogService()
     models = ModelCatalog()
@@ -179,6 +181,7 @@ async def _create_pipeline_document(
             embedding_model_id=model.id,
             vector_binding_id=vector.id,
             object_binding_id=objects.id,
+            chunk_config=chunk_config,
         ),
     )
     digest = registered_hash or sha256(source).hexdigest()
@@ -425,7 +428,7 @@ async def _test_pipeline(  # type: ignore[no-untyped-def]
     async def vector_store_for(_binding):  # type: ignore[no-untyped-def]
         return resolved_vector_store
 
-    async def embedding_for(_model_id):  # type: ignore[no-untyped-def]
+    async def embedding_for(snapshot):  # type: ignore[no-untyped-def]
         return PreparedEmbedding(
             model=model,
             tokenizer=tokenizer,

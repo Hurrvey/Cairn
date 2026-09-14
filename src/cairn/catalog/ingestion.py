@@ -7,7 +7,6 @@ from base64 import urlsafe_b64encode
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import timedelta
 from typing import Literal, TypeVar, cast
 from uuid import UUID
 
@@ -15,11 +14,20 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cairn.catalog.config import ChunkConfig
-from cairn.catalog.dto import BindingRef, ChunkSpec
-from cairn.catalog.models import Document, DocumentIngestion, KnowledgeBase, StorageBinding
+from cairn.catalog.dto import BindingRef, ChunkReembedTarget, ChunkSpec, IndexVersionConfig
+from cairn.catalog.models import (
+    Chunk,
+    Document,
+    DocumentIngestion,
+    KbIndexVersion,
+    KnowledgeBase,
+    StorageBinding,
+)
+from cairn.catalog.reindex import activate_build_if_ready
 from cairn.catalog.repository import CatalogRepository
 from cairn.core.db import session_scope, transaction
 from cairn.core.errors import CairnError, NotFound, ValidationFailed
+from cairn.core.modelref import ModelRef
 from cairn.core.time import utcnow
 from cairn.tasks.dto import TaskContext, TaskSpec
 from cairn.tasks.service import TaskLeaseLostError, TaskService, get_task_service
@@ -44,12 +52,10 @@ class IngestionRun:
     object_key: str
     mime_type: str
     source_url: str | None
-    chunk_config: ChunkConfig
-    embedding_model_id: UUID
-    embedding_dim: int
-    metric: str
+    version_config: IndexVersionConfig
     object_binding: BindingRef
     vector_binding: BindingRef
+    prior_parsed_object_key: str | None
     parsed_object_key: str | None
     chunks_object_key: str | None
     embeddings_object_key: str | None
@@ -58,6 +64,29 @@ class IngestionRun:
     stale_point_ids: tuple[UUID, ...]
     active_index_version: int | None
     building_index_version: int | None
+
+    @property
+    def chunk_config(self) -> ChunkConfig:
+        return self.version_config.chunk_config
+
+    @property
+    def embedding_model(self) -> ModelRef:
+        return self.version_config.embedding_model
+
+    @property
+    def embedding_model_id(self) -> UUID:
+        return self.embedding_model.id
+
+    @property
+    def embedding_dim(self) -> int:
+        dimension = self.embedding_model.dimension
+        if dimension is None:  # pragma: no cover - snapshot validation rejects this
+            raise ValidationFailed("The version embedding model has no dimension.")
+        return dimension
+
+    @property
+    def metric(self) -> str:
+        return self.version_config.metric
 
     @property
     def artifact_prefix(self) -> str:
@@ -71,6 +100,17 @@ class IngestionRun:
 class IndexCommit:
     advanced: bool
     activated: bool
+
+
+@dataclass(frozen=True, slots=True)
+class DeletedBuildTarget:
+    document_id: UUID
+    workspace_id: UUID
+    kb_id: UUID
+    index_version: int
+    vector_binding: BindingRef
+    embedding_dim: int
+    metric: str
 
 
 _T = TypeVar("_T")
@@ -88,6 +128,35 @@ class IndexMutationGuard:
 
     async def commit(self, count: int) -> IndexCommit:
         return await self._commit_indexed(count)
+
+
+@dataclass(frozen=True, slots=True)
+class DeletedIndexMutationGuard:
+    target: DeletedBuildTarget
+    _before_external: Callable[[], Awaitable[float]]
+    _commit_deleted: Callable[[], Awaitable[IndexCommit]]
+
+    async def apply(self, operation: Callable[[], Awaitable[_T]]) -> _T:
+        remaining = await self._before_external()
+        async with asyncio.timeout(remaining):
+            return await operation()
+
+    async def commit(self) -> IndexCommit:
+        return await self._commit_deleted()
+
+
+@dataclass(frozen=True, slots=True)
+class ChunkReembedMutationGuard:
+    _before_external: Callable[[], Awaitable[float]]
+    _commit_applied: Callable[[int], Awaitable[None]]
+
+    async def apply(self, operation: Callable[[], Awaitable[_T]]) -> _T:
+        remaining = await self._before_external()
+        async with asyncio.timeout(remaining):
+            return await operation()
+
+    async def commit(self, actual_token_count: int) -> None:
+        await self._commit_applied(actual_token_count)
 
 
 class CatalogIngestionFacade:
@@ -186,6 +255,8 @@ class CatalogIngestionFacade:
             kb = await self._repo.get_kb(session, run.kb_id)
             if kb is None:
                 return None
+            version = await self._repo.get_index_version(session, run.kb_id, run.index_version)
+            version_config = _load_version_config(version)
             object_binding = await self._repo.get_binding(session, kb.object_binding_id)
             vector_binding = await self._repo.get_binding(session, kb.vector_binding_id)
             if object_binding is None or vector_binding is None:
@@ -221,6 +292,7 @@ class CatalogIngestionFacade:
                 document,
                 run,
                 kb,
+                version_config,
                 _binding_ref(object_binding),
                 _binding_ref(vector_binding),
                 previous_key,
@@ -281,6 +353,166 @@ class CatalogIngestionFacade:
                 run.active_index_version,
             )
         return {row.ordinal: (row.content, row.content_hash) for row in rows}
+
+    async def load_chunk_reembed(self, context: TaskContext) -> ChunkReembedTarget | None:
+        identity = _chunk_reembed_identity(context)
+        if identity is None or context.kb_id is None or context.document_id is None:
+            return None
+        chunk_id, revision, index_version, content_hash, edit_generation = identity
+        async with session_scope() as session:
+            document = await self._repo.get_document(session, context.document_id)
+            run = await self._repo.get_document_ingestion(
+                session, context.document_id, revision, index_version
+            )
+            kb = await self._repo.get_kb(session, context.kb_id)
+            version = await self._repo.get_index_version(session, context.kb_id, index_version)
+            chunk = await self._repo.get_chunk(session, context.kb_id, chunk_id)
+            if (
+                document is None
+                or document.deleted_at is not None
+                or document.state == "deleting"
+                or run is None
+                or run.state != "indexed"
+                or kb is None
+                or kb.workspace_id != context.workspace_id
+                or kb.status in {"deleting", "archived"}
+                or kb.active_index_version != index_version
+                or version is None
+                or version.state != "active"
+                or chunk is None
+                or chunk.workspace_id != context.workspace_id
+                or chunk.document_id != context.document_id
+                or chunk.index_version != index_version
+                or chunk.content_hash != content_hash
+                or chunk.edit_generation != edit_generation
+                or not chunk.is_edited
+                or chunk.chunk_metadata.get("embed", True) is False
+                or document.workspace_id != context.workspace_id
+                or document.kb_id != context.kb_id
+                or document.revision != revision
+                or document.content_hash != run.source_content_hash
+                or run.kb_id != context.kb_id
+            ):
+                return None
+            binding = await self._repo.get_binding(session, kb.vector_binding_id)
+            if (
+                binding is None
+                or binding.workspace_id != context.workspace_id
+                or binding.kind != "vector"
+            ):
+                return None
+            return _chunk_reembed_target(
+                document,
+                chunk,
+                _load_version_config(version),
+                _binding_ref(binding),
+            )
+
+    @asynccontextmanager
+    async def chunk_reembed_mutation(
+        self,
+        context: TaskContext,
+        expected: ChunkReembedTarget,
+        *,
+        timeout_s: float = 30.0,
+    ) -> AsyncIterator[ChunkReembedMutationGuard]:
+        identity = _chunk_reembed_identity(context)
+        expected_identity = (
+            expected.chunk_id,
+            expected.revision,
+            expected.index_version,
+            expected.content_hash,
+            expected.edit_generation,
+        )
+        if (
+            identity != expected_identity
+            or context.kb_id != expected.kb_id
+            or context.document_id != expected.document_id
+            or context.workspace_id != expected.workspace_id
+        ):
+            raise IngestionOwnershipError()
+        await context.heartbeat()
+        async with asyncio.timeout(timeout_s), transaction() as session:
+            document = await self._repo.get_document(session, expected.document_id, for_update=True)
+            run = await self._repo.get_document_ingestion(
+                session,
+                expected.document_id,
+                expected.revision,
+                expected.index_version,
+                for_update=True,
+            )
+            kb = await self._repo.get_kb(session, expected.kb_id, for_update=True)
+            version = await self._repo.get_index_version(
+                session, expected.kb_id, expected.index_version, for_update=True
+            )
+            chunk = await self._repo.get_chunk(
+                session, expected.kb_id, expected.chunk_id, for_update=True
+            )
+            if (
+                document is None
+                or document.deleted_at is not None
+                or document.state == "deleting"
+                or run is None
+                or run.state != "indexed"
+                or kb is None
+                or kb.workspace_id != expected.workspace_id
+                or kb.status in {"deleting", "archived"}
+                or kb.active_index_version != expected.index_version
+                or version is None
+                or version.state != "active"
+                or chunk is None
+                or chunk.workspace_id != expected.workspace_id
+                or chunk.document_id != expected.document_id
+                or chunk.index_version != expected.index_version
+                or chunk.content != expected.content
+                or chunk.content_hash != expected.content_hash
+                or chunk.edit_generation != expected.edit_generation
+                or chunk.parent_id != expected.parent_id
+                or chunk.chunk_metadata != expected.metadata
+                or not chunk.is_edited
+                or chunk.chunk_metadata.get("embed", True) is False
+                or document.workspace_id != expected.workspace_id
+                or document.kb_id != expected.kb_id
+                or document.revision != expected.revision
+                or document.content_hash != run.source_content_hash
+                or run.kb_id != expected.kb_id
+            ):
+                raise IngestionOwnershipError()
+            version_config = _load_version_config(version)
+            binding = await self._repo.get_binding(session, kb.vector_binding_id)
+            if (
+                version_config.embedding_model != expected.embedding_model
+                or version_config.metric != expected.metric
+                or binding is None
+                or binding.workspace_id != expected.workspace_id
+                or binding.kind != "vector"
+                or binding.id != expected.vector_binding.id
+                or binding.driver != expected.vector_binding.driver
+                or dict(binding.config or {}) != expected.vector_binding.config
+            ):
+                raise IngestionOwnershipError()
+
+            async def before_external() -> float:
+                await context.heartbeat()
+                return await self._owned_lease_budget(session, context, timeout_s)
+
+            async def commit(actual_token_count: int) -> None:
+                await context.heartbeat()
+                await self._owned_lease_budget(session, context, timeout_s)
+                if actual_token_count < 0:
+                    raise ValidationFailed("The measured chunk token count is invalid.")
+                chunk.token_count = actual_token_count
+                chunk.reembed_applied_generation = expected.edit_generation
+                await session.flush()
+                document.token_count = await self._repo.sum_document_tokens(
+                    session,
+                    expected.kb_id,
+                    expected.document_id,
+                    expected.index_version,
+                )
+
+            await self._owned_lease_budget(session, context, timeout_s)
+            yield ChunkReembedMutationGuard(before_external, commit)
 
     async def commit_chunked(
         self,
@@ -424,6 +656,101 @@ class CatalogIngestionFacade:
             await self._tasks.lock_owned_task(session, context)
             return await self._commit_indexed(session, context, verified_point_count)
 
+    async def is_deleted_activation_publication_retry(self, context: TaskContext) -> bool:
+        identity = _deleted_identity(context)
+        if identity is None:
+            return False
+        document_id, index_version = identity
+        async with transaction() as session:
+            await self._tasks.lock_owned_task(session, context)
+            document = await self._repo.get_document(session, document_id)
+            kb = await self._repo.get_kb(session, context.kb_id) if context.kb_id else None
+            version = (
+                await self._repo.get_index_version(session, context.kb_id, index_version)
+                if context.kb_id
+                else None
+            )
+            return bool(
+                document is not None
+                and document.deleted_at is not None
+                and document.workspace_id == context.workspace_id
+                and document.kb_id == context.kb_id
+                and kb is not None
+                and kb.workspace_id == context.workspace_id
+                and kb.active_index_version == index_version
+                and version is not None
+                and version.state == "active"
+                and version.enrollment_state == "complete"
+            )
+
+    @asynccontextmanager
+    async def deleted_index_mutation(
+        self, context: TaskContext, *, timeout_s: float = 30.0
+    ) -> AsyncIterator[DeletedIndexMutationGuard]:
+        identity = _deleted_identity(context)
+        if identity is None or context.kb_id is None:
+            raise IngestionOwnershipError()
+        document_id, index_version = identity
+        await context.heartbeat()
+        async with asyncio.timeout(timeout_s), transaction() as session:
+            document = await self._repo.get_document(session, document_id, for_update=True)
+            if (
+                document is None
+                or document.deleted_at is None
+                or document.state != "deleting"
+                or document.workspace_id != context.workspace_id
+                or document.kb_id != context.kb_id
+            ):
+                raise IngestionOwnershipError()
+            kb = await self._repo.get_kb(session, context.kb_id, for_update=True)
+            if kb is None or kb.building_index_version != index_version:
+                raise IngestionOwnershipError()
+            version = await self._repo.get_index_version(
+                session, context.kb_id, index_version, for_update=True
+            )
+            binding = await self._repo.get_binding(session, kb.vector_binding_id)
+            if (
+                version is None
+                or version.state != "building"
+                or binding is None
+                or binding.workspace_id != context.workspace_id
+                or binding.kind != "vector"
+            ):
+                raise IngestionOwnershipError()
+            version_config = _load_version_config(version)
+            embedding_dim = version_config.embedding_model.dimension
+            if embedding_dim is None:
+                raise IngestionOwnershipError()
+            target = DeletedBuildTarget(
+                document_id=document_id,
+                workspace_id=context.workspace_id,
+                kb_id=context.kb_id,
+                index_version=index_version,
+                vector_binding=_binding_ref(binding),
+                embedding_dim=embedding_dim,
+                metric=version_config.metric,
+            )
+
+            async def before_external() -> float:
+                return await self._owned_lease_budget(session, context, timeout_s)
+
+            async def commit() -> IndexCommit:
+                await self._owned_lease_budget(session, context, timeout_s)
+                await self._repo.clear_document_version_chunks(
+                    session, target.kb_id, document_id, index_version
+                )
+                activated = await activate_build_if_ready(
+                    session,
+                    kb=kb,
+                    version=version,
+                    repository=self._repo,
+                    tasks=self._tasks,
+                )
+                return IndexCommit(advanced=True, activated=activated)
+
+            await self._owned_lease_budget(session, context, timeout_s)
+            yield DeletedIndexMutationGuard(target, before_external, commit)
+
     async def _commit_indexed(
         self, session: AsyncSession, context: TaskContext, verified_point_count: int
     ) -> IndexCommit:
@@ -454,24 +781,17 @@ class CatalogIngestionFacade:
             await self._repo.set_index_progress(
                 session, run.kb_id, run.index_version, done=done, total=total
             )
-            if await self._repo.pending_ingestions(session, run.kb_id, run.index_version) == 0:
-                previous = kb.active_index_version
-                kb.active_index_version = run.index_version
-                kb.building_index_version = None
-                kb.status = "active"
-                kb.config_version += 1
-                kb.chunk_count = total
-                kb.last_indexed_at = utcnow()
-                await self._repo.set_index_state(session, run.kb_id, run.index_version, "active")
-                if previous is not None and previous != run.index_version:
-                    await self._repo.set_index_state(
-                        session,
-                        run.kb_id,
-                        previous,
-                        "retired",
-                        retire_after=utcnow() + timedelta(hours=24),
-                    )
-                activated = True
+            version = await self._repo.get_index_version(
+                session, run.kb_id, run.index_version, for_update=True
+            )
+            if version is not None:
+                activated = await activate_build_if_ready(
+                    session,
+                    kb=kb,
+                    version=version,
+                    repository=self._repo,
+                    tasks=self._tasks,
+                )
         return IndexCommit(advanced=True, activated=activated)
 
     async def record_failure(
@@ -605,6 +925,15 @@ def _identity(context: TaskContext) -> tuple[UUID, int, int] | None:
     return context.document_id, revision, index_version
 
 
+def _deleted_identity(context: TaskContext) -> tuple[UUID, int] | None:
+    if context.document_id is None or context.kb_id is None:
+        return None
+    index_version = context.payload.get("index_version")
+    if type(index_version) is not int or index_version < 1:
+        return None
+    return context.document_id, index_version
+
+
 def _next_task(context: TaskContext, *, queue: str, kind: str) -> TaskSpec:
     assert context.document_id is not None and context.kb_id is not None
     revision = int(context.payload["revision"])
@@ -632,10 +961,36 @@ def _binding_ref(binding: StorageBinding) -> BindingRef:
     )
 
 
+def _chunk_reembed_target(
+    document: Document,
+    chunk: Chunk,
+    version_config: IndexVersionConfig,
+    vector_binding: BindingRef,
+) -> ChunkReembedTarget:
+    return ChunkReembedTarget(
+        workspace_id=document.workspace_id,
+        kb_id=document.kb_id,
+        document_id=document.id,
+        chunk_id=chunk.id,
+        revision=document.revision,
+        index_version=chunk.index_version,
+        edit_generation=chunk.edit_generation,
+        reembed_applied_generation=chunk.reembed_applied_generation,
+        content=chunk.content,
+        content_hash=chunk.content_hash,
+        parent_id=chunk.parent_id,
+        metadata=chunk.chunk_metadata,
+        embedding_model=version_config.embedding_model,
+        metric=version_config.metric,
+        vector_binding=vector_binding,
+    )
+
+
 def _run_view(
     document: Document,
     run: DocumentIngestion,
     kb: KnowledgeBase,
+    version_config: IndexVersionConfig,
     object_binding: BindingRef,
     vector_binding: BindingRef,
     previous_key: str | None,
@@ -653,12 +1008,10 @@ def _run_view(
         object_key=document.object_key,
         mime_type=document.mime_type,
         source_url=document.source_ref if document.source_type == "crawl" else None,
-        chunk_config=ChunkConfig.model_validate(kb.chunk_config or {}),
-        embedding_model_id=kb.embedding_model_id,
-        embedding_dim=kb.embedding_dim,
-        metric=kb.metric,
+        version_config=version_config,
         object_binding=object_binding,
         vector_binding=vector_binding,
+        prior_parsed_object_key=run.prior_parsed_object_key,
         parsed_object_key=run.parsed_object_key,
         chunks_object_key=run.chunks_object_key,
         embeddings_object_key=run.embeddings_object_key,
@@ -668,3 +1021,55 @@ def _run_view(
         active_index_version=kb.active_index_version,
         building_index_version=kb.building_index_version,
     )
+
+
+def _load_version_config(row: KbIndexVersion | None) -> IndexVersionConfig:
+    if row is None or row.snapshot_unavailable or row.config_snapshot is None:
+        raise ValidationFailed(
+            "The ingestion target has no proven version snapshot; a fresh rebuild is required."
+        )
+    try:
+        return IndexVersionConfig.model_validate(row.config_snapshot)
+    except ValueError as exc:
+        raise ValidationFailed(
+            "The ingestion target version snapshot is invalid; a fresh rebuild is required."
+        ) from exc
+
+
+def _chunk_reembed_identity(
+    context: TaskContext,
+) -> tuple[UUID, int, int, str, int] | None:
+    if context.kind != "chunk.reembed":
+        return None
+    payload = context.payload
+    raw_chunk_id = payload.get("chunk_id")
+    raw_revision = payload.get("revision")
+    raw_index_version = payload.get("index_version")
+    raw_content_hash = payload.get("content_hash")
+    raw_edit_generation = payload.get("edit_generation")
+    if (
+        not isinstance(raw_chunk_id, str)
+        or type(raw_revision) is not int
+        or type(raw_index_version) is not int
+        or not isinstance(raw_content_hash, str)
+        or type(raw_edit_generation) is not int
+    ):
+        return None
+    try:
+        chunk_id = UUID(raw_chunk_id)
+    except (ValueError, AttributeError):
+        return None
+    revision = raw_revision
+    index_version = raw_index_version
+    content_hash = raw_content_hash
+    edit_generation = raw_edit_generation
+    if (
+        revision <= 0
+        or index_version <= 0
+        or edit_generation <= 0
+        or not isinstance(content_hash, str)
+        or len(content_hash) != 64
+        or any(char not in "0123456789abcdef" for char in content_hash)
+    ):
+        return None
+    return chunk_id, revision, index_version, content_hash, edit_generation

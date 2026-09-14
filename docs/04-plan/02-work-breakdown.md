@@ -30,6 +30,29 @@ See the [lifecycle acceptance package](16-lifecycle-acceptance-plan.md) for unim
 rebuild, manual re-embedding and retirement. Neither this note nor a passing normal-path test
 marks M07 or the knowledge-base end-to-end gate complete.
 
+**2026-09-09 lifecycle slice 1:** the two September 8 rebuild regressions are repaired. Version-owned
+registered model/metric/chunk snapshots, safe unavailable-provenance legacy migration and durable
+monotonic allocation passed coordinator review and 86 focused tests. Expanded backend: 703 passed,
+2 PDF/OCR collection errors, no assertion failures/skips, coverage84.83%. See
+[snapshot implementation and limits](17-version-snapshot-implementation.md). Full fan-out,
+reembedding, recovery and retirement are not implemented; the next slice is described in
+[follow-up review](18-lifecycle-followup-review.md). No M07/E2E completion mark is added.
+
+**2026-09-10 lifecycle slice2:** bounded resumable reindex fan-out and enrollment/coverage barriers
+are independently accepted, including build-scoped deletion across source revisions and parse
+artifact reuse/fallback. Explicit real-rebuild activation cannot bypass the worker barrier. Final
+backend: 734 passed, 2 PDF/OCR collection errors, no assertion failures/skips, coverage85.05%;
+40 focused coordinator tests passed. See [fan-out journal](19-reindex-fanout-implementation.md).
+Next: manual chunk reembedding, then general recovery/purge/retirement/cache ordering. No overall
+M07/E2E completion mark is added and legacy/operator limits remain documented.
+
+**2026-09-14 lifecycle slice3:** manual chunk reembedding independently accepted: generation/
+revision/hash/version fencing, one-point exact updates, token budget before provider, parent
+context-only behavior, guarded stale/race handling and post-upsert retry. Parent101 focused tests
+passed; full backend761 passed,2 PDF/OCR collection errors,no assertion failures/skips,coverage85.18%.
+See [manual reembedding journal](20-chunk-reembed-implementation.md). Next is durable failed-stage
+recovery, then general purge/retirement/cache ordering; no M07/E2E completion mark is added.
+
 ---
 
 ## How to use this document

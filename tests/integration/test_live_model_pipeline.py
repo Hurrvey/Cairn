@@ -10,11 +10,16 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import text
-from tests.integration.test_ingestion_pipeline import _execute_pipeline, pipeline_admin
+from tests.integration.test_ingestion_pipeline import (
+    _execute_one,
+    _execute_pipeline,
+    pipeline_admin,
+)
 
+from apps.worker.main import build_worker
 from cairn.authz.model import Principal
 from cairn.catalog.config import ChunkConfig, ChunkStrategy
-from cairn.catalog.dto import CreateKbSpec, UploadSpec
+from cairn.catalog.dto import CreateKbSpec, ReindexSpec, UploadSpec
 from cairn.catalog.ingestion import CatalogIngestionFacade
 from cairn.catalog.service import CatalogService
 from cairn.core.cache import get_cache
@@ -124,7 +129,7 @@ async def test_live_model_runtime_indexes_and_replaces_document(
         assert (await catalog.get_kb(kb.id)).active_index_version == 1
         vector_store = PgVectorStore(get_engine())
         namespace = Namespace(kb.id, 1)
-        prepared = await runtime.embedding_for(model.id)
+        prepared = await runtime.embedding_for(await models.get_ref(model.id))
         query = await prepared.service.embed_query(prepared.model, "Which planet has icy rings?")
         assert query.dim == 384 and math.isclose(math.hypot(*query.values), 1, abs_tol=1e-6)
         hits = await vector_store.search(namespace, VectorQuery(dense=query.values, top_k=3))
@@ -163,6 +168,40 @@ async def test_live_model_runtime_indexes_and_replaces_document(
         )
         assert ocean_hits and "Pacific" in ocean_hits[0].content
         assert all("Saturn" not in hit.content for hit in ocean_hits)
+        monkeypatch.setattr("cairn.ingestion.runtime.get_pipeline_runtime", lambda: runtime)
+        await catalog.start_reindex(pipeline_admin, kb.id, ReindexSpec(confirm=True))
+        workers = [
+            build_worker(queue) for queue in ("maintain", "parse", "chunk", "embed", "index")
+        ]
+        for _attempt in range(20):
+            for worker in workers:
+                for row in await worker._claim_batch():
+                    await worker._execute(row)
+            if (await catalog.get_kb(kb.id)).active_index_version == 2:
+                break
+        rebuilt = await catalog.publish_runtime(kb.id)
+        assert rebuilt is not None and rebuilt.index_version == 2
+        assert rebuilt.embedding_model.id == model.id
+        assert rebuilt.embedding_model.dimension == 384
+        rebuilt_hits = await vector_store.search(
+            Namespace(kb.id, 2), VectorQuery(dense=ocean_query.values, top_k=3)
+        )
+        assert rebuilt_hits and "Pacific" in rebuilt_hits[0].content
+        assert all("Saturn" not in hit.content for hit in rebuilt_hits)
+        assert {hit.id for hit in rebuilt_hits}.isdisjoint(hit.id for hit in ocean_hits)
+        manual_text = "The Mariana Trench lies in the western Pacific Ocean."
+        await catalog.edit_chunk(pipeline_admin, kb.id, rebuilt_hits[0].id, manual_text)
+        await _execute_one(build_worker("embed"))
+        edited_points = await vector_store.fetch(Namespace(kb.id, 2), [rebuilt_hits[0].id])
+        assert len(edited_points) == 1 and edited_points[0].content == manual_text
+        assert edited_points[0].payload["content_hash"] == sha256(manual_text.encode()).hexdigest()
+        trench_query = await prepared.service.embed_query(
+            prepared.model, "Where is the Mariana Trench?"
+        )
+        manual_hits = await vector_store.search(
+            Namespace(kb.id, 2), VectorQuery(dense=trench_query.values, top_k=3)
+        )
+        assert manual_hits and "Mariana Trench" in manual_hits[0].content
     finally:
         await runtime.close()
         get_ingestion_runtime_settings.cache_clear()

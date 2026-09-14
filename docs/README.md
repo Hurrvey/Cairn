@@ -105,6 +105,10 @@ acceptance criteria.
 | [13-ingestion-completion-coordination.md](04-plan/13-ingestion-completion-coordination.md) | Serial worker ownership and acceptance rules |
 | [15-execution-ledger.md](04-plan/15-execution-ledger.md) | **Current restart point: step log, accepted scope, failures, resources and next action** |
 | [16-lifecycle-acceptance-plan.md](04-plan/16-lifecycle-acceptance-plan.md) | Pending rebuild/re-embed/retry/retirement package and regression matrix |
+| [17-version-snapshot-implementation.md](04-plan/17-version-snapshot-implementation.md) | Version-owned model/configuration snapshots, safe legacy migration and allocation evidence |
+| [18-lifecycle-followup-review.md](04-plan/18-lifecycle-followup-review.md) | Historical source review; accepted fan-out is tracked in document19, later lifecycle gaps remain |
+| [19-reindex-fanout-implementation.md](04-plan/19-reindex-fanout-implementation.md) | Resumable fan-out, activation/deletion barriers, replay and artifact-reuse evidence |
+| [20-chunk-reembed-implementation.md](04-plan/20-chunk-reembed-implementation.md) | Manual chunk reembedding, edit-generation fencing, exact token/payload validation and retry evidence |
 
 ### 05 — Quality
 

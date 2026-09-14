@@ -6,6 +6,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import delete, exists, func, insert, select, text, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cairn.catalog.models import (
@@ -36,7 +37,7 @@ class CatalogRepository:
             KnowledgeBase.id == kb_id, KnowledgeBase.deleted_at.is_(None)
         )
         if for_update:
-            stmt = stmt.with_for_update()
+            stmt = stmt.with_for_update().execution_options(populate_existing=True)
         kb: KnowledgeBase | None = await session.scalar(stmt)
         return kb
 
@@ -143,7 +144,7 @@ class CatalogRepository:
             KbIndexVersion.kb_id == kb_id, KbIndexVersion.version == version
         )
         if for_update:
-            stmt = stmt.with_for_update()
+            stmt = stmt.with_for_update().execution_options(populate_existing=True)
         row: KbIndexVersion | None = await session.scalar(stmt)
         return row
 
@@ -227,7 +228,7 @@ class CatalogRepository:
     ) -> Document | None:
         stmt = select(Document).where(Document.id == doc_id)
         if for_update:
-            stmt = stmt.with_for_update()
+            stmt = stmt.with_for_update().execution_options(populate_existing=True)
         document: Document | None = await session.scalar(stmt)
         return document
 
@@ -238,6 +239,111 @@ class CatalogRepository:
             select(Document).where(Document.kb_id == kb_id, Document.content_hash == content_hash)
         )
         return document
+
+    async def fanout_document_ids(
+        self,
+        session: AsyncSession,
+        kb_id: UUID,
+        *,
+        after: UUID | None,
+        limit: int,
+    ) -> list[UUID]:
+        stmt = select(Document.id).where(
+            Document.kb_id == kb_id,
+            Document.deleted_at.is_(None),
+            Document.state != "deleting",
+        )
+        if after is not None:
+            stmt = stmt.where(Document.id > after)
+        return list((await session.scalars(stmt.order_by(Document.id).limit(limit))).all())
+
+    async def missing_enrollment_document_ids(
+        self,
+        session: AsyncSession,
+        kb_id: UUID,
+        index_version: int,
+        *,
+        limit: int,
+    ) -> list[UUID]:
+        rows = await session.scalars(
+            select(Document.id)
+            .where(
+                Document.kb_id == kb_id,
+                Document.deleted_at.is_(None),
+                Document.state != "deleting",
+                ~exists().where(
+                    DocumentIngestion.document_id == Document.id,
+                    DocumentIngestion.revision == Document.revision,
+                    DocumentIngestion.kb_id == kb_id,
+                    DocumentIngestion.index_version == index_version,
+                    DocumentIngestion.source_content_hash == Document.content_hash,
+                ),
+            )
+            .order_by(Document.id)
+            .limit(limit)
+        )
+        return list(rows.all())
+
+    async def lock_documents(
+        self, session: AsyncSession, document_ids: list[UUID]
+    ) -> list[Document]:
+        if not document_ids:
+            return []
+        rows = await session.scalars(
+            select(Document)
+            .where(Document.id.in_(document_ids))
+            .order_by(Document.id)
+            .with_for_update()
+        )
+        return list(rows.all())
+
+    async def enroll_document_ingestion(
+        self, session: AsyncSession, run: DocumentIngestion
+    ) -> bool:
+        result = await session.execute(
+            pg_insert(DocumentIngestion)
+            .values(
+                document_id=run.document_id,
+                revision=run.revision,
+                kb_id=run.kb_id,
+                index_version=run.index_version,
+                source_content_hash=run.source_content_hash,
+                state="registered",
+                prior_parsed_object_key=run.prior_parsed_object_key,
+            )
+            .on_conflict_do_nothing(
+                index_elements=[
+                    DocumentIngestion.document_id,
+                    DocumentIngestion.revision,
+                    DocumentIngestion.index_version,
+                ]
+            )
+            .returning(DocumentIngestion.document_id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def reusable_parsed_object_key(
+        self,
+        session: AsyncSession,
+        document_id: UUID,
+        revision: int,
+        source_content_hash: str,
+        *,
+        exclude_index_version: int,
+    ) -> str | None:
+        return await session.scalar(
+            select(DocumentIngestion.parsed_object_key)
+            .where(
+                DocumentIngestion.document_id == document_id,
+                DocumentIngestion.revision == revision,
+                DocumentIngestion.source_content_hash == source_content_hash,
+                DocumentIngestion.index_version != exclude_index_version,
+                DocumentIngestion.parsed_object_key.is_not(None),
+                DocumentIngestion.state.in_(("parsed", "chunked", "embedded", "indexed")),
+            )
+            .order_by(DocumentIngestion.updated_at.desc())
+            .limit(1)
+        )
 
     async def add_document_ingestion(
         self, session: AsyncSession, run: DocumentIngestion
@@ -261,7 +367,7 @@ class CatalogRepository:
             DocumentIngestion.index_version == index_version,
         )
         if for_update:
-            stmt = stmt.with_for_update()
+            stmt = stmt.with_for_update().execution_options(populate_existing=True)
         row: DocumentIngestion | None = await session.scalar(stmt)
         return row
 
@@ -318,6 +424,26 @@ class CatalogRepository:
         await session.execute(insert(Chunk), rows)
         return len(rows)
 
+    async def clear_document_version_chunks(
+        self, session: AsyncSession, kb_id: UUID, document_id: UUID, index_version: int
+    ) -> None:
+        await session.execute(
+            delete(Chunk).where(
+                Chunk.kb_id == kb_id,
+                Chunk.document_id == document_id,
+                Chunk.index_version == index_version,
+            )
+        )
+        await session.execute(
+            update(DocumentIngestion)
+            .where(
+                DocumentIngestion.document_id == document_id,
+                DocumentIngestion.kb_id == kb_id,
+                DocumentIngestion.index_version == index_version,
+            )
+            .values(point_count=0)
+        )
+
     async def list_chunks(
         self,
         session: AsyncSession,
@@ -354,6 +480,21 @@ class CatalogRepository:
             ).all()
         )
 
+    async def has_document_version_chunks(
+        self, session: AsyncSession, kb_id: UUID, document_id: UUID, index_version: int
+    ) -> bool:
+        return bool(
+            await session.scalar(
+                select(
+                    exists().where(
+                        Chunk.kb_id == kb_id,
+                        Chunk.document_id == document_id,
+                        Chunk.index_version == index_version,
+                    )
+                )
+            )
+        )
+
     async def pending_ingestions(
         self, session: AsyncSession, kb_id: UUID, index_version: int
     ) -> int:
@@ -369,6 +510,60 @@ class CatalogRepository:
                     DocumentIngestion.kb_id == kb_id,
                     DocumentIngestion.index_version == index_version,
                     DocumentIngestion.state.not_in(("indexed", "failed")),
+                )
+            )
+            or 0
+        )
+
+    async def live_document_count(self, session: AsyncSession, kb_id: UUID) -> int:
+        return int(
+            await session.scalar(
+                select(func.count(Document.id)).where(
+                    Document.kb_id == kb_id,
+                    Document.deleted_at.is_(None),
+                    Document.state != "deleting",
+                )
+            )
+            or 0
+        )
+
+    async def has_document_history(self, session: AsyncSession, kb_id: UUID) -> bool:
+        return bool(await session.scalar(select(exists().where(Document.kb_id == kb_id))))
+
+    async def missing_current_ingestions(
+        self, session: AsyncSession, kb_id: UUID, index_version: int
+    ) -> int:
+        return int(
+            await session.scalar(
+                select(func.count(Document.id)).where(
+                    Document.kb_id == kb_id,
+                    Document.deleted_at.is_(None),
+                    Document.state != "deleting",
+                    ~exists().where(
+                        DocumentIngestion.document_id == Document.id,
+                        DocumentIngestion.revision == Document.revision,
+                        DocumentIngestion.kb_id == kb_id,
+                        DocumentIngestion.index_version == index_version,
+                        DocumentIngestion.source_content_hash == Document.content_hash,
+                        DocumentIngestion.state == "indexed",
+                    ),
+                )
+            )
+            or 0
+        )
+
+    async def deleted_target_point_count(
+        self, session: AsyncSession, kb_id: UUID, index_version: int
+    ) -> int:
+        return int(
+            await session.scalar(
+                select(func.count(Chunk.id))
+                .join(Document, Document.id == Chunk.document_id)
+                .where(
+                    Chunk.kb_id == kb_id,
+                    Chunk.index_version == index_version,
+                    Chunk.chunk_metadata["embed"].as_boolean().is_not(False),
+                    (Document.deleted_at.is_not(None)) | (Document.state == "deleting"),
                 )
             )
             or 0
@@ -395,7 +590,7 @@ class CatalogRepository:
     ) -> Chunk | None:
         stmt = select(Chunk).where(Chunk.kb_id == kb_id, Chunk.id == chunk_id)
         if for_update:
-            stmt = stmt.with_for_update()
+            stmt = stmt.with_for_update().execution_options(populate_existing=True)
         chunk: Chunk | None = await session.scalar(stmt)
         return chunk
 
@@ -440,6 +635,22 @@ class CatalogRepository:
         total = await session.scalar(
             select(func.coalesce(func.sum(Chunk.token_count), 0)).where(
                 Chunk.kb_id == kb_id, Chunk.index_version == index_version
+            )
+        )
+        return int(total or 0)
+
+    async def sum_document_tokens(
+        self,
+        session: AsyncSession,
+        kb_id: UUID,
+        document_id: UUID,
+        index_version: int,
+    ) -> int:
+        total = await session.scalar(
+            select(func.coalesce(func.sum(Chunk.token_count), 0)).where(
+                Chunk.kb_id == kb_id,
+                Chunk.document_id == document_id,
+                Chunk.index_version == index_version,
             )
         )
         return int(total or 0)

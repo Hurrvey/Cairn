@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 
+from cairn.core.errors import ValidationFailed
 from cairn.core.modelref import ModelRef
 from cairn.embedding.errors import TokenizerUnavailable
 from cairn.embedding.tokenizers import TokenizerRegistry
@@ -115,7 +116,7 @@ async def test_tokenizer_is_validated_before_provider_is_opened(
     runtime = _build_runtime(monkeypatch, _Models(ref), tokenizer=False)
 
     with pytest.raises(TokenizerUnavailable):
-        await runtime.embedding_for(ref.model.id)
+        await runtime.embedding_for(ref.model)
 
     assert _Provider.instances == []
 
@@ -129,7 +130,7 @@ async def test_provider_startup_failure_is_closed(
     _Provider.fail_enter = True
 
     with pytest.raises(RuntimeError, match="provider startup failed"):
-        await runtime.embedding_for(ref.model.id)
+        await runtime.embedding_for(ref.model)
 
     assert len(_Provider.instances) == 1
     assert _Provider.instances[0].closed
@@ -145,7 +146,7 @@ async def test_concurrent_resolution_opens_one_provider(
     _Provider.enter_delay = 0.05
 
     first, second = await asyncio.gather(
-        runtime.embedding_for(ref.model.id), runtime.embedding_for(ref.model.id)
+        runtime.embedding_for(ref.model), runtime.embedding_for(ref.model)
     )
 
     assert first is second
@@ -162,13 +163,13 @@ async def test_runtime_cache_tracks_config_without_closing_inflight_generation(
     models = _Models(first_ref)
     runtime = _build_runtime(monkeypatch, models)
 
-    first = await runtime.embedding_for(first_ref.model.id)
+    first = await runtime.embedding_for(first_ref.model)
     models.runtime = replace(
         first_ref,
         model=replace(first_ref.model, model_key="runtime-test-v2"),
         config={"binding_revision": "r1", "deployment": {"name": "green"}},
     )
-    second = await runtime.embedding_for(first_ref.model.id)
+    second = await runtime.embedding_for(models.runtime.model)
 
     assert first is not second
     assert first.binding_fingerprint != second.binding_fingerprint
@@ -177,3 +178,17 @@ async def test_runtime_cache_tracks_config_without_closing_inflight_generation(
     assert not _Provider.instances[1].closed
     await runtime.close()
     assert all(provider.closed for provider in _Provider.instances)
+
+
+@pytest.mark.anyio
+async def test_registered_model_drift_is_rejected_before_provider_startup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = _runtime_ref()
+    changed = replace(original, model=replace(original.model, tokenizer_id="changed-tokenizer"))
+    runtime = _build_runtime(monkeypatch, _Models(changed))
+
+    with pytest.raises(ValidationFailed, match="snapshot"):
+        await runtime.embedding_for(original.model)
+
+    assert _Provider.instances == []

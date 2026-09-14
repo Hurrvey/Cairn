@@ -318,16 +318,16 @@ def test_chunk_manifest_round_trip_preserves_parent_metadata_and_stale_ids() -> 
 
 
 @pytest.mark.parametrize(
-    ("queue", "kind"),
+    ("queue", "kinds"),
     [
-        ("parse", "document.parse"),
-        ("chunk", "document.chunk"),
-        ("embed", "document.embed"),
-        ("index", "document.index"),
+        ("parse", {"document.parse"}),
+        ("chunk", {"document.chunk"}),
+        ("embed", {"document.embed", "chunk.reembed"}),
+        ("index", {"document.index", "document.reindex_delete"}),
     ],
 )
 def test_worker_startup_registers_pipeline_handler(
-    queue: str, kind: str, monkeypatch: pytest.MonkeyPatch
+    queue: str, kinds: set[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from apps.worker.main import build_worker
     from cairn.core.config import get_settings
@@ -338,4 +338,4 @@ def test_worker_startup_registers_pipeline_handler(
 
     worker = build_worker(queue)
 
-    assert set(worker._handlers) == {kind}
+    assert set(worker._handlers) == kinds

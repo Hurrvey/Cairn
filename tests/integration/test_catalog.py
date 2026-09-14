@@ -592,13 +592,27 @@ async def test_a_chunk_outside_the_active_version_is_not_editable(
     await catalog.start_reindex(admin, kb.id, ReindexSpec(confirm=True))
     await catalog.activate_index_version(kb.id, 1)
     doc_id = await _chunked(catalog, admin, kb.id)
-    chunks = await catalog.list_chunks(kb.id, doc_id, index_version=1)
 
     await catalog.start_reindex(admin, kb.id, ReindexSpec(confirm=True))
-    await catalog.activate_index_version(kb.id, 2)
+    await catalog.replace_chunks(
+        kb.id,
+        doc_id,
+        2,
+        [
+            ChunkSpec(
+                id=uuid4(),
+                document_id=doc_id,
+                ordinal=0,
+                content="building chunk",
+                content_hash="9" * 64,
+                token_count=2,
+            )
+        ],
+    )
+    chunks = await catalog.list_chunks(kb.id, doc_id, index_version=2)
 
     with pytest.raises(ChunkNotEditable):
-        await catalog.edit_chunk(admin, kb.id, chunks[0].id, "too late")
+        await catalog.edit_chunk(admin, kb.id, chunks[0].id, "not active")
 
 
 # --- storage bindings ---------------------------------------------------------

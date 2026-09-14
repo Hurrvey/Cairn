@@ -29,6 +29,7 @@ from cairn.catalog.dto import (
     DocumentRegistration,
     DocumentView,
     IndexProgressView,
+    IndexVersionConfig,
     IndexVersionView,
     KnowledgeBaseRuntime,
     KnowledgeBaseView,
@@ -53,11 +54,13 @@ from cairn.catalog.models import (
     KnowledgeBase,
     StorageBinding,
 )
+from cairn.catalog.reindex import activate_build_if_ready
 from cairn.catalog.repository import CatalogRepository
 from cairn.core.cache import Cache, get_cache
 from cairn.core.db import session_scope, transaction
 from cairn.core.errors import Conflict, NotFound, ValidationFailed
 from cairn.core.logging import get_logger
+from cairn.core.modelref import ModelRef
 from cairn.core.time import utcnow
 from cairn.modelgw.catalog import ModelCatalog, get_model_catalog
 from cairn.platform.audit import AuditService, get_audit_service
@@ -339,17 +342,25 @@ class CatalogService:
             binding = await self._repo.get_binding(session, kb.vector_binding_id)
             if binding is None:  # pragma: no cover — FK guarantees this
                 raise NotFound("Vector binding not found.")
-            snapshot = (kb, binding)
+            version = await self._repo.get_index_version(session, kb.id, kb.active_index_version)
+            snapshot = (kb, binding, version)
 
-        kb, binding = snapshot
+        kb, binding, version = snapshot
+        try:
+            config = _version_config(version)
+        except ValidationFailed:
+            # A pre-migration payload may still be cached. Never leave it
+            # reachable after discovering that provenance is unavailable.
+            await self.invalidate_runtime(kb_id)
+            raise
         runtime = KnowledgeBaseRuntime(
             id=kb.id,
             workspace_id=kb.workspace_id,
             # ACTIVE, never "latest" — this is what stops a query seeing a
             # half-built index during a rebuild.
             index_version=kb.active_index_version,
-            embedding_model=await self._models.get_ref(kb.embedding_model_id),
-            metric=kb.metric,
+            embedding_model=config.embedding_model,
+            metric=config.metric,
             vector_binding=BindingRefModel(
                 id=binding.id, driver=binding.driver, config=dict(binding.config)
             ),
@@ -411,21 +422,32 @@ class CatalogService:
                 raise KbIndexInProgress(
                     f"Index version {kb.building_index_version} is already building."
                 )
+            if (
+                kb.active_index_version is not None
+                and await self._repo.live_document_count(session, kb.id) == 0
+                and await self._repo.has_document_history(session, kb.id)
+            ):
+                raise ValidationFailed("A knowledge base with no live documents cannot be rebuilt.")
 
             before = kb.snapshot()
 
-            # A reindex is the ONLY way to change the embedding model.
-            if spec.embedding_model_id is not None:
-                model = await self._models.require_embedding_model(
-                    actor.workspace_id, spec.embedding_model_id
-                )
-                assert model.dimension is not None
-                kb.embedding_model_id = model.id
-                kb.embedding_dim = model.dimension
+            # A reindex is the ONLY way to change the embedding model. Resolve
+            # the complete ref even when the ID is unchanged so this version
+            # owns all metadata used by its workers.
+            model = await self._models.require_embedding_model(
+                actor.workspace_id, spec.embedding_model_id or kb.embedding_model_id
+            )
+            assert model.dimension is not None
+            # Registry metadata may legitimately have changed under the same
+            # model ID. The desired row and this fresh snapshot must agree.
+            # SQLAlchemy flushes these fields with the new building pointer, so
+            # the ADR-0006 trigger still sees the sanctioned rebuild boundary.
+            kb.embedding_model_id = model.id
+            kb.embedding_dim = model.dimension
             if spec.chunk_config is not None:
                 kb.chunk_config = spec.chunk_config.model_dump(mode="json")
 
-            new_version = (kb.active_index_version or 0) + 1
+            new_version = _allocate_index_version(kb)
             kb.building_index_version = new_version
             kb.status = "indexing"
             kb.config_version += 1
@@ -438,6 +460,10 @@ class CatalogService:
                     workspace_id=kb.workspace_id,
                     state="building",
                     physical_ref=Namespace(kb_id, new_version).key(),
+                    config_snapshot=_capture_version_config(kb, model),
+                    enrollment_state=(
+                        "scanning" if kb.active_index_version is not None else "complete"
+                    ),
                     chunk_total=estimate.chunks,
                 ),
             )
@@ -451,9 +477,9 @@ class CatalogService:
                     kind="kb.reindex_fanout",
                     workspace_id=kb.workspace_id,
                     kb_id=kb_id,
-                    payload={"index_version": new_version},
+                    payload={"index_version": new_version, "enrollment_generation": 0},
                     priority=50,
-                    dedupe_key=f"kb.reindex:{kb_id}:{new_version}",
+                    dedupe_key=f"kb.reindex:{kb_id}:{new_version}:0",
                 ),
             )
             await self._audit.record(
@@ -483,6 +509,9 @@ class CatalogService:
         One transaction, so a request either reads the old index or the new one
         and never a mixture.
         """
+        activated = False
+        abandoned = False
+        retired: int | None = None
         async with transaction() as session:
             kb = await self._repo.get_kb(session, kb_id, for_update=True)
             if kb is None:
@@ -492,40 +521,59 @@ class CatalogService:
                     f"Index version {version} is not the version being built "
                     f"({kb.building_index_version})."
                 )
+            row = await self._repo.get_index_version(session, kb_id, version, for_update=True)
+            _version_config(row)
+            assert row is not None
 
             retired = kb.active_index_version
-            kb.active_index_version = version
-            kb.building_index_version = None
-            kb.status = "active"
-            kb.config_version += 1
-            kb.last_indexed_at = utcnow()
-            kb.chunk_count = await self._repo.count_chunks(session, kb_id, version)
-
-            await self._repo.set_index_state(session, kb_id, version, "active")
-
-            if retired is not None:
-                # Kept briefly so a bad rebuild can be reverted with one UPDATE.
-                await self._repo.set_index_state(
+            is_real_rebuild = retired is not None and await self._repo.has_document_history(
+                session, kb.id
+            )
+            if is_real_rebuild:
+                activated = await activate_build_if_ready(
                     session,
-                    kb_id,
-                    retired,
-                    "retired",
-                    retire_after=utcnow() + _INDEX_RETENTION,
+                    kb=kb,
+                    version=row,
+                    repository=self._repo,
+                    tasks=self._tasks,
                 )
-                await self._tasks.enqueue(
-                    session,
-                    TaskSpec(
-                        queue="maintain",
-                        kind="index.drop",
-                        workspace_id=kb.workspace_id,
-                        kb_id=kb_id,
-                        payload={"index_version": retired},
-                        priority=10,
-                        run_after=utcnow() + _INDEX_RETENTION,
-                        dedupe_key=f"index.drop:{kb_id}:{retired}",
-                    ),
-                )
+                if not activated and kb.building_index_version == version:
+                    raise Conflict(f"Index version {version} is not ready for activation.")
+                abandoned = not activated
+            else:
+                kb.active_index_version = version
+                kb.building_index_version = None
+                kb.status = "active"
+                kb.config_version += 1
+                kb.last_indexed_at = utcnow()
+                kb.chunk_count = await self._repo.count_chunks(session, kb_id, version)
+                await self._repo.set_index_state(session, kb_id, version, "active")
+                activated = True
 
+                if retired is not None:
+                    await self._repo.set_index_state(
+                        session,
+                        kb_id,
+                        retired,
+                        "retired",
+                        retire_after=utcnow() + _INDEX_RETENTION,
+                    )
+                    await self._tasks.enqueue(
+                        session,
+                        TaskSpec(
+                            queue="maintain",
+                            kind="index.drop",
+                            workspace_id=kb.workspace_id,
+                            kb_id=kb_id,
+                            payload={"index_version": retired},
+                            priority=10,
+                            run_after=utcnow() + _INDEX_RETENTION,
+                            dedupe_key=f"index.drop:{kb_id}:{retired}",
+                        ),
+                    )
+
+        if abandoned:
+            raise Conflict(f"Index version {version} was abandoned and was not activated.")
         await self.publish_runtime(kb_id)
         log.info("catalog.index_activated", kb_id=str(kb_id), version=version, retired=retired)
 
@@ -536,6 +584,11 @@ class CatalogService:
             kb = await self._repo.get_kb(session, kb_id, for_update=True)
             if kb is None:  # pragma: no cover
                 return
+            if kb.building_index_version != version:
+                raise Conflict(
+                    f"Index version {version} no longer owns the building pointer "
+                    f"({kb.building_index_version})."
+                )
             kb.building_index_version = None
             kb.status = "active" if kb.active_index_version is not None else "error"
             await self._repo.set_index_state(session, kb_id, version, "failed", error=error[:2000])
@@ -676,7 +729,10 @@ class CatalogService:
             elif kb.active_index_version is not None:
                 index_version = kb.active_index_version
             else:
-                index_version = 1
+                model = await self._models.require_embedding_model(
+                    kb.workspace_id, kb.embedding_model_id
+                )
+                index_version = _allocate_index_version(kb)
                 kb.building_index_version = index_version
                 kb.status = "indexing"
                 await self._repo.add_index_version(
@@ -686,6 +742,8 @@ class CatalogService:
                         version=index_version,
                         workspace_id=kb.workspace_id,
                         state="building",
+                        physical_ref=Namespace(kb.id, index_version).key(),
+                        config_snapshot=_capture_version_config(kb, model),
                     ),
                 )
 
@@ -789,10 +847,14 @@ class CatalogService:
             return await self._repo.count_documents_by_state(session, kb_id)
 
     async def delete_document(self, actor: Principal, doc_id: UUID) -> None:
+        building_cleanup = False
         async with transaction() as session:
             document = await self._repo.get_document(session, doc_id, for_update=True)
             if document is None:
                 raise NotFound("Document not found.")
+            kb = await self._repo.get_kb(session, document.kb_id, for_update=True)
+            if kb is None:
+                raise NotFound("Knowledge base not found.")
 
             before = document.snapshot()
             document.deleted_at = utcnow()
@@ -811,6 +873,27 @@ class CatalogService:
                     dedupe_key=f"document.purge:{doc_id}",
                 ),
             )
+            if kb.building_index_version is not None and (
+                kb.active_index_version is not None
+                or await self._repo.has_document_version_chunks(
+                    session, kb.id, document.id, kb.building_index_version
+                )
+            ):
+                building_cleanup = True
+                await self._tasks.enqueue(
+                    session,
+                    TaskSpec(
+                        queue="index",
+                        kind="document.reindex_delete",
+                        workspace_id=document.workspace_id,
+                        kb_id=document.kb_id,
+                        document_id=doc_id,
+                        payload={"index_version": kb.building_index_version},
+                        dedupe_key=(
+                            f"document.reindex_delete:{doc_id}:{kb.building_index_version}"
+                        ),
+                    ),
+                )
             await self._repo.adjust_counters(
                 session, document.kb_id, docs=-1, bytes_used=-(document.size_bytes or 0)
             )
@@ -824,6 +907,8 @@ class CatalogService:
                 resource_id=doc_id,
                 before=before,
             )
+        if building_cleanup:
+            await self._tasks.notify("index")
 
     async def retry_document(self, actor: Principal, doc_id: UUID) -> None:
         """Re-enqueue a failed document from the parse stage."""
@@ -968,19 +1053,62 @@ class CatalogService:
         if not content.strip():
             raise ValidationFailed("Chunk content cannot be empty.")
 
-        async with transaction() as session:
-            kb = await self._repo.get_kb(session, kb_id)
-            if kb is None:
-                raise NotFound("Knowledge base not found.")
-            chunk = await self._repo.get_chunk(session, kb_id, chunk_id, for_update=True)
-            if chunk is None:
+        async with session_scope() as session:
+            initial = await self._repo.get_chunk(session, kb_id, chunk_id)
+            if initial is None or initial.workspace_id != actor.workspace_id:
                 raise NotFound("Chunk not found.")
-            if chunk.index_version != kb.active_index_version:
-                # Editing a retired or building version would be discarded by
-                # the next switch, which looks like data loss to the user.
+            document_id = initial.document_id
+            index_version = initial.index_version
+
+        notify = False
+        async with transaction() as session:
+            document = await self._repo.get_document(session, document_id, for_update=True)
+            if (
+                document is None
+                or document.deleted_at is not None
+                or document.state == "deleting"
+                or document.workspace_id != actor.workspace_id
+                or document.kb_id != kb_id
+            ):
+                raise NotFound("Chunk not found.")
+            run = await self._repo.get_document_ingestion(
+                session,
+                document.id,
+                document.revision,
+                index_version,
+                for_update=True,
+            )
+            kb = await self._repo.get_kb(session, kb_id, for_update=True)
+            if kb is None or kb.workspace_id != actor.workspace_id:
+                raise NotFound("Chunk not found.")
+            if kb.status in {"deleting", "archived"}:
+                raise ChunkNotEditable("This knowledge base does not accept chunk edits.")
+            version = await self._repo.get_index_version(
+                session, kb_id, index_version, for_update=True
+            )
+            chunk = await self._repo.get_chunk(session, kb_id, chunk_id, for_update=True)
+            if (
+                run is None
+                or version is None
+                or chunk is None
+                or chunk.document_id != document.id
+                or chunk.workspace_id != actor.workspace_id
+                or chunk.index_version != index_version
+                or index_version != kb.active_index_version
+                or version.state != "active"
+            ):
                 raise ChunkNotEditable(
                     "This chunk belongs to an index version that is not active. "
                     "Wait for the current rebuild to finish."
+                )
+            if kb.building_index_version is not None:
+                raise ChunkNotEditable(
+                    "Chunk editing is unavailable while this knowledge base is rebuilding."
+                )
+            if run.state not in {"registered", "parsed", "indexed"}:
+                raise ChunkNotEditable(
+                    "This document is preparing an immutable index artifact. "
+                    "Wait for indexing to finish before editing its chunks."
                 )
 
             from hashlib import sha256
@@ -989,20 +1117,32 @@ class CatalogService:
             chunk.content = content
             chunk.content_hash = sha256(content.encode()).hexdigest()
             chunk.is_edited = True
+            chunk.edit_generation += 1
 
-            await self._tasks.enqueue(
-                session,
-                TaskSpec(
-                    queue="embed",
-                    kind="chunk.reembed",
-                    workspace_id=kb.workspace_id,
-                    kb_id=kb_id,
-                    document_id=chunk.document_id,
-                    payload={"chunk_id": str(chunk_id), "index_version": chunk.index_version},
-                    priority=200,  # a user is waiting to see the effect
-                    dedupe_key=f"reembed:{chunk_id}:{chunk.content_hash}",
-                ),
-            )
+            if run.state == "indexed" and chunk.chunk_metadata.get("embed", True) is not False:
+                await self._tasks.enqueue(
+                    session,
+                    TaskSpec(
+                        queue="embed",
+                        kind="chunk.reembed",
+                        workspace_id=kb.workspace_id,
+                        kb_id=kb_id,
+                        document_id=chunk.document_id,
+                        payload={
+                            "chunk_id": str(chunk_id),
+                            "index_version": chunk.index_version,
+                            "revision": document.revision,
+                            "content_hash": chunk.content_hash,
+                            "edit_generation": chunk.edit_generation,
+                        },
+                        priority=200,
+                        dedupe_key=(
+                            f"chunk.reembed:{chunk_id}:{chunk.index_version}:"
+                            f"{document.revision}:{chunk.edit_generation}"
+                        ),
+                    ),
+                )
+                notify = True
             await self._audit.record(
                 session,
                 workspace_id=kb.workspace_id,
@@ -1016,7 +1156,8 @@ class CatalogService:
             )
             view = _chunk_view(chunk)
 
-        await self._tasks.notify("embed")
+        if notify:
+            await self._tasks.notify("embed")
         return view
 
     # ----------------------------------------------------------- storage bindings
@@ -1263,7 +1404,37 @@ def _index_version_view(row: KbIndexVersion) -> IndexVersionView:
         started_at=row.started_at,
         completed_at=row.completed_at,
         error=row.error,
+        config=None if row.snapshot_unavailable else _version_config(row),
     )
+
+
+def _capture_version_config(kb: KnowledgeBase, model: ModelRef) -> dict[str, object]:
+    config = IndexVersionConfig(
+        embedding_model=model,
+        metric=kb.metric,
+        chunk_config=ChunkConfig.model_validate(kb.chunk_config or {}),
+    )
+    return config.model_dump(mode="json")
+
+
+def _version_config(row: KbIndexVersion | None) -> IndexVersionConfig:
+    if row is None or row.snapshot_unavailable or row.config_snapshot is None:
+        raise ValidationFailed(
+            "The index version configuration cannot be proven; a fresh rebuild is required."
+        )
+    try:
+        return IndexVersionConfig.model_validate(row.config_snapshot)
+    except ValueError as exc:
+        raise ValidationFailed(
+            "The index version configuration is invalid; a fresh rebuild is required."
+        ) from exc
+
+
+def _allocate_index_version(kb: KnowledgeBase) -> int:
+    if kb.index_version_high_water >= 2_147_483_647:
+        raise ValidationFailed("The knowledge base has exhausted its index-version space.")
+    kb.index_version_high_water += 1
+    return kb.index_version_high_water
 
 
 _service: CatalogService | None = None

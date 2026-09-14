@@ -15,6 +15,7 @@ from cairn.catalog.ingestion import CatalogIngestionFacade
 from cairn.core.cache import get_cache
 from cairn.core.config import get_settings
 from cairn.core.errors import ValidationFailed
+from cairn.core.modelref import ModelRef
 from cairn.embedding.providers import InfinityProvider, TeiProvider
 from cairn.embedding.service import EmbeddingService
 from cairn.embedding.tokenizers import (
@@ -77,14 +78,18 @@ class PipelineRuntime:
             VectorBindingRef(binding.id, binding.driver, binding.config)
         )
 
-    async def embedding_for(self, model_id: UUID) -> PreparedEmbedding:
+    async def embedding_for(self, model: ModelRef) -> PreparedEmbedding:
         async with self._resolution_lock:
             if self._closed:
                 raise RuntimeError("pipeline runtime is closed")
-            return await self._resolve_embedding(model_id)
+            return await self._resolve_embedding(model)
 
-    async def _resolve_embedding(self, model_id: UUID) -> PreparedEmbedding:
-        runtime = await self._models.get_embedding_runtime(model_id)
+    async def _resolve_embedding(self, model: ModelRef) -> PreparedEmbedding:
+        runtime = await self._models.get_embedding_runtime(model.id)
+        if runtime.model != model:
+            raise ValidationFailed(
+                "The registered embedding model no longer matches the index version snapshot."
+            )
         if runtime.has_credentials:
             raise ValidationFailed(
                 "Credential-backed embedding providers require the model gateway invoker."
@@ -100,7 +105,7 @@ class PipelineRuntime:
             raise ValidationFailed("The embedding provider runtime configuration is invalid.")
         tokenizer = self._tokenizers.for_model(runtime.model)
         fingerprint = _binding_fingerprint(runtime, tokenizer)
-        cached = self._embeddings.get(model_id)
+        cached = self._embeddings.get(model.id)
         if cached is not None and cached[0] == fingerprint:
             return cached[1]
         provider: TeiProvider | InfinityProvider
@@ -139,9 +144,9 @@ class PipelineRuntime:
             with suppress(Exception):
                 await provider.close()
             raise
-        previous = self._providers.get(model_id)
-        self._providers[model_id] = provider
-        self._embeddings[model_id] = (fingerprint, prepared)
+        previous = self._providers.get(model.id)
+        self._providers[model.id] = provider
+        self._embeddings[model.id] = (fingerprint, prepared)
         if previous is not None:
             self._retired_providers.append(previous)
         return prepared

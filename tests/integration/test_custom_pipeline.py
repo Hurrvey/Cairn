@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import replace
 from pathlib import Path
 from uuid import UUID
 
 import pytest
-from sqlalchemy import text
 from tests.integration.test_ingestion_pipeline import (
     _create_pipeline_document,
     _execute_one,
@@ -20,7 +18,6 @@ from cairn.authz.model import Principal
 from cairn.catalog.config import ChunkConfig
 from cairn.catalog.dto import ChunkSpec
 from cairn.catalog.ingestion import IngestionRun
-from cairn.core.db import transaction
 from cairn.ingestion.base import ParsedDocument
 from cairn.ingestion.chunkers import DocumentChunker
 from cairn.ingestion.custom import (
@@ -31,6 +28,7 @@ from cairn.ingestion.custom import (
     chunk_id,
 )
 from cairn.ingestion.pipeline import register_pipeline_handlers
+from cairn.modelgw.catalog import ModelCatalog
 from cairn.tasks.worker import TaskWorker
 from cairn.vectorstore.base import Namespace
 
@@ -41,10 +39,6 @@ __all__ = ["pipeline_admin"]
 async def test_custom_worker_requires_explicit_scoped_executor(
     pipeline_admin: Principal, tmp_path: Path, injected: bool
 ) -> None:
-    catalog, kb, registration, _source, _key = await _create_pipeline_document(
-        pipeline_admin, tmp_path, source=b"A trusted custom chunking example."
-    )
-    assert registration.document is not None
     config = ChunkConfig(
         strategy="custom",
         function_id="approved-chunker",
@@ -53,11 +47,13 @@ async def test_custom_worker_requires_explicit_scoped_executor(
         child_overlap=0,
         min_chunk_tokens=8,
     )
-    async with transaction() as session:
-        await session.execute(
-            text("UPDATE knowledge_base SET chunk_config=CAST(:config AS jsonb) WHERE id=:id"),
-            {"id": kb.id, "config": json.dumps(config.model_dump(mode="json"))},
-        )
+    catalog, kb, registration, _source, _key = await _create_pipeline_document(
+        pipeline_admin,
+        tmp_path,
+        source=b"A trusted custom chunking example.",
+        chunk_config=config,
+    )
+    assert registration.document is not None
     (
         pipeline,
         provider,
@@ -67,7 +63,8 @@ async def test_custom_worker_requires_explicit_scoped_executor(
         _resolved_vectors,
     ) = await _test_pipeline(kb, tmp_path)
     calls: list[tuple[UUID, UUID, FunctionVersionRef]] = []
-    prepared = await pipeline._resources.embedding_for(kb.embedding_model_id)
+    model = await ModelCatalog().get_ref(kb.embedding_model_id)
+    prepared = await pipeline._resources.embedding_for(model)
 
     class TrustedExecutor:
         identity = "audited-test-implementation:7"
