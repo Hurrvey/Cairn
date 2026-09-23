@@ -53,6 +53,31 @@ passed; full backend761 passed,2 PDF/OCR collection errors,no assertion failures
 See [manual reembedding journal](20-chunk-reembed-implementation.md). Next is durable failed-stage
 recovery, then general purge/retirement/cache ordering; no M07/E2E completion mark is added.
 
+**2026-09-14 recovery increment:** bounded slice4 is independently accepted: exact-run failed-stage
+resume, generation-fenced tasks, unchanged source revision, retained committed prerequisites,
+publication-only recovery and pending manual-edit preservation. Parent45 focused passed; backend780
+passed,2 PDF/OCR collection errors,no assertion failures/skips,coverage85.96%. See
+[recovery journal](22-stage-recovery-implementation.md). Next main-product priority is public
+retrieval per [preflight](23-retrieval-mainflow-preflight.md); essential cleanup/retirement/cache
+ordering and the UI/deployment journey remain explicit release gates. No full E2E mark is added.
+
+**2026-09-15 first public retrieval:** POST `/v1/retrieval/query` independently accepted for
+authorized fulltext/vector/hybrid RRF, active-version snapshots, supplied/query-generated vectors,
+strict/partial failures and explicit degradation. Shared runtime DTOs, atomic auth/IP/expiry cache,
+data-role isolation and bounded token/deadline handling verified. Parent138 focused passed;
+backend856 passed,2 known PDF/OCR collection errors,no assertion failures/skips,coverage85.20%.
+See [retrieval implementation](24-retrieval-api-implementation.md). Automatic runtime refresh,
+management/upload/UI/deployment and essential purge/retirement remain release gates; this is not
+all of M09 and does not mark the whole-product E2E complete.
+
+**2026-09-22 PDF/OCR, advanced retrieval and green full suite:** T-M07-03 (pypdfium2 subprocess
+parser), T-M07-15 (Tesseract OCR baseline) and T-M09-07/08/10 (weighted fusion, rerank adapter,
+parent expansion) are implemented and independently verified; see
+[PDF/OCR continuation](34-pdf-ocr-continuation.md). Full backend: 1066 passed, 0 failures,
+0 collection errors, coverage84.62%, first zero-exit run. T-M07-14 (genuine annotated 30-document
+corpus) remains OPEN per [quality report](../05-quality/04-pdf-ocr-evaluation.md); T-M07-01 is
+not closed by measurement. Deployed rerank requires a separate cross-encoder endpoint.
+
 ---
 
 ## How to use this document

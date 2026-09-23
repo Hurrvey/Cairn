@@ -5,8 +5,10 @@ from __future__ import annotations
 from cairn.ingestion.base import ParseContext, ParsedDocument, Parser
 from cairn.ingestion.errors import ParseEmptyContent, ParseTooLarge, ParseUnsupportedMime
 from cairn.ingestion.language import resolve_language
+from cairn.ingestion.ocr import ImageOcrParser, TesseractOcrEngine
 from cairn.ingestion.office import CsvParser, DocxParser, PptxParser, XlsxParser
 from cairn.ingestion.parsers import HtmlParser, JsonParser, MarkdownParser, TextParser
+from cairn.ingestion.runtime_config import get_ingestion_runtime_settings
 
 
 def _normalize_mime(mime: str) -> str:
@@ -52,7 +54,19 @@ class ParserRegistry:
 
 
 def get_parser_registry() -> ParserRegistry:
+    from cairn.ingestion.pdf import PdfParser
+
     registry = ParserRegistry()
+    settings = get_ingestion_runtime_settings()
+    ocr = (
+        TesseractOcrEngine(
+            languages=tuple(settings.ocr_languages.split("+")),
+            timeout_seconds=settings.ocr_timeout_s,
+            max_concurrency=settings.ocr_max_concurrency,
+        )
+        if settings.ocr_enabled
+        else None
+    )
     for parser in (
         TextParser(),
         MarkdownParser(),
@@ -62,6 +76,9 @@ def get_parser_registry() -> ParserRegistry:
         PptxParser(),
         XlsxParser(),
         CsvParser(),
+        PdfParser(ocr=ocr),
     ):
         registry.register(parser)
+    if ocr is not None:
+        registry.register(ImageOcrParser(ocr))
     return registry

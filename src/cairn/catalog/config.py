@@ -11,6 +11,15 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from cairn.core.retrieval_runtime import (
+    FusionSpec,
+    MmrSpec,
+    RerankSpec,
+    RetrievalConfig,
+    SearchMode,
+    SearchWeights,
+)
+
 __all__ = [
     "ChunkConfig",
     "ChunkStrategy",
@@ -23,9 +32,6 @@ __all__ = [
 ]
 
 ChunkStrategy = Literal["fixed", "recursive", "markdown", "semantic", "parent_child", "custom"]
-SearchMode = Literal["vector", "fulltext", "hybrid"]
-DedupeMode = Literal["none", "by_chunk", "by_document"]
-
 _Strict = ConfigDict(extra="forbid")
 
 
@@ -67,60 +73,4 @@ class ChunkConfig(BaseModel):
             raise ValueError("min_chunk_tokens must be smaller than child_tokens")
         if self.strategy == "custom" and not self.function_id:
             raise ValueError("custom chunking requires function_id")
-        return self
-
-
-class FusionSpec(BaseModel):
-    model_config = _Strict
-    #: RRF by default because dense and sparse scores are on incomparable
-    #: scales — cosine sits in [0,1] while BM25 is unbounded and
-    #: corpus-dependent. RRF uses rank alone, so it needs no calibration.
-    method: Literal["rrf", "weighted"] = "rrf"
-    k: int = Field(default=60, ge=1, le=1000)
-
-
-class SearchWeights(BaseModel):
-    model_config = _Strict
-    dense: float = Field(default=0.7, ge=0.0, le=1.0)
-    sparse: float = Field(default=0.3, ge=0.0, le=1.0)
-
-
-class RerankSpec(BaseModel):
-    model_config = _Strict
-    enabled: bool = True
-    model_id: str | None = None
-    top_n: int = Field(default=5, ge=1, le=100)
-    timeout_s: float = Field(default=1.5, gt=0, le=30)
-
-
-class MmrSpec(BaseModel):
-    model_config = _Strict
-    enabled: bool = False
-    lambda_: float = Field(default=0.5, ge=0.0, le=1.0, alias="lambda")
-
-
-class RetrievalConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
-
-    search_mode: SearchMode = "hybrid"
-    fusion: FusionSpec = Field(default_factory=FusionSpec)
-    weights: SearchWeights = Field(default_factory=SearchWeights)
-
-    top_k: int = Field(default=5, ge=1, le=100)
-    #: Retrieve wide with cheap ANN, rank narrow with the expensive
-    #: cross-encoder. 100 is the usual sweet spot.
-    candidate_k: int = Field(default=100, ge=1, le=1000)
-    score_threshold: float = 0.0
-
-    rerank: RerankSpec = Field(default_factory=RerankSpec)
-    expand_parent: bool = True
-    dedupe: DedupeMode = "none"
-    mmr: MmrSpec = Field(default_factory=MmrSpec)
-
-    @model_validator(mode="after")
-    def _check_coherence(self) -> RetrievalConfig:
-        if self.candidate_k < self.top_k:
-            raise ValueError("candidate_k must be at least top_k")
-        if self.rerank.enabled and self.rerank.top_n > self.candidate_k:
-            raise ValueError("rerank.top_n cannot exceed candidate_k")
         return self

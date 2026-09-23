@@ -11,6 +11,9 @@
  *    listener. This is what makes FR-P-02 hold globally: the dialog reopens no
  *    matter which call tripped the guard, so there is no route that can quietly
  *    render while the requirement is outstanding.
+ *
+ * It also reports transport health so the shell can show an offline notice
+ * after a failed connection and clear it on the next successful response.
  */
 
 const CSRF_COOKIE = "cairn_csrf";
@@ -33,14 +36,18 @@ export class ApiError extends Error {
   readonly errors: FieldError[];
 
   constructor(status: number, body: Record<string, unknown>) {
-    const detail = typeof body.detail === "string" ? body.detail : "Request failed.";
+    const detail =
+      typeof body.detail === "string" ? body.detail : "Request failed.";
     super(detail);
     this.name = "ApiError";
     this.status = status;
     this.code = typeof body.code === "string" ? body.code : "UNKNOWN";
     this.detail = detail;
-    this.requestId = typeof body.request_id === "string" ? body.request_id : undefined;
-    this.errors = Array.isArray(body.errors) ? (body.errors as FieldError[]) : [];
+    this.requestId =
+      typeof body.request_id === "string" ? body.request_id : undefined;
+    this.errors = Array.isArray(body.errors)
+      ? (body.errors as FieldError[])
+      : [];
   }
 
   /** Field-level messages keyed by field name, for inline form errors. */
@@ -77,6 +84,23 @@ function emit(error: ApiError): void {
   for (const listener of listeners[error.code] ?? []) listener(error);
 }
 
+type TransportListener = (reachable: boolean) => void;
+const transportListeners: TransportListener[] = [];
+
+/** Subscribe to transport health: false after a connection failure, true
+ *  after the next response of any status. */
+export function onTransport(listener: TransportListener): () => void {
+  transportListeners.push(listener);
+  return () => {
+    const index = transportListeners.indexOf(listener);
+    if (index >= 0) transportListeners.splice(index, 1);
+  };
+}
+
+function reportTransport(reachable: boolean): void {
+  for (const listener of transportListeners) listener(reachable);
+}
+
 function readCookie(name: string): string | null {
   const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
   return match?.[1] ? decodeURIComponent(match[1]) : null;
@@ -91,11 +115,16 @@ export interface RequestOptions {
   signal?: AbortSignal;
 }
 
-export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+export async function request<T>(
+  path: string,
+  options: RequestOptions = {},
+): Promise<T> {
   const method = (options.method ?? "GET").toUpperCase();
   const headers: Record<string, string> = { Accept: "application/json" };
 
-  if (options.body !== undefined) headers["Content-Type"] = "application/json";
+  const multipart = options.body instanceof FormData;
+  if (options.body !== undefined && !multipart)
+    headers["Content-Type"] = "application/json";
   if (options.token) headers["Authorization"] = `Bearer ${options.token}`;
 
   if (!SAFE_METHODS.has(method) && !options.token) {
@@ -109,20 +138,39 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
       method,
       headers,
       credentials: "same-origin",
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      body: multipart
+        ? (options.body as FormData)
+        : options.body === undefined
+          ? undefined
+          : JSON.stringify(options.body),
       ...(options.signal ? { signal: options.signal } : {}),
     });
   } catch (cause) {
+    if (cause instanceof DOMException && cause.name === "AbortError")
+      throw cause;
+    reportTransport(false);
     throw new NetworkError(cause);
   }
+  reportTransport(true);
 
   if (response.status === 204) return undefined as T;
 
   const text = await response.text();
-  const payload: unknown = text ? JSON.parse(text) : {};
+  let payload: unknown = {};
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      // A proxy error page is not JSON; keep the status and a generic detail.
+      payload = { code: response.ok ? "UNKNOWN" : "UPSTREAM_ERROR", detail: text.slice(0, 200) };
+    }
+  }
 
   if (!response.ok) {
-    const error = new ApiError(response.status, payload as Record<string, unknown>);
+    const error = new ApiError(
+      response.status,
+      payload as Record<string, unknown>,
+    );
     emit(error);
     throw error;
   }
@@ -131,7 +179,14 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
 }
 
 export const api = {
-  get: <T>(path: string, options?: RequestOptions) => request<T>(path, { ...options, method: "GET" }),
+  get: <T>(path: string, options?: RequestOptions) =>
+    request<T>(path, { ...options, method: "GET" }),
   post: <T>(path: string, body?: unknown, options?: RequestOptions) =>
     request<T>(path, { ...options, method: "POST", body }),
+  patch: <T>(path: string, body?: unknown, options?: RequestOptions) =>
+    request<T>(path, { ...options, method: "PATCH", body }),
+  put: <T>(path: string, body?: unknown, options?: RequestOptions) =>
+    request<T>(path, { ...options, method: "PUT", body }),
+  delete: <T>(path: string, options?: RequestOptions) =>
+    request<T>(path, { ...options, method: "DELETE" }),
 };

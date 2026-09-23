@@ -31,6 +31,8 @@ from cairn.identity.middleware import CREDENTIAL_SETUP_ALLOWLIST, PUBLIC_PATHS
 GUARD_NAMES = frozenset(
     {
         "current_principal",
+        "current_dataplane_principal",
+        "current_mcp_principal",
         "dependency",  # the closure returned by require_permission / require_role
     }
 )

@@ -101,3 +101,85 @@ def test_invalid_ocr_limits_are_rejected() -> None:
         OcrLimits(max_pixels=0)
     with pytest.raises(ValueError, match="command"):
         TesseractOcrEngine(command=())
+
+
+async def test_ocr_rejects_language_injection_before_process_launch() -> None:
+    from cairn.ingestion.ocr import OcrLanguageUnsupported
+
+    engine = TesseractOcrEngine(command=("must-not-run",))
+    with pytest.raises(OcrLanguageUnsupported):
+        await engine.recognize(_png(), language="eng --tessdata-dir=/tmp")
+
+
+@pytest.mark.parametrize("payload", [b"not an image", b"\x89PNG\r\n\x1a\n"])
+async def test_ocr_rejects_invalid_image_header(payload: bytes) -> None:
+    from cairn.ingestion.errors import ParseCorruptFile
+
+    with pytest.raises(ParseCorruptFile):
+        await TesseractOcrEngine(command=("must-not-run",)).recognize(payload)
+
+
+async def test_ocr_does_not_silently_discard_multipage_tiff() -> None:
+    output = BytesIO()
+    first = Image.new("RGB", (40, 40), "white")
+    second = Image.new("RGB", (40, 40), "black")
+    first.save(output, format="TIFF", save_all=True, append_images=[second])
+    with pytest.raises(OcrInputTooLarge):
+        await TesseractOcrEngine(command=("must-not-run",)).recognize(output.getvalue())
+
+
+async def test_ocr_rejects_malformed_tsv(tmp_path: Path) -> None:
+    from cairn.ingestion.ocr import OcrFailed
+
+    command = _fake_tesseract(tmp_path, "import sys; sys.stdin.buffer.read(); print('bad output')")
+    with pytest.raises(OcrFailed):
+        await TesseractOcrEngine(command=command).recognize(_png())
+
+
+async def test_ocr_bounds_subprocess_output(tmp_path: Path) -> None:
+    command = _fake_tesseract(
+        tmp_path,
+        "import sys; sys.stdin.buffer.read(); "
+        "print('tesseract fake' if '--version' in sys.argv else 'x'*100000)",
+    )
+    with pytest.raises(OcrInputTooLarge):
+        await TesseractOcrEngine(command=command, limits=OcrLimits(max_output_bytes=100)).recognize(
+            _png()
+        )
+
+
+async def test_missing_requested_language_is_not_silently_ignored(tmp_path: Path) -> None:
+    command = _fake_tesseract(
+        tmp_path,
+        "import sys\n"
+        "sys.stdin.buffer.read()\n"
+        "print('Failed loading language chi_sim', file=sys.stderr)\n"
+        "print('level\\tpage_num\\tblock_num\\tpar_num\\tline_num\\tword_num\\tleft\\ttop\\twidth\\theight\\tconf\\ttext')\n"
+        "print('5\\t1\\t1\\t1\\t1\\t1\\t4\\t5\\t20\\t10\\t96.5\\tHello')\n",
+    )
+    with pytest.raises(OcrEngineUnavailable):
+        await TesseractOcrEngine(command=command).recognize(_png(), language="zh")
+
+
+def test_tiff_header_check_does_not_enumerate_all_frames(monkeypatch: pytest.MonkeyPatch) -> None:
+    from PIL.TiffImagePlugin import TiffImageFile
+
+    from cairn.ingestion.ocr import image_dimensions
+
+    original = TiffImageFile.n_frames.fget
+
+    def enumerate_frames(image: TiffImageFile) -> int:
+        if image._n_frames is None:
+            raise AssertionError("Enumerating an untrusted frame chain is unbounded")
+        assert original is not None
+        return original(image)
+
+    output = BytesIO()
+    Image.new("RGB", (40, 40), "white").save(output, format="TIFF")
+    monkeypatch.setattr(TiffImageFile, "n_frames", property(enumerate_frames))
+    assert image_dimensions(output.getvalue(), OcrLimits()) == (40, 40)
+    multiple = BytesIO()
+    first = Image.new("RGB", (40, 40), "white")
+    first.save(multiple, format="TIFF", save_all=True, append_images=[first.copy()])
+    with pytest.raises(OcrInputTooLarge):
+        image_dimensions(multiple.getvalue(), OcrLimits())

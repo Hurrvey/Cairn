@@ -1,7 +1,10 @@
 <script setup lang="ts">
+import { TooltipProvider } from "reka-ui";
 import { onMounted, onUnmounted } from "vue";
 
 import { onApiError } from "@/api/client";
+import ConfirmHost from "@/components/ui/ConfirmHost.vue";
+import Toaster from "@/components/ui/Toaster.vue";
 import { useSessionStore } from "@/stores/session";
 
 const session = useSessionStore();
@@ -21,5 +24,9 @@ onUnmounted(() => unsubscribe?.());
 </script>
 
 <template>
-  <RouterView />
+  <TooltipProvider :delay-duration="300">
+    <RouterView />
+    <Toaster />
+    <ConfirmHost />
+  </TooltipProvider>
 </template>

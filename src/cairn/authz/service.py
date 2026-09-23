@@ -169,6 +169,17 @@ class AuthzService:
             grants = await self._repo.live_grants(session, subject_type, subject_id)
         return [g for g in grants if g.workspace_id == workspace_id]
 
+    async def purge_knowledge_base_access(self, workspace_id: UUID, kb_id: UUID) -> None:
+        async with transaction() as session:
+            user_ids, key_hashes = await self._repo.purge_knowledge_base_access(
+                session, workspace_id, kb_id
+            )
+            for user_id in sorted(user_ids):
+                await self._repo.bump_perm_version(session, user_id)
+        dataplane = get_dataplane_authz()
+        for key_hash in key_hashes:
+            await dataplane.invalidate_key(key_hash)
+
     def _validate_permissions(self, spec: GrantSpec) -> None:
         if not spec.permissions:
             raise ValidationFailed("A grant must carry at least one permission.")

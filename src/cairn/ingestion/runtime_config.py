@@ -20,6 +20,10 @@ class IngestionRuntimeSettings(BaseSettings):
     tokenizers_json: str = "{}"
     max_source_bytes: int = Field(default=50 * 1024 * 1024, gt=0)
     max_artifact_bytes: int = Field(default=256 * 1024 * 1024, gt=0)
+    ocr_enabled: bool = True
+    ocr_languages: str = "eng+chi_sim+chi_tra"
+    ocr_timeout_s: float = Field(default=45, gt=0, le=300, allow_inf_nan=False)
+    ocr_max_concurrency: int = Field(default=1, ge=1, le=4)
 
     @field_validator("tokenizers_json")
     @classmethod

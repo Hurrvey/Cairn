@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import unicodedata
 from bisect import bisect_left, bisect_right
 from copy import deepcopy
 from dataclasses import dataclass
@@ -128,14 +129,20 @@ class DocumentChunker:
         document_id: UUID,
         tokenizer: Tokenizer,
         index_version: int = 1,
+        max_input_tokens: int | None = None,
         semantic: SemanticEmbedding | None = None,
         custom: CustomChunkExecutor | None = None,
     ) -> None:
         if index_version < 1:
             raise ValueError("index_version must be positive")
+        if max_input_tokens is not None and (
+            isinstance(max_input_tokens, bool) or max_input_tokens <= 0
+        ):
+            raise ValueError("max_input_tokens must be positive")
         self._document_id = document_id
         self._tokenizer = tokenizer
         self._index_version = index_version
+        self._max_input_tokens = max_input_tokens
         self._semantic = SemanticBoundaryDetector(semantic) if semantic is not None else None
         if custom is not None and not custom.identity:
             raise ValueError("custom executor identity is required")
@@ -177,10 +184,76 @@ class DocumentChunker:
             return " > ".join(section.heading_path) + "\n\n"
         return ""
 
-    def _fit(self, window: _Window, start: int, prefix: str, budget: int) -> int:
+    @staticmethod
+    def _normalize_for_embedding(text: str) -> str:
+        return " ".join(unicodedata.normalize("NFKC", text).split())
+
+    def _within_model_limit(self, text: str) -> bool:
+        if self._max_input_tokens is None:
+            return True
+        return (
+            self._tokenizer.count(text) <= self._max_input_tokens
+            and self._tokenizer.count(self._normalize_for_embedding(text)) <= self._max_input_tokens
+        )
+
+    def _fits(
+        self,
+        prefix: str,
+        body: str,
+        raw_budget: int,
+        *,
+        model_bounded: bool,
+    ) -> bool:
+        content = prefix + body
+        return self._tokenizer.count(content) <= raw_budget and (
+            not model_bounded
+            or (self._within_model_limit(content) and self._within_model_limit(body))
+        )
+
+    def _bounded_prefix(
+        self,
+        section: _Section,
+        cfg: ChunkConfig,
+        body: str,
+        raw_budget: int,
+        *,
+        model_bounded: bool,
+    ) -> str:
+        prefix = self._prefix(section, cfg)
+        if (
+            prefix
+            and self._max_input_tokens is not None
+            and not self._fits(
+                prefix,
+                body,
+                raw_budget,
+                model_bounded=model_bounded,
+            )
+        ):
+            return ""
+        return prefix
+
+    def _content_budget(self, section: _Section, target: int, *, model_bounded: bool) -> int:
+        if not model_bounded or self._max_input_tokens is None:
+            return target
+        if section.atomic:
+            return self._max_input_tokens
+        return min(target, self._max_input_tokens)
+
+    def _fit(
+        self,
+        window: _Window,
+        start: int,
+        prefix: str,
+        budget: int,
+        *,
+        model_bounded: bool,
+    ) -> int:
         probe = min(budget, window.end - start)
         while True:
-            combined = prefix + window.section.text[start : start + probe]
+            body = window.section.text[start : start + probe]
+            combined = prefix + body
+            candidate_length = probe
             if self._tokenizer.count(combined) > budget:
                 try:
                     candidate = self._tokenizer.truncate(combined, budget)
@@ -193,12 +266,49 @@ class DocumentChunker:
                 length = len(candidate) - len(prefix)
                 if length <= 0:
                     raise ChunkBudgetExceeded()
-                return start + length
+                candidate_length = length
+            if not self._fits(
+                prefix,
+                window.section.text[start : start + candidate_length],
+                budget,
+                model_bounded=model_bounded,
+            ):
+                low = 1
+                high = candidate_length - 1
+                if not self._fits(
+                    prefix,
+                    window.section.text[start : start + low],
+                    budget,
+                    model_bounded=model_bounded,
+                ):
+                    raise ChunkBudgetExceeded()
+                while low < high:
+                    middle = (low + high + 1) // 2
+                    if self._fits(
+                        prefix,
+                        window.section.text[start : start + middle],
+                        budget,
+                        model_bounded=model_bounded,
+                    ):
+                        low = middle
+                    else:
+                        high = middle - 1
+                return start + low
+            if candidate_length < probe:
+                return start + candidate_length
             if start + probe == window.end:
                 return window.end
             probe = min(probe * 2, window.end - start)
 
-    def _boundary(self, text: str, prefix: str, budget: int, cfg: ChunkConfig) -> int:
+    def _boundary(
+        self,
+        text: str,
+        prefix: str,
+        budget: int,
+        cfg: ChunkConfig,
+        *,
+        model_bounded: bool,
+    ) -> int:
         if cfg.strategy == "fixed":
             return len(text)
         separators = tuple(dict.fromkeys((*cfg.separators, *_SENTENCE_SEPARATORS)))
@@ -211,7 +321,13 @@ class DocumentChunker:
             end = position if separator.startswith("\n#") else position + len(separator)
             if (
                 end > 0
-                and cfg.min_chunk_tokens <= self._tokenizer.count(prefix + text[:end]) <= budget
+                and cfg.min_chunk_tokens <= self._tokenizer.count(prefix + text[:end])
+                and self._fits(
+                    prefix,
+                    text[:end],
+                    budget,
+                    model_bounded=model_bounded,
+                )
             ):
                 return end
         return len(text)
@@ -234,23 +350,80 @@ class DocumentChunker:
         cfg: ChunkConfig,
         budget: int,
         overlap: int,
+        *,
+        model_bounded: bool = False,
     ) -> list[_Window]:
-        if window.section.atomic:
+        raw_budget = self._content_budget(
+            window.section,
+            budget,
+            model_bounded=model_bounded,
+        )
+        whole_prefix = self._bounded_prefix(
+            window.section,
+            cfg,
+            window.body,
+            raw_budget,
+            model_bounded=model_bounded,
+        )
+        if window.section.atomic and (
+            not model_bounded
+            or self._fits(
+                whole_prefix,
+                window.body,
+                raw_budget,
+                model_bounded=True,
+            )
+        ):
             return [window]
-        prefix = self._prefix(window.section, cfg)
         result: list[_Window] = []
         start = window.start
         previous_end = start
         while start < window.end:
-            end = self._fit(window, start, prefix, budget)
+            prefix = self._bounded_prefix(
+                window.section,
+                cfg,
+                window.section.text[start : start + 1],
+                raw_budget,
+                model_bounded=model_bounded,
+            )
+            end = self._fit(
+                window,
+                start,
+                prefix,
+                raw_budget,
+                model_bounded=model_bounded,
+            )
             if end < window.end:
-                end = start + self._boundary(window.section.text[start:end], prefix, budget, cfg)
+                end = start + self._boundary(
+                    window.section.text[start:end],
+                    prefix,
+                    raw_budget,
+                    cfg,
+                    model_bounded=model_bounded,
+                )
             if end <= previous_end:
                 start = previous_end
-                end = self._fit(window, start, prefix, budget)
+                prefix = self._bounded_prefix(
+                    window.section,
+                    cfg,
+                    window.section.text[start : start + 1],
+                    raw_budget,
+                    model_bounded=model_bounded,
+                )
+                end = self._fit(
+                    window,
+                    start,
+                    prefix,
+                    raw_budget,
+                    model_bounded=model_bounded,
+                )
                 if end < window.end:
                     end = start + self._boundary(
-                        window.section.text[start:end], prefix, budget, cfg
+                        window.section.text[start:end],
+                        prefix,
+                        raw_budget,
+                        cfg,
+                        model_bounded=model_bounded,
                     )
             candidate = _Window(window.section, start, end)
             if candidate.sources:
@@ -281,7 +454,13 @@ class DocumentChunker:
                         doc.language,
                     )
                     result.append(spec)
-                    for child in self._windows(parent, cfg, cfg.child_tokens, cfg.child_overlap):
+                    for child in self._windows(
+                        parent,
+                        cfg,
+                        cfg.child_tokens,
+                        cfg.child_overlap,
+                        model_bounded=self._max_input_tokens is not None,
+                    ):
                         result.append(
                             self._spec(
                                 child,
@@ -295,7 +474,13 @@ class DocumentChunker:
                             )
                         )
             else:
-                for window in self._windows(whole, cfg, cfg.child_tokens, cfg.child_overlap):
+                for window in self._windows(
+                    whole,
+                    cfg,
+                    cfg.child_tokens,
+                    cfg.child_overlap,
+                    model_bounded=self._max_input_tokens is not None,
+                ):
                     result.append(
                         self._spec(
                             window,
@@ -329,7 +514,7 @@ class DocumentChunker:
         validation_cfg = cfg.model_copy(deep=True)
         execution_cfg = validation_cfg.model_copy(deep=True)
         chunks = await self._custom.execute(ref, execution_doc, execution_cfg, scope, limits)
-        return validate_custom_chunks(
+        validated = validate_custom_chunks(
             chunks,
             doc=validation_doc,
             cfg=validation_cfg,
@@ -337,6 +522,10 @@ class DocumentChunker:
             scope=scope,
             limits=limits,
         )
+        for chunk in validated:
+            if chunk.metadata["embed"] and not self._within_model_limit(chunk.content):
+                raise ChunkBudgetExceeded("Custom chunk output exceeds the model token limit.")
+        return validated
 
     def _config_key(self, cfg: ChunkConfig, extension_identity: str | None = None) -> str:
         return sha256(
@@ -360,10 +549,24 @@ class DocumentChunker:
         for section in _sections(doc, cfg):
             whole = _Window(section, 0, len(section.text))
             if section.atomic:
-                windows = [whole]
+                windows = self._windows(
+                    whole,
+                    cfg,
+                    cfg.child_tokens,
+                    cfg.child_overlap,
+                    model_bounded=self._max_input_tokens is not None,
+                )
             else:
                 units = self._semantic_units(whole, cfg)
-                peaks = await self._semantic.boundaries([unit.body for unit in units])
+                semantic_inputs = [unit.body for unit in units]
+                if self._max_input_tokens is not None and any(
+                    not text.strip() or not self._within_model_limit(text)
+                    for text in semantic_inputs
+                ):
+                    raise ChunkBudgetExceeded(
+                        "Semantic boundary input exceeds the model token limit."
+                    )
+                peaks = await self._semantic.boundaries(semantic_inputs)
                 windows = self._semantic_windows(units, peaks, cfg)
             for window in windows:
                 result.append(
@@ -401,14 +604,28 @@ class DocumentChunker:
             coalesced.append(end)
         result: list[_Window] = []
         start = window.start
+        model_bounded = self._max_input_tokens is not None
+        budget = self._content_budget(
+            window.section,
+            cfg.child_tokens,
+            model_bounded=model_bounded,
+        )
         for relative_end in coalesced:
             end = window.start + relative_end
             while start < end:
+                prefix = self._bounded_prefix(
+                    window.section,
+                    cfg,
+                    window.section.text[start : start + 1],
+                    budget,
+                    model_bounded=model_bounded,
+                )
                 fitted = self._fit(
                     window,
                     start,
-                    self._prefix(window.section, cfg),
-                    cfg.child_tokens,
+                    prefix,
+                    budget,
+                    model_bounded=model_bounded,
                 )
                 fitted = min(fitted, end)
                 if fitted <= start:
@@ -465,7 +682,15 @@ class DocumentChunker:
                 units[first].start,
                 units[last - 1].end,
             )
-            result.extend(self._windows(semantic_window, cfg, cfg.child_tokens, cfg.child_overlap))
+            result.extend(
+                self._windows(
+                    semantic_window,
+                    cfg,
+                    cfg.child_tokens,
+                    cfg.child_overlap,
+                    model_bounded=self._max_input_tokens is not None,
+                )
+            )
             first = last
         return result
 
@@ -480,7 +705,22 @@ class DocumentChunker:
         budget: int,
         language: str,
     ) -> ChunkSpec:
-        content = self._prefix(window.section, cfg) + window.body
+        model_bounded = role != "parent" and self._max_input_tokens is not None
+        raw_budget = self._content_budget(
+            window.section,
+            budget,
+            model_bounded=model_bounded,
+        )
+        prefix = self._bounded_prefix(
+            window.section,
+            cfg,
+            window.body,
+            raw_budget,
+            model_bounded=model_bounded,
+        )
+        content = prefix + window.body
+        if model_bounded and not self._within_model_limit(content):
+            raise ChunkBudgetExceeded("Chunk output exceeds the model token limit.")
         content_hash = sha256(content.encode()).hexdigest()
         citations = [
             {

@@ -2,26 +2,167 @@
 
 from __future__ import annotations
 
+import asyncio
+import re
+import tempfile
 import time
 from collections.abc import Awaitable, Callable
 
+import anyio
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from cairn.core.config import get_settings
-from cairn.core.errors import CairnError, InternalError
+from cairn.core.errors import CairnError, InternalError, PayloadTooLarge, UpstreamUnavailable
 from cairn.core.ids import new_public_id
 from cairn.core.logging import bind_request_context, clear_request_context, get_logger
 from cairn.core.telemetry import http_request_duration_seconds, http_requests_total
+from cairn.core.upload_limits import MAX_UPLOAD_REQUEST_BYTES
 
-__all__ = ["ErrorHandlingMiddleware", "RequestContextMiddleware"]
+__all__ = [
+    "DataPlaneAuthenticationMiddleware",
+    "DataPlaneRateLimitMiddleware",
+    "ErrorHandlingMiddleware",
+    "RequestContextMiddleware",
+    "RetrievalDeadlineMiddleware",
+    "UploadBodyLimitMiddleware",
+]
 
 log = get_logger(__name__)
 
 Handler = Callable[[Request], Awaitable[Response]]
 
 REQUEST_ID_HEADER = "X-Request-Id"
+_UPLOAD_PATH = re.compile(r"^/v1/knowledge-bases/[^/]+/documents/upload$")
+
+
+class UploadBodyLimitMiddleware:
+    """Bound and pre-spool upload bytes before FastAPI parses multipart data."""
+
+    def __init__(self, app: ASGIApp, *, max_body_bytes: int = MAX_UPLOAD_REQUEST_BYTES) -> None:
+        self._app = app
+        self._max_body_bytes = max_body_bytes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if (
+            scope["type"] != "http"
+            or scope.get("method") != "POST"
+            or not _UPLOAD_PATH.fullmatch(str(scope.get("path", "")))
+        ):
+            await self._app(scope, receive, send)
+            return
+        headers = {name.lower(): value for name, value in scope.get("headers", [])}
+        raw_length = headers.get(b"content-length")
+        if raw_length is not None:
+            try:
+                if int(raw_length) > self._max_body_bytes:
+                    await self._reject(scope, receive, send)
+                    return
+            except ValueError:
+                pass
+        consumed = 0
+        spool = _new_request_spool(self._max_body_bytes)
+        try:
+            while True:
+                message = await receive()
+                if message["type"] != "http.request":
+                    return
+                body = message.get("body", b"")
+                consumed += len(body)
+                if consumed > self._max_body_bytes:
+                    await self._reject(scope, receive, send)
+                    return
+                if body:
+                    await anyio.to_thread.run_sync(spool.write, body)
+                if not message.get("more_body", False):
+                    break
+            await anyio.to_thread.run_sync(spool.seek, 0)
+
+            async def replay() -> Message:
+                body = await anyio.to_thread.run_sync(spool.read, 1024 * 1024)
+                return {
+                    "type": "http.request",
+                    "body": body,
+                    "more_body": bool(body),
+                }
+
+            await self._app(scope, replay, send)
+        finally:
+            spool.close()
+
+    async def _reject(self, scope: Scope, receive: Receive, send: Send) -> None:
+        request = Request(scope, receive=receive)
+        response = _problem_response(
+            request,
+            PayloadTooLarge("Document upload request exceeds the 51 MiB request limit."),
+        )
+        await response(scope, receive, send)
+
+
+def _new_request_spool(max_body_bytes: int) -> tempfile.SpooledTemporaryFile[bytes]:
+    return tempfile.SpooledTemporaryFile(max_size=min(2 * 1024 * 1024, max_body_bytes), mode="w+b")
+
+
+class DataPlaneAuthenticationMiddleware(BaseHTTPMiddleware):
+    """Authenticate API keys without importing identity/session services."""
+
+    async def dispatch(self, request: Request, call_next: Handler) -> Response:
+        from cairn.authz.dataplane import KEY_PREFIX, get_dataplane_authz
+        from cairn.authz.errors import ApiKeyInvalid, ApiKeyIpNotAllowed
+
+        request.state.principal = None
+        request.state.auth_source = None
+        header = request.headers.get("Authorization")
+        token = header[7:].strip() if header and header.lower().startswith("bearer ") else None
+        if token is not None and token.startswith(KEY_PREFIX):
+            try:
+                principal = await get_dataplane_authz().authenticate_api_key(
+                    token, ip=request.client.host if request.client else None
+                )
+            except ApiKeyIpNotAllowed:
+                raise
+            except ApiKeyInvalid:
+                principal = None
+            if principal is not None:
+                request.state.principal = principal
+                request.state.auth_source = "api_key"
+                bind_request_context(
+                    principal_id=str(principal.id),
+                    principal_type=principal.type,
+                    workspace_id=str(principal.workspace_id),
+                )
+        return await call_next(request)
+
+
+class DataPlaneRateLimitMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: Handler) -> Response:
+        principal = getattr(request.state, "principal", None)
+        if principal is None:
+            return await call_next(request)
+        from cairn.authz.ratelimit import get_rate_limiter
+
+        state = await get_rate_limiter().check(principal)
+        response = await call_next(request)
+        for header, value in state.headers().items():
+            response.headers.setdefault(header, value)
+        return response
+
+
+class RetrievalDeadlineMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app: object, *, timeout_s: float) -> None:
+        super().__init__(app)  # type: ignore[arg-type]
+        self._timeout_s = timeout_s
+
+    async def dispatch(self, request: Request, call_next: Handler) -> Response:
+        if request.url.path != "/v1/retrieval/query":
+            return await call_next(request)
+        try:
+            async with asyncio.timeout(self._timeout_s):
+                return await call_next(request)
+        except TimeoutError as exc:
+            raise UpstreamUnavailable("The retrieval request exceeded its time limit.") from exc
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):

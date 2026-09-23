@@ -14,17 +14,31 @@ import contextlib
 import hashlib
 import ipaddress
 import json
+import math
 import time
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 from uuid import UUID
+
+from fastapi import Request
 
 from cairn.authz.errors import ApiKeyInvalid, ApiKeyIpNotAllowed
 from cairn.authz.model import Principal
 from cairn.core.cache import Cache, get_cache
+from cairn.core.errors import AuthenticationFailed
 from cairn.core.logging import get_logger
 from cairn.core.telemetry import authz_cache_total, authz_resolve_seconds
 
-__all__ = ["KEY_PREFIX", "DataPlaneAuthz", "get_dataplane_authz", "hash_api_key"]
+__all__ = [
+    "KEY_PREFIX",
+    "ApiKeyEnvelope",
+    "DataPlaneAuthz",
+    "current_dataplane_principal",
+    "encode_api_key_envelope",
+    "get_dataplane_authz",
+    "hash_api_key",
+]
 
 log = get_logger(__name__)
 
@@ -37,9 +51,25 @@ def hash_api_key(raw_key: str) -> str:
     return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
 
 
-def _encode(principal: Principal) -> bytes:
+def current_dataplane_principal(request: Request) -> Principal:
+    principal: Principal | None = getattr(request.state, "principal", None)
+    if principal is None:
+        raise AuthenticationFailed("Authentication is required.")
+    return principal
+
+
+@dataclass(frozen=True, slots=True)
+class ApiKeyEnvelope:
+    principal: Principal
+    ip_allowlist: tuple[str, ...]
+    expires_at: datetime | None
+
+
+def encode_api_key_envelope(envelope: ApiKeyEnvelope) -> bytes:
+    principal = envelope.principal
     return json.dumps(
         {
+            "version": 2,
             "type": principal.type,
             "id": str(principal.id),
             "workspace_id": str(principal.workspace_id),
@@ -53,27 +83,36 @@ def _encode(principal: Principal) -> bytes:
                 str(rid): sorted(perms) for rid, perms in principal.resource_permissions.items()
             },
             "accessible_kb_ids": [str(k) for k in principal.accessible_kb_ids],
+            "ip_allowlist": list(envelope.ip_allowlist),
+            "expires_at": envelope.expires_at.isoformat() if envelope.expires_at else None,
         },
         separators=(",", ":"),
     ).encode()
 
 
-def _decode(raw: bytes) -> Principal:
+def _decode_envelope(raw: bytes) -> ApiKeyEnvelope | None:
     data: dict[str, Any] = json.loads(raw)
-    return Principal(
-        type=data["type"],
-        id=UUID(data["id"]),
-        workspace_id=UUID(data["workspace_id"]),
-        role=data["role"],
-        username=data["username"],
-        owner_user_id=UUID(data["owner_user_id"]) if data["owner_user_id"] else None,
-        rate_limit_rpm=data["rate_limit_rpm"],
-        perm_version=data["perm_version"],
-        permissions=frozenset(data["permissions"]),
-        resource_permissions={
-            UUID(rid): frozenset(perms) for rid, perms in data["resource_permissions"].items()
-        },
-        accessible_kb_ids=frozenset(UUID(k) for k in data["accessible_kb_ids"]),
+    if data.get("version") != 2 or "ip_allowlist" not in data or "expires_at" not in data:
+        return None
+    expires_at = datetime.fromisoformat(data["expires_at"]) if data["expires_at"] else None
+    return ApiKeyEnvelope(
+        principal=Principal(
+            type=data["type"],
+            id=UUID(data["id"]),
+            workspace_id=UUID(data["workspace_id"]),
+            role=data["role"],
+            username=data["username"],
+            owner_user_id=UUID(data["owner_user_id"]) if data["owner_user_id"] else None,
+            rate_limit_rpm=data["rate_limit_rpm"],
+            perm_version=data["perm_version"],
+            permissions=frozenset(data["permissions"]),
+            resource_permissions={
+                UUID(rid): frozenset(perms) for rid, perms in data["resource_permissions"].items()
+            },
+            accessible_kb_ids=frozenset(UUID(k) for k in data["accessible_kb_ids"]),
+        ),
+        ip_allowlist=tuple(data["ip_allowlist"]),
+        expires_at=expires_at,
     )
 
 
@@ -94,34 +133,34 @@ class DataPlaneAuthz:
         key_hash = hash_api_key(raw_key)
         cache_key = f"authz:key:{key_hash}"
 
-        principal: Principal | None = None
+        envelope: ApiKeyEnvelope | None = None
         source = "cache"
         try:
             cached = await self.cache.get(cache_key)
             if cached is not None:
-                principal = _decode(cached)
-                authz_cache_total.labels(result="hit").inc()
+                envelope = _decode_envelope(cached)
+                if envelope is not None:
+                    authz_cache_total.labels(result="hit").inc()
         except Exception as exc:
             log.warning("authz.cache_unavailable", error=type(exc).__name__)
 
-        if principal is None:
+        if envelope is None:
             authz_cache_total.labels(result="miss").inc()
             source = "database"
-            principal = await self._resolve_from_database(key_hash)
-            if principal is None:
+            envelope = await self._resolve_from_database(key_hash)
+            if envelope is None:
                 raise ApiKeyInvalid("Invalid API key.")
-            # Best-effort write-through: a cache that refuses the write costs
-            # the next request a database round trip, nothing more.
+            self._validate_envelope(envelope, ip)
+            ttl = self._cache_ttl(envelope)
             with contextlib.suppress(Exception):
-                await self.cache.set(cache_key, _encode(principal), _CACHE_TTL_SECONDS)
-
-        if ip is not None:
-            await self._check_ip_allowlist(key_hash, ip)
+                await self.cache.set(cache_key, encode_api_key_envelope(envelope), ttl)
+        else:
+            self._validate_envelope(envelope, ip)
 
         authz_resolve_seconds.labels(source=source).observe(time.perf_counter() - started)
-        return principal
+        return envelope.principal
 
-    async def _resolve_from_database(self, key_hash: str) -> Principal | None:
+    async def _resolve_from_database(self, key_hash: str) -> ApiKeyEnvelope | None:
         from cairn.authz.repository import AuthzRepository
         from cairn.authz.resolver import PermissionResolver
         from cairn.core.db import session_scope
@@ -147,27 +186,42 @@ class DataPlaneAuthz:
             principal = await PermissionResolver(repo).principal_for_key(
                 session, key, admin_content_access=policy
             )
-            if principal is not None:
-                await self._remember_ip_allowlist(key_hash, key.ip_allowlist)
-            return principal
+            if principal is None:
+                return None
+            return ApiKeyEnvelope(
+                principal=principal,
+                ip_allowlist=tuple(key.ip_allowlist or ()),
+                expires_at=key.expires_at,
+            )
 
-    async def _remember_ip_allowlist(self, key_hash: str, allowlist: list[str] | None) -> None:
-        payload = json.dumps(allowlist or []).encode()
-        with contextlib.suppress(Exception):
-            await self.cache.set(f"authz:ip:{key_hash}", payload, _CACHE_TTL_SECONDS)
+    def _cache_ttl(self, envelope: ApiKeyEnvelope) -> int:
+        if envelope.expires_at is None:
+            return _CACHE_TTL_SECONDS
+        from cairn.core.time import utcnow
 
-    async def _check_ip_allowlist(self, key_hash: str, ip: str) -> None:
+        remaining = (envelope.expires_at - utcnow()).total_seconds()
+        if remaining <= 0:
+            raise ApiKeyInvalid("Invalid API key.")
+        return max(1, min(_CACHE_TTL_SECONDS, math.ceil(remaining)))
+
+    def _validate_envelope(self, envelope: ApiKeyEnvelope, ip: str | None) -> None:
+        from cairn.core.time import utcnow
+
+        if envelope.expires_at is not None and envelope.expires_at <= utcnow():
+            raise ApiKeyInvalid("Invalid API key.")
+        if not envelope.ip_allowlist:
+            return
+        if ip is None:
+            raise ApiKeyIpNotAllowed("This API key requires a known client address.")
         try:
-            raw = await self.cache.get(f"authz:ip:{key_hash}")
-        except Exception:
-            return
-        if raw is None:
-            return
-        networks = json.loads(raw)
-        if not networks:
-            return
-        address = ipaddress.ip_address(ip)
-        if not any(address in ipaddress.ip_network(net, strict=False) for net in networks):
+            address = ipaddress.ip_address(ip)
+            allowed = any(
+                address in ipaddress.ip_network(network, strict=False)
+                for network in envelope.ip_allowlist
+            )
+        except ValueError as exc:
+            raise ApiKeyIpNotAllowed("This API key may not be used from this address.") from exc
+        if not allowed:
             log.warning("authz.ip_rejected", ip=ip)
             raise ApiKeyIpNotAllowed("This API key may not be used from this address.")
 

@@ -1,7 +1,13 @@
 # Pipeline lifecycle acceptance package
 
-Updated: 2026-09-14. Status: IN PROGRESS. Bounded slices1-3 independently ACCEPTED;
-slices4-5 and full E2E remain OPEN. Prerequisite repair was accepted September8.
+Updated: 2026-09-14. Status: IN PROGRESS. Bounded slices1-4 independently ACCEPTED;
+slice5 and full E2E remain OPEN. Prerequisite repair was accepted September8.
+
+Recovery increment: exact-run contributor retry, durable committed-state resume, generation fencing,
+scoped retry authorization and publication/manual-edit preservation passed45 independent focused
+tests. Full backend780 passed,2 known PDF/OCR collection errors,no assertion failures/skips,
+coverage85.96%; document22/ledger L99. Under document21's user priority, public retrieval is the next
+main-product implementation; essential purge/retirement/cache ordering remain release gates.
 
 September14: manual chunk reembedding passed101 independent focused tests including actual TEI
 manual-edit retrieval. Final backend761 passed,2 known PDF/OCR collection errors,no assertion

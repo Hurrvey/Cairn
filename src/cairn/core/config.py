@@ -13,8 +13,9 @@ from __future__ import annotations
 import sys
 from functools import lru_cache
 from typing import Literal
+from uuid import UUID
 
-from pydantic import BaseModel, Field, SecretStr, ValidationError
+from pydantic import BaseModel, Field, SecretStr, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 __all__ = ["Role", "Settings", "get_settings"]
@@ -82,6 +83,8 @@ class TaskSettings(BaseModel):
     graceful_shutdown_s: int = 30
     retain_done_days: int = 7
     default_workspace_concurrency: int = 16
+    runtime_refresh_interval_s: float = Field(default=60, gt=0, le=3600)
+    runtime_refresh_batch_size: int = Field(default=100, ge=1, le=1000)
 
 
 class EmbeddingSettings(BaseModel):
@@ -94,6 +97,68 @@ class EmbeddingSettings(BaseModel):
     circuit_failure_threshold: int = Field(default=5, ge=1)
     circuit_window_s: float = Field(default=60, gt=0)
     circuit_reset_s: float = Field(default=30, gt=0)
+
+
+class RetrievalEmbeddingEndpointSettings(BaseModel):
+    dialect: Literal["tei", "infinity"]
+    base_url: str
+    allow_private: bool = False
+    namespace: str
+    max_batch_size: int = Field(default=16, ge=1, le=1024)
+    api_key: SecretStr | None = None
+
+
+class RerankEndpointSettings(BaseModel):
+    """Operator-owned endpoints; requests select a name, never a URL or credential."""
+
+    base_url: str
+    dialect: Literal["tei", "infinity"] = "tei"
+    model_name: str | None = None
+    workspace_ids: list[UUID] = Field(min_length=1)
+    allow_private: bool = False
+    api_key: SecretStr | None = None
+    max_candidates: int = Field(default=100, ge=1, le=1000)
+    max_request_bytes: int = Field(default=1024 * 1024, ge=1024, le=8 * 1024 * 1024)
+
+
+class RetrievalSettings(BaseModel):
+    embedding_endpoints: dict[UUID, RetrievalEmbeddingEndpointSettings] = Field(
+        default_factory=dict
+    )
+    tokenizer_files: dict[str, str] = Field(default_factory=dict)
+    request_timeout_s: float = Field(default=5, gt=0, le=30)
+    runtime_timeout_s: float = Field(default=0.25, gt=0, le=5)
+    search_timeout_s: float = Field(default=2, gt=0, le=10)
+    rerank_endpoints: dict[str, RerankEndpointSettings] = Field(default_factory=dict)
+
+
+class MCPSettings(BaseModel):
+    managed: bool = False
+    port_min: int = Field(default=8081, ge=1024, le=65535)
+    port_max: int = Field(default=8090, ge=1024, le=65535)
+    gateway_port: int = Field(default=8099, ge=1024, le=65535)
+
+    @model_validator(mode="after")
+    def managed_ports(self) -> MCPSettings:
+        if not 0 <= self.port_max - self.port_min < 32:
+            raise ValueError("MCP published port range must contain1..32 ports")
+        if self.port_min <= self.gateway_port <= self.port_max:
+            raise ValueError("MCP gateway port must be outside the published range")
+        return self
+
+    allowed_hosts: list[str] = Field(
+        default_factory=lambda: [
+            "localhost",
+            "localhost:*",
+            "127.0.0.1",
+            "127.0.0.1:*",
+            "[::1]",
+            "[::1]:*",
+        ]
+    )
+    allowed_origins: list[str] = Field(default_factory=list)
+    max_request_bytes: int = Field(default=65536, ge=1024, le=1048576)
+    request_timeout_s: float = Field(default=15, gt=0, le=60)
 
 
 class TelemetrySettings(BaseModel):
@@ -129,6 +194,8 @@ class Settings(BaseSettings):
     http: HttpSettings = Field(default_factory=HttpSettings)
     tasks: TaskSettings = Field(default_factory=TaskSettings)
     embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
+    retrieval: RetrievalSettings = Field(default_factory=RetrievalSettings)
+    mcp: MCPSettings = Field(default_factory=MCPSettings)
     objectstore: ObjectStoreSettings = Field(default_factory=ObjectStoreSettings)
     telemetry: TelemetrySettings = Field(default_factory=TelemetrySettings)
 

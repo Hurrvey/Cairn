@@ -21,6 +21,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 from cairn.catalog.config import ChunkConfig, RetrievalConfig
+from cairn.core.retrieval_runtime import BindingRefModel, KnowledgeBaseRuntime
 from cairn.modelgw.dto import ModelRef
 
 __all__ = [
@@ -101,38 +102,6 @@ class KnowledgeBaseView:
     #: an update response so the UI can prompt rather than leaving the user to
     #: wonder why nothing changed.
     reindex_required: bool = False
-
-
-class BindingRefModel(BaseModel):
-    """A storage binding as the data plane sees it: driver and non-secret
-    configuration. Credentials stay in the gateway."""
-
-    model_config = ConfigDict(frozen=True)
-    id: UUID
-    driver: str
-    config: dict[str, Any] = {}
-
-
-class KnowledgeBaseRuntime(BaseModel):
-    """The minimal projection the data plane needs — published to Redis.
-
-    Pydantic rather than a dataclass because it is serialised on every config
-    change and deserialised on every cache hit.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    id: UUID
-    workspace_id: UUID
-    #: (kb_id, ACTIVE index_version). Never "latest" — that is what would let a
-    #: query see a half-built index mid-rebuild.
-    index_version: int
-    embedding_model: ModelRef
-    metric: str
-    vector_binding: BindingRefModel
-    retrieval_config: RetrievalConfig
-    config_version: int
-    status: KbStatus
 
 
 class IndexVersionConfig(BaseModel):

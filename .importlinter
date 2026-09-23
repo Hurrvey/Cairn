@@ -29,7 +29,8 @@ include_external_packages = True
 name = Cairn layered architecture
 type = layers
 layers =
-    cairn.ingestion
+    cairn.mcpserver
+    cairn.ingestion | cairn.retrieval
     cairn.embedding
     cairn.catalog | cairn.identity
     cairn.authz
@@ -51,6 +52,10 @@ exhaustive = False
 ignore_imports =
     cairn.platform.router -> cairn.authz.deps
     cairn.platform.router -> cairn.authz.model
+    cairn.platform.mcp_router -> cairn.authz.deps
+    cairn.platform.mcp_router -> cairn.authz.model
+    cairn.modelgw.router -> cairn.authz.deps
+    cairn.modelgw.router -> cairn.authz.model
 
 ; ---------------------------------------------------------------------------
 ; ACTIVATE WITH T-M09-01 (the first data-plane module).
@@ -63,19 +68,20 @@ ignore_imports =
 ; commented until `cairn.retrieval` lands. Uncommenting it is part of
 ; T-M09-01's Definition of Done.
 ;
-; [importlinter:contract:dataplane]
-; name = Data plane must not import control plane
-; type = forbidden
-; source_modules =
-;     cairn.retrieval
-;     cairn.mcpserver
-; forbidden_modules =
-;     cairn.identity
-;     cairn.catalog
-;     cairn.modelgw
-;     cairn.functions
-;     cairn.evaluation
-;     cairn.platform
+[importlinter:contract:dataplane]
+name = Data plane must not import control plane
+type = forbidden
+source_modules =
+    cairn.retrieval
+    cairn.mcpserver
+forbidden_modules =
+    cairn.identity
+    cairn.catalog
+    cairn.ingestion
+    cairn.modelgw
+    cairn.functions
+    cairn.evaluation
+    cairn.platform
 ; ---------------------------------------------------------------------------
 
 [importlinter:contract:no_cross_orm]
@@ -88,6 +94,8 @@ source_modules =
     cairn.modelgw
     cairn.objectstore
     cairn.vectorstore
+    cairn.retrieval
+    cairn.mcpserver
 forbidden_modules =
     cairn.identity.models
     cairn.platform.models
@@ -128,6 +136,7 @@ forbidden_modules =
     cairn.modelgw
     cairn.objectstore
     cairn.vectorstore
+    cairn.retrieval
 
 [importlinter:contract:embedding_is_dataplane_safe]
 name = Embedding must not import control-plane services or database libraries

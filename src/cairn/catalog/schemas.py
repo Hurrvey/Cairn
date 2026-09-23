@@ -28,6 +28,7 @@ from cairn.catalog.dto import (
     ReindexEstimate,
 )
 from cairn.core.ids import encode_id
+from cairn.modelgw.dto import ModelView
 
 __all__ = [
     "BindingResponse",
@@ -39,10 +40,13 @@ __all__ = [
     "EditChunkRequest",
     "IndexProgressResponse",
     "IndexVersionResponse",
+    "KnowledgeBaseOptionsResponse",
     "KnowledgeBaseResponse",
+    "ModelChoiceResponse",
     "RegisterUploadRequest",
     "ReindexEstimateResponse",
     "ReindexRequest",
+    "SafeBindingResponse",
     "UpdateKbRequest",
 ]
 
@@ -138,6 +142,52 @@ class CreateBindingRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     config: dict[str, Any] = Field(default_factory=dict)
     is_default: bool = False
+
+
+class ModelChoiceResponse(BaseModel):
+    id: str
+    provider_id: str
+    display_name: str
+    model_key: str
+    dimension: int | None
+    max_input_tokens: int | None
+    tokenizer_id: str | None
+
+    @classmethod
+    def from_dto(cls, model: ModelView) -> ModelChoiceResponse:
+        return cls(
+            id=encode_id("mdl", model.id),
+            provider_id=encode_id("prov", model.provider_id),
+            display_name=model.display_name,
+            model_key=model.model_key,
+            dimension=model.dimension,
+            max_input_tokens=model.max_input_tokens,
+            tokenizer_id=model.tokenizer_id,
+        )
+
+
+class SafeBindingResponse(BaseModel):
+    id: str
+    name: str
+    kind: str
+    driver: str
+
+    @classmethod
+    def from_dto(cls, binding: BindingRef) -> SafeBindingResponse:
+        return cls(
+            id=encode_id("bind", binding.id),
+            name=binding.name,
+            kind=binding.kind,
+            driver=binding.driver,
+        )
+
+
+class KnowledgeBaseOptionsResponse(BaseModel):
+    models: list[ModelChoiceResponse]
+    bindings: list[SafeBindingResponse]
+    tokenizers: list[str]
+    supported_extensions: list[str]
+    max_upload_bytes: int
 
 
 # -------------------------------------------------------------- responses

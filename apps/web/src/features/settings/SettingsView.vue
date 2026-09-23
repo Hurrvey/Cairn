@@ -3,29 +3,37 @@
  * Workspace settings (FR-O-06).
  *
  * `admin_content_access` is the consequential one, so it gets a real
- * explanation of each option rather than a bare dropdown: the difference
- * between `always` and `break_glass` is the difference between "we can host
- * your team's documents" and "we can't".
- *
- * Settings that need a restart are labelled as such. A UI that implies a change
- * took effect when it did not is worse than one that refuses the change.
+ * explanation of each option rather than a bare dropdown. Settings that
+ * need a restart are labelled as such: a UI that implies a change took
+ * effect when it did not is worse than one that refuses the change.
  */
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 
 import { type SettingsResponse, queues, settings } from "@/api/admin";
-import { ApiError } from "@/api/client";
+import Badge from "@/components/ui/Badge.vue";
+import Button from "@/components/ui/Button.vue";
+import ErrorState from "@/components/ui/ErrorState.vue";
+import Field from "@/components/ui/Field.vue";
+import Input from "@/components/ui/Input.vue";
+import Notice from "@/components/ui/Notice.vue";
+import RadioCards from "@/components/ui/RadioCards.vue";
+import Skeleton from "@/components/ui/Skeleton.vue";
+import { formatBytes, formatDuration } from "@/lib/utils";
 import PageHeader from "@/shared/components/PageHeader.vue";
+import Section from "@/shared/components/Section.vue";
 import { useAsyncData } from "@/shared/composables/useAsyncData";
+import { useToasts } from "@/shared/composables/useToasts";
+import { describeError } from "@/shared/errors";
 
 const { t } = useI18n();
+const toasts = useToasts();
 
 const loaded = useAsyncData<SettingsResponse>(() => settings.get());
 const queueStats = useAsyncData(() => queues.stats());
 
 const draft = ref<Record<string, unknown>>({});
 const saving = ref(false);
-const message = ref<string | null>(null);
 const error = ref<string | null>(null);
 const restartNeeded = ref<string[]>([]);
 
@@ -38,185 +46,120 @@ watch(
 );
 
 const hotReloadable = computed(() => new Set(loaded.data.value?.hot_reloadable ?? []));
+const accessMode = computed({
+  get: () => String(draft.value.admin_content_access ?? "break_glass"),
+  set: (value: string) => {
+    draft.value.admin_content_access = value;
+  },
+});
+const accessOptions = computed(() =>
+  (["break_glass", "on_grant", "always"] as const).map((mode) => ({
+    value: mode,
+    label: t(`settings.access.${mode}.label`),
+    description: t(`settings.access.${mode}.detail`),
+    recommended: mode === "break_glass",
+  })),
+);
 
-const ACCESS_MODES = ["break_glass", "on_grant", "always"] as const;
+const NUMERIC_FIELDS = [
+  { key: "break_glass_ttl_minutes", labelKey: "settings.breakGlassTtl", min: 5, max: 1440 },
+  { key: "default_rate_limit_rpm", labelKey: "settings.defaultRpm", min: 1, max: 100000 },
+  { key: "audit_retention_days", labelKey: "settings.auditRetention", min: 30, max: 3650 },
+  { key: "session_ttl_minutes", labelKey: "settings.sessionTtl", min: 5, max: 10080 },
+  { key: "max_upload_bytes", labelKey: "settings.maxUpload", min: 1048576, max: 10737418240 },
+] as const;
+
+function numberField(key: string): number | null {
+  const value = draft.value[key];
+  return typeof value === "number" ? value : null;
+}
+
+function setNumber(key: string, value: string | number | null): void {
+  draft.value[key] = value === null || value === "" ? null : Number(value);
+}
+
+function ageTone(seconds: number): "ok" | "warn" | "bad" {
+  if (seconds > 1800) return "bad";
+  return seconds > 300 ? "warn" : "ok";
+}
 
 async function save(): Promise<void> {
   saving.value = true;
   error.value = null;
-  message.value = null;
   try {
     const response = await settings.update(draft.value);
-    restartNeeded.value = response.requires_restart;
-    message.value = t("settings.saved");
+    restartNeeded.value = response.requires_restart ?? [];
+    toasts.success(t("settings.saved"));
     await loaded.refresh();
   } catch (caught) {
-    error.value = caught instanceof ApiError ? caught.detail : t("errors.unexpected");
+    error.value = describeError(caught).message;
   } finally {
     saving.value = false;
   }
-}
-
-function ageClass(seconds: number): string {
-  if (seconds > 1800) return "bad";
-  return seconds > 300 ? "warn" : "";
 }
 </script>
 
 <template>
   <div>
-    <PageHeader :title="t('settings.title')" :subtitle="t('settings.subtitle')" />
+    <PageHeader :title="t('settings.title')" :description="t('settings.subtitle')" />
 
-    <el-alert v-if="error" type="error" :title="error" show-icon :closable="false" class="mb" />
-    <el-alert v-if="message" type="success" :title="message" show-icon :closable="false" class="mb" />
-    <el-alert
-      v-if="restartNeeded.length"
-      type="warning"
-      show-icon
-      :closable="false"
-      class="mb"
-      data-test="restart-warning"
-    >
+    <ErrorState v-if="loaded.error.value" :message="loaded.error.value" class="mb-4" @retry="loaded.refresh()" />
+    <Notice v-if="restartNeeded.length" tone="warn" class="mb-4" test-id="restart-warning">
       {{ t("settings.restartNeeded", { keys: restartNeeded.join(", ") }) }}
-    </el-alert>
+    </Notice>
 
-    <section v-if="loaded.data.value" class="card">
-      <h2>{{ t("settings.accessTitle") }}</h2>
+    <Skeleton v-if="loaded.loading.value && !loaded.data.value" :rows="5" />
 
-      <el-radio-group v-model="draft.admin_content_access" class="modes" data-test="access-mode">
-        <label v-for="mode in ACCESS_MODES" :key="mode" class="mode">
-          <el-radio :value="mode">
-            <div>
-              <strong>{{ t(`settings.access.${mode}.label`) }}</strong>
-              <p>{{ t(`settings.access.${mode}.detail`) }}</p>
-            </div>
-          </el-radio>
-        </label>
-      </el-radio-group>
+    <form v-else-if="loaded.data.value" class="grid" @submit.prevent="save">
+      <Section :title="t('settings.accessTitle')" :description="t('settings.accessDescription')" id="access">
+        <RadioCards v-model="accessMode" :options="accessOptions" class="max-w-2xl" test-id="access-mode" />
+      </Section>
 
-      <el-form label-position="top" class="grid">
-        <el-form-item>
-          <template #label>
-            {{ t("settings.breakGlassTtl") }}
-            <em v-if="hotReloadable.has('break_glass_ttl_minutes')" class="hot">
-              {{ t("settings.hot") }}
-            </em>
-          </template>
-          <el-input-number v-model="draft.break_glass_ttl_minutes" :min="5" :max="1440" />
-        </el-form-item>
+      <Section :title="t('settings.limitsTitle')" :description="t('settings.limitsDescription')" id="limits">
+        <div class="grid max-w-3xl gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <Field v-for="field in NUMERIC_FIELDS" :key="field.key" :id="`setting-${field.key}`">
+            <template #default="{ id }">
+              <label :for="id" class="flex items-center gap-2 text-[12.5px] font-medium text-ink-2">
+                {{ t(field.labelKey) }}
+                <Badge size="sm" :tone="hotReloadable.has(field.key) ? 'ok' : 'warn'">
+                  {{ hotReloadable.has(field.key) ? t("settings.hot") : t("settings.restart") }}
+                </Badge>
+              </label>
+              <Input
+                :id="id"
+                :model-value="numberField(field.key)"
+                type="number"
+                :min="field.min"
+                :max="field.max"
+                class="mt-1.5"
+                :data-test="`setting-${field.key}`"
+                @update:model-value="setNumber(field.key, $event)"
+              />
+              <p v-if="field.key === 'max_upload_bytes'" class="mt-1 text-[12px] text-ink-3">= {{ formatBytes(numberField(field.key)) }}</p>
+            </template>
+          </Field>
+        </div>
+        <Notice v-if="error" tone="bad" class="mt-4 max-w-3xl">{{ error }}</Notice>
+        <div class="mt-4">
+          <Button type="submit" variant="primary" :loading="saving" data-test="save-settings">{{ t("common.save") }}</Button>
+        </div>
+      </Section>
+    </form>
 
-        <el-form-item>
-          <template #label>
-            {{ t("settings.defaultRpm") }}
-            <em v-if="hotReloadable.has('default_rate_limit_rpm')" class="hot">
-              {{ t("settings.hot") }}
-            </em>
-          </template>
-          <el-input-number v-model="draft.default_rate_limit_rpm" :min="1" :max="100000" />
-        </el-form-item>
-
-        <el-form-item>
-          <template #label>
-            {{ t("settings.auditRetention") }}
-            <em v-if="hotReloadable.has('audit_retention_days')" class="hot">
-              {{ t("settings.hot") }}
-            </em>
-          </template>
-          <el-input-number v-model="draft.audit_retention_days" :min="30" :max="3650" />
-        </el-form-item>
-
-        <el-form-item>
-          <template #label>
-            {{ t("settings.sessionTtl") }}
-            <em class="cold">{{ t("settings.restart") }}</em>
-          </template>
-          <el-input-number v-model="draft.session_ttl_minutes" :min="5" :max="10080" />
-        </el-form-item>
-      </el-form>
-
-      <el-button type="primary" :loading="saving" data-test="save-settings" @click="save">
-        {{ t("common.save") }}
-      </el-button>
-    </section>
-
-    <section class="card">
-      <h2>{{ t("settings.queuesTitle") }}</h2>
-      <p class="hint">{{ t("settings.queuesHint") }}</p>
-
-      <el-table :data="queueStats.data.value?.queues ?? []" size="small" data-test="queues-table">
-        <el-table-column prop="queue" :label="t('settings.queue')" width="140" />
-        <el-table-column prop="ready" :label="t('settings.ready')" width="100" />
-        <el-table-column :label="t('settings.oldestReady')">
-          <template #default="{ row }">
-            <span :class="ageClass(row.oldest_ready_age_seconds)">
-              {{ row.oldest_ready_age_seconds }}s
-            </span>
-          </template>
-        </el-table-column>
-      </el-table>
-    </section>
+    <Section :title="t('settings.queuesTitle')" :description="t('settings.queuesHint')" id="queues">
+      <Skeleton v-if="queueStats.loading.value && !queueStats.data.value" :rows="3" />
+      <p v-else-if="queueStats.error.value" class="text-[13px] text-ink-3">{{ queueStats.error.value }}</p>
+      <ul v-else class="divide-y divide-line rounded-md border border-line" data-test="queues-table">
+        <li v-for="queue in queueStats.data.value?.queues ?? []" :key="queue.queue" class="grid grid-cols-[120px_1fr_1fr] items-center gap-3 px-3 py-2 text-[13px]">
+          <code class="text-ink">{{ queue.queue }}</code>
+          <span class="tnum text-ink-2">{{ t("settings.readyCount", { n: queue.ready }) }}</span>
+          <span class="tnum flex items-center gap-2 text-ink-2">
+            <Badge size="sm" :tone="queue.ready ? ageTone(queue.oldest_ready_age_seconds) : 'neutral'" dot>
+              {{ queue.ready ? formatDuration(queue.oldest_ready_age_seconds) : t("settings.idle") }}
+            </Badge>
+          </span>
+        </li>
+      </ul>
+    </Section>
   </div>
 </template>
-
-<style scoped>
-.card {
-  background: var(--cairn-surface);
-  border: 1px solid var(--cairn-border);
-  border-radius: 8px;
-  padding: var(--cairn-space-5);
-  margin-bottom: var(--cairn-space-5);
-}
-h2 {
-  margin: 0 0 var(--cairn-space-4);
-  font-size: 15px;
-}
-.hint {
-  margin: -8px 0 var(--cairn-space-4);
-  font-size: 12px;
-  color: var(--cairn-text-muted);
-}
-.modes {
-  display: grid;
-  gap: var(--cairn-space-3);
-  margin-bottom: var(--cairn-space-5);
-}
-.mode p {
-  margin: 2px 0 0;
-  font-size: 12px;
-  color: var(--cairn-text-muted);
-  line-height: 1.5;
-  white-space: normal;
-  max-width: 62ch;
-}
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: var(--cairn-space-4);
-}
-.hot,
-.cold {
-  font-style: normal;
-  font-size: 10px;
-  padding: 1px 5px;
-  border-radius: 3px;
-  margin-left: 6px;
-}
-.hot {
-  background: #e8f3ec;
-  color: var(--cairn-success);
-}
-.cold {
-  background: #f6efe4;
-  color: var(--cairn-warning);
-}
-.warn {
-  color: var(--cairn-warning);
-}
-.bad {
-  color: var(--cairn-danger);
-  font-weight: 600;
-}
-.mb {
-  margin-bottom: var(--cairn-space-4);
-}
-</style>

@@ -6,17 +6,14 @@
  * dismiss the dialog is left staring at an application where every request 403s.
  */
 
-import ElementPlus from "element-plus";
-import { createPinia, setActivePinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mount, type VueWrapper } from "@vue/test-utils";
 import { nextTick } from "vue";
-import { createI18n } from "vue-i18n";
 
-import enUS from "@/locales/en-US.json";
-import zhCN from "@/locales/zh-CN.json";
 import ForcedCredentialDialog from "@/features/auth/ForcedCredentialDialog.vue";
 import { useSessionStore } from "@/stores/session";
+
+import { freshPinia, makeI18n, settle } from "./helpers";
 
 const POLICY = {
   min_length: 12,
@@ -27,16 +24,9 @@ const POLICY = {
   disallow_previous: true,
 };
 
-const i18n = createI18n({
-  legacy: false,
-  locale: "en-US",
-  fallbackLocale: "en-US",
-  messages: { "en-US": enUS, "zh-CN": zhCN },
-});
-
 function mountDialog(): VueWrapper {
   return mount(ForcedCredentialDialog, {
-    global: { plugins: [i18n, ElementPlus] },
+    global: { plugins: [makeI18n()] },
     attachTo: document.body,
   });
 }
@@ -63,9 +53,7 @@ function flagged() {
 
 const q = (selector: string) => document.body.querySelector(selector);
 
-/** el-dialog teleports to <body>; drive the real input and let v-model react.
- *  ElInput sets inheritAttrs:false and forwards attrs to the inner <input>, so
- *  data-test may land on the input itself rather than on a wrapper. */
+/** The dialog is portalled to <body>; drive the real input and let v-model react. */
 async function setField(name: string, value: string): Promise<void> {
   const target = q(`[data-test="${name}"]`);
   const input = (
@@ -79,7 +67,7 @@ async function setField(name: string, value: string): Promise<void> {
 
 describe("ForcedCredentialDialog", () => {
   beforeEach(() => {
-    setActivePinia(createPinia());
+    freshPinia();
     document.body.innerHTML = "";
   });
 
@@ -98,20 +86,19 @@ describe("ForcedCredentialDialog", () => {
     flagged();
     const wrapper = mountDialog();
     await wrapper.vm.$nextTick();
+    await settle();
 
     const dialog = q('[data-test="forced-credential-dialog"]');
     expect(dialog).not.toBeNull();
 
     // No ✕ button is rendered at all — not merely disabled.
-    expect(q(".el-dialog__headerbtn")).toBeNull();
+    expect(q('[data-test="dialog-close"]')).toBeNull();
 
-    // Element Plus reads these props to decide whether ESC and backdrop clicks
-    // close the dialog. Asserting the props is the honest check: simulating a
-    // keypress would test the library, not our configuration.
-    const props = wrapper.findComponent({ name: "ElDialog" }).props();
-    expect(props.closeOnPressEscape).toBe(false);
-    expect(props.closeOnClickModal).toBe(false);
-    expect(props.showClose).toBe(false);
+    // Escape must not close it.
+    dialog?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await settle();
+    expect(q('[data-test="forced-credential-dialog"]')).not.toBeNull();
+    expect(useSessionStore().mustChangePassword).toBe(true);
   });
 
   it("TC-M16-04: renders policy rules from the server, not from hardcoded values", async () => {
@@ -122,6 +109,7 @@ describe("ForcedCredentialDialog", () => {
 
     const wrapper = mountDialog();
     await wrapper.vm.$nextTick();
+    await settle();
 
     const rules = q('[data-test="policy-rules"]');
     expect(rules?.textContent).toContain("At least 20 characters");
@@ -132,6 +120,7 @@ describe("ForcedCredentialDialog", () => {
     flagged();
     const wrapper = mountDialog();
     await wrapper.vm.$nextTick();
+    await settle();
 
     const lengthRule = () => q('[data-rule="length"]');
     expect(lengthRule()?.classList.contains("ok")).toBe(false);
@@ -147,6 +136,7 @@ describe("ForcedCredentialDialog", () => {
     flagged();
     const wrapper = mountDialog();
     await wrapper.vm.$nextTick();
+    await settle();
 
     const submit = () => q('[data-test="submit"]') as HTMLButtonElement | null;
     expect(submit()?.disabled).toBe(true);
@@ -176,6 +166,7 @@ describe("ForcedCredentialDialog", () => {
 
     const wrapper = mountDialog();
     await wrapper.vm.$nextTick();
+    await settle();
 
     await setField("username", "dana.ops");
     await setField("current-password", "initial-password");
@@ -183,14 +174,15 @@ describe("ForcedCredentialDialog", () => {
     await setField("confirm-password", "Correct-Horse-Battery-9");
     await wrapper.vm.$nextTick();
 
-    await (q('[data-test="submit"]') as HTMLButtonElement).click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    (q('[data-test="submit"]') as HTMLButtonElement).click();
+    await settle();
 
     // One call, carrying both changes — not a rename followed by a password change.
     const setupCalls = fetchMock.mock.calls.filter(
       ([url]) => String(url) === "/v1/auth/complete-initial-setup",
     );
     expect(setupCalls).toHaveLength(1);
+    expect(wrapper.emitted("completed")).toHaveLength(1);
 
     const [, init] = setupCalls[0] as [string, RequestInit];
     const body = JSON.parse(String(init.body));
@@ -224,6 +216,7 @@ describe("ForcedCredentialDialog", () => {
 
     const wrapper = mountDialog();
     await wrapper.vm.$nextTick();
+    await settle();
 
     await setField("username", "taken.name");
     await setField("current-password", "initial-password");
@@ -231,8 +224,8 @@ describe("ForcedCredentialDialog", () => {
     await setField("confirm-password", "Correct-Horse-Battery-9");
     await wrapper.vm.$nextTick();
 
-    await (q('[data-test="submit"]') as HTMLButtonElement).click();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    (q('[data-test="submit"]') as HTMLButtonElement).click();
+    await settle();
 
     expect(q('[data-test="form-error"]')?.textContent).toContain("already in use");
     // The server rolled the whole change back, so the dialog must stay open.

@@ -1,5 +1,11 @@
 # M13 — MCP Server ★
 
+**Implementation checkpoint (2026-09-17):** the user approved a narrower first increment:
+generic read-only `search_knowledge_base` over Streamable HTTP, reusing existing retrieval/authz.
+See `../04-plan/31-generic-mcp-implementation.md` and `../06-ops/05-mcp-quickstart.md` for actual
+implemented scope and acceptance. The three-tool/resource design and all15 acceptance cases below
+remain the broader target, not a claim that list/get/resources/OAuth or every MCP client is supported.
+
 | | |
 | --- | --- |
 | **Package** | `cairn.mcpserver` |

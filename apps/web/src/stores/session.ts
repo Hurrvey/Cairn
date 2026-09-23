@@ -117,6 +117,10 @@ export const useSessionStore = defineStore("session", () => {
     }
   }
 
+  async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    await authApi.changePassword({ current_password: currentPassword, new_password: newPassword });
+  }
+
   async function signOut(): Promise<void> {
     try {
       await authApi.logout();
@@ -137,6 +141,7 @@ export const useSessionStore = defineStore("session", () => {
     isAuthenticated,
     signIn,
     completeSetup,
+    changePassword,
     completeSetupPolicy: policy,
     loadMe,
     restore,

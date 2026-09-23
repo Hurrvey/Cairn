@@ -9,10 +9,17 @@ which knowledge base a document belongs to before it can authorize anything.
 
 from __future__ import annotations
 
+import hashlib
+import tempfile
+from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Annotated, Any
+from urllib.parse import quote
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, Query, Response, status
+import anyio
+from fastapi import APIRouter, Body, Depends, File, Query, Response, UploadFile, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from cairn.authz.deps import current_principal, require_permission
@@ -24,6 +31,7 @@ from cairn.catalog.dto import (
     UpdateKbSpec,
     UploadSpec,
 )
+from cairn.catalog.errors import UnsupportedFileType
 from cairn.catalog.schemas import (
     BindingResponse,
     ChunkResponse,
@@ -34,15 +42,24 @@ from cairn.catalog.schemas import (
     EditChunkRequest,
     IndexProgressResponse,
     IndexVersionResponse,
+    KnowledgeBaseOptionsResponse,
     KnowledgeBaseResponse,
+    ModelChoiceResponse,
     RegisterUploadRequest,
     ReindexEstimateResponse,
     ReindexRequest,
+    SafeBindingResponse,
     UpdateKbRequest,
 )
 from cairn.catalog.service import CatalogService, get_catalog_service
+from cairn.core.config import get_settings
+from cairn.core.errors import ValidationFailed
 from cairn.core.ids import decode_id
 from cairn.core.pagination import MAX_LIMIT, CursorPage, decode_cursor
+from cairn.core.tokenizer_config import configured_tokenizer_ids
+from cairn.core.upload_limits import MAX_UPLOAD_BYTES
+from cairn.modelgw.catalog import get_model_catalog
+from cairn.objectstore.keys import ObjectKeys
 
 __all__ = ["router"]
 
@@ -57,6 +74,27 @@ PROBLEM: dict[int | str, dict[str, Any]] = {
 #: One request registers a whole upload batch. Capped because each entry becomes
 #: a row plus a queued task, and an unbounded list is an unbounded transaction.
 MAX_BATCH = 100
+_UPLOAD_CHUNK_BYTES = 1024 * 1024
+SUPPORTED_UPLOAD_TYPES: dict[str, frozenset[str]] = {
+    ".txt": frozenset({"text/plain"}),
+    ".md": frozenset({"text/markdown", "text/plain"}),
+    ".markdown": frozenset({"text/markdown", "text/plain"}),
+    ".html": frozenset({"text/html"}),
+    ".htm": frozenset({"text/html"}),
+    ".json": frozenset({"application/json"}),
+    ".docx": frozenset({"application/vnd.openxmlformats-officedocument.wordprocessingml.document"}),
+    ".pptx": frozenset(
+        {"application/vnd.openxmlformats-officedocument.presentationml.presentation"}
+    ),
+    ".xlsx": frozenset({"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}),
+    ".csv": frozenset({"text/csv", "application/csv", "text/plain"}),
+    ".pdf": frozenset({"application/pdf"}),
+    ".png": frozenset({"image/png"}),
+    ".jpg": frozenset({"image/jpeg"}),
+    ".jpeg": frozenset({"image/jpeg"}),
+    ".tif": frozenset({"image/tiff"}),
+    ".tiff": frozenset({"image/tiff"}),
+}
 
 
 def _service() -> CatalogService:
@@ -85,6 +123,43 @@ class DocumentStateCounts(BaseModel):
 
     counts: dict[str, int]
     total: int
+
+
+@router.get(
+    "/knowledge-base-options",
+    response_model=KnowledgeBaseOptionsResponse,
+    responses=PROBLEM,
+    summary="List safe knowledge-base setup options",
+)
+async def knowledge_base_options(
+    actor: Annotated[Principal, Depends(current_principal)],
+    service: Annotated[CatalogService, Depends(_service)],
+) -> KnowledgeBaseOptionsResponse:
+    models = []
+    bindings = []
+    if actor.can("kb:create"):
+        models = [
+            model
+            for model in await get_model_catalog().list_models(actor.workspace_id, "embedding")
+            if (
+                model.is_enabled
+                and model.health_state != "unavailable"
+                and model.dimension
+                and model.tokenizer_id
+            )
+        ]
+        bindings = [
+            binding
+            for binding in await service.list_bindings(actor.workspace_id)
+            if binding.health_state != "unavailable"
+        ]
+    return KnowledgeBaseOptionsResponse(
+        models=[ModelChoiceResponse.from_dto(model) for model in models],
+        bindings=[SafeBindingResponse.from_dto(binding) for binding in bindings],
+        tokenizers=list(configured_tokenizer_ids(get_settings().retrieval)),
+        supported_extensions=sorted(SUPPORTED_UPLOAD_TYPES),
+        max_upload_bytes=MAX_UPLOAD_BYTES,
+    )
 
 
 # ------------------------------------------------------------ knowledge bases
@@ -331,6 +406,115 @@ async def register_documents(
     return results
 
 
+def _validated_upload_type(filename: str | None, content_type: str | None) -> tuple[str, str]:
+    if not filename or len(filename) > 1024 or "\x00" in filename:
+        raise UnsupportedFileType("The upload must have a valid filename.")
+    extension = Path(filename).suffix.lower()
+    allowed = SUPPORTED_UPLOAD_TYPES.get(extension)
+    normalized = (content_type or "").partition(";")[0].strip().lower()
+    if allowed is None or normalized not in allowed:
+        raise UnsupportedFileType(
+            "Supported uploads are TXT, Markdown, HTML, JSON, DOCX, PPTX, XLSX, CSV, "
+            "PDF, PNG, JPEG, and single-page TIFF."
+        )
+    return filename, normalized
+
+
+async def _spool_upload(file: UploadFile) -> tuple[tempfile.SpooledTemporaryFile[bytes], int, str]:
+    spool = _new_spool()
+    digest = hashlib.sha256()
+    size = 0
+    try:
+        while chunk := await file.read(_UPLOAD_CHUNK_BYTES):
+            size += len(chunk)
+            if size > MAX_UPLOAD_BYTES:
+                raise UnsupportedFileType(f"Uploads are limited to {MAX_UPLOAD_BYTES} bytes.")
+            digest.update(chunk)
+            await anyio.to_thread.run_sync(spool.write, chunk)
+        if size == 0:
+            raise UnsupportedFileType("Empty files cannot be uploaded.")
+        await anyio.to_thread.run_sync(spool.seek, 0)
+        return spool, size, digest.hexdigest()
+    except BaseException:
+        spool.close()
+        raise
+
+
+def _new_spool() -> tempfile.SpooledTemporaryFile[bytes]:
+    return tempfile.SpooledTemporaryFile(max_size=2 * _UPLOAD_CHUNK_BYTES, mode="w+b")
+
+
+async def _validate_upload_signature(
+    spool: tempfile.SpooledTemporaryFile[bytes], filename: str
+) -> None:
+    signature = await anyio.to_thread.run_sync(spool.read, 8)
+    await anyio.to_thread.run_sync(spool.seek, 0)
+    extension = Path(filename).suffix.lower()
+    signatures = {
+        ".pdf": (b"%PDF-",),
+        ".png": (b"\x89PNG\r\n\x1a\n",),
+        ".jpg": (b"\xff\xd8\xff",),
+        ".jpeg": (b"\xff\xd8\xff",),
+        ".tif": (b"II*\x00", b"MM\x00*"),
+        ".tiff": (b"II*\x00", b"MM\x00*"),
+    }
+    expected = signatures.get(extension)
+    if expected is not None and not signature.startswith(expected):
+        raise UnsupportedFileType("The document signature does not match its file extension.")
+    if expected is None and any(signature.startswith(magic) for magic in signatures.values()):
+        raise UnsupportedFileType("PDF and image uploads must use their actual file extension.")
+    if extension in {".docx", ".pptx", ".xlsx"} and not signature.startswith(b"PK\x03\x04"):
+        raise UnsupportedFileType("The Office upload is not a valid ZIP-based document.")
+
+
+async def _spooled_chunks(
+    spool: tempfile.SpooledTemporaryFile[bytes],
+) -> AsyncIterator[bytes]:
+    try:
+        while chunk := await anyio.to_thread.run_sync(spool.read, _UPLOAD_CHUNK_BYTES):
+            yield chunk
+    finally:
+        spool.close()
+
+
+@router.post(
+    "/knowledge-bases/{kb_id}/documents/upload",
+    response_model=DocumentRegistrationResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses=PROBLEM,
+    summary="Upload and register a document",
+)
+async def upload_document(
+    kb_id: str,
+    actor: Annotated[Principal, Depends(require_permission("kb:write", "kb_id"))],
+    service: Annotated[CatalogService, Depends(_service)],
+    file: Annotated[UploadFile, File()],
+) -> DocumentRegistrationResponse:
+    filename, content_type = _validated_upload_type(file.filename, file.content_type)
+    spool: tempfile.SpooledTemporaryFile[bytes] | None = None
+    try:
+        spool, size, content_hash = await _spool_upload(file)
+        await _validate_upload_signature(spool, filename)
+        target = decode_id("kb", kb_id)
+        result = await service.upload_document(
+            actor,
+            target,
+            UploadSpec(
+                filename=filename,
+                content_hash=content_hash,
+                size_bytes=size,
+                mime_type=content_type,
+                object_key=ObjectKeys.original(actor.workspace_id, target, content_hash),
+            ),
+            _spooled_chunks(spool),
+        )
+        return DocumentRegistrationResponse.from_dto(result)
+    finally:
+        if spool is not None:
+            spool.close()
+        await file.close()
+
+
 @router.get(
     "/knowledge-bases/{kb_id}/documents",
     response_model=CursorPage[DocumentResponse],
@@ -391,7 +575,37 @@ async def get_document(
     actor: Annotated[Principal, Depends(require_permission("kb:read", "kb_id"))],
     service: Annotated[CatalogService, Depends(_service)],
 ) -> DocumentResponse:
-    return DocumentResponse.from_dto(await service.get_document(decode_id("doc", document_id)))
+    return DocumentResponse.from_dto(
+        await service.get_document(
+            decode_id("doc", document_id), expected_kb_id=decode_id("kb", kb_id)
+        )
+    )
+
+
+@router.get(
+    "/knowledge-bases/{kb_id}/documents/{document_id}/download",
+    responses=PROBLEM,
+    summary="Download a document source",
+)
+async def download_document(
+    kb_id: str,
+    document_id: str,
+    actor: Annotated[Principal, Depends(require_permission("kb:read", "kb_id"))],
+    service: Annotated[CatalogService, Depends(_service)],
+) -> StreamingResponse:
+    document, stream = await service.download_document(
+        actor, decode_id("kb", kb_id), decode_id("doc", document_id)
+    )
+    filename = document.title or "document"
+    disposition = f"attachment; filename*=UTF-8''{quote(filename, safe='')}"
+    return StreamingResponse(
+        stream,
+        media_type=document.mime_type or "application/octet-stream",
+        headers={
+            "Content-Disposition": disposition,
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.delete(
@@ -406,7 +620,11 @@ async def delete_document(
     actor: Annotated[Principal, Depends(require_permission("kb:write", "kb_id"))],
     service: Annotated[CatalogService, Depends(_service)],
 ) -> Response:
-    await service.delete_document(actor, decode_id("doc", document_id))
+    await service.delete_document(
+        actor,
+        decode_id("doc", document_id),
+        expected_kb_id=decode_id("kb", kb_id),
+    )
     return Response(status_code=status.HTTP_202_ACCEPTED)
 
 
@@ -415,7 +633,7 @@ async def delete_document(
     status_code=status.HTTP_202_ACCEPTED,
     responses=PROBLEM,
     summary="Retry a failed document",
-    description="Re-runs the pipeline from the start for a document in `failed`.",
+    description="Resumes the durable failed stage for a document in `failed`.",
 )
 async def retry_document(
     kb_id: str,
@@ -423,7 +641,11 @@ async def retry_document(
     actor: Annotated[Principal, Depends(require_permission("kb:write", "kb_id"))],
     service: Annotated[CatalogService, Depends(_service)],
 ) -> Response:
-    await service.retry_document(actor, decode_id("doc", document_id))
+    await service.retry_document(
+        actor,
+        decode_id("doc", document_id),
+        expected_kb_id=decode_id("kb", kb_id),
+    )
     return Response(status_code=status.HTTP_202_ACCEPTED)
 
 
@@ -504,6 +726,7 @@ async def create_binding(
     body: CreateBindingRequest,
     service: Annotated[CatalogService, Depends(_service)],
 ) -> BindingResponse:
+    _validate_binding_config(body)
     ref = await service.create_binding(
         actor,
         kind=body.kind,
@@ -513,6 +736,30 @@ async def create_binding(
         is_default=body.is_default,
     )
     return BindingResponse.from_dto(ref)
+
+
+def _validate_binding_config(body: CreateBindingRequest) -> None:
+    expected_driver = "local" if body.kind == "object" else "pgvector"
+    if body.driver != expected_driver:
+        raise ValidationFailed(
+            f"The first-product {body.kind} binding driver must be {expected_driver!r}."
+        )
+    if body.kind == "vector":
+        if body.config:
+            raise ValidationFailed("pgvector uses the configured application database.")
+        return
+    unknown = set(body.config) - {"path"}
+    if unknown:
+        raise ValidationFailed("Local object storage config contains unsupported fields.")
+    raw_path = body.config.get("path")
+    if raw_path is None:
+        return
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        raise ValidationFailed("Local object storage path must be a non-empty string.")
+    deployment_root = Path(get_settings().objectstore.local_path).resolve()
+    requested = Path(raw_path).resolve()
+    if not requested.is_relative_to(deployment_root):
+        raise ValidationFailed("Local object storage path must remain under the deployment root.")
 
 
 @router.get(
@@ -527,7 +774,7 @@ async def create_binding(
     ),
 )
 async def list_bindings(
-    actor: Annotated[Principal, Depends(require_permission("kb:create"))],
+    actor: Annotated[Principal, Depends(require_permission("platform:storage"))],
     service: Annotated[CatalogService, Depends(_service)],
     kind: Annotated[str | None, Query(pattern="^(vector|object)$")] = None,
 ) -> list[BindingResponse]:

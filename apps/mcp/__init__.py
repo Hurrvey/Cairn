@@ -1,0 +1,1 @@
+"""Managed MCP deployment entrypoint."""

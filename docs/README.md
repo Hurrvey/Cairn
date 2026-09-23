@@ -109,6 +109,21 @@ acceptance criteria.
 | [18-lifecycle-followup-review.md](04-plan/18-lifecycle-followup-review.md) | Historical source review; accepted fan-out is tracked in document19, later lifecycle gaps remain |
 | [19-reindex-fanout-implementation.md](04-plan/19-reindex-fanout-implementation.md) | Resumable fan-out, activation/deletion barriers, replay and artifact-reuse evidence |
 | [20-chunk-reembed-implementation.md](04-plan/20-chunk-reembed-implementation.md) | Manual chunk reembedding, edit-generation fencing, exact token/payload validation and retry evidence |
+| [21-runnable-product-priority.md](04-plan/21-runnable-product-priority.md) | User-directed runnable main-flow priority, project-wide gaps and supported-format release acceptance |
+| [22-stage-recovery-implementation.md](04-plan/22-stage-recovery-implementation.md) | Failed-stage resumepoints, recovery-generation fencing and scoped contributor retry evidence |
+| [23-retrieval-mainflow-preflight.md](04-plan/23-retrieval-mainflow-preflight.md) | Historical retrieval preflight; current accepted endpoint and remaining gates are tracked in document24 |
+| [24-retrieval-api-implementation.md](04-plan/24-retrieval-api-implementation.md) | Accepted bounded public query API, environment configuration, auth/isolation, evidence and release limitations |
+| [25-main-product-delivery.md](04-plan/25-main-product-delivery.md) | Current five-part user delivery: UI, configuration, Compose, runtime refresh and cleanup |
+| [26-runtime-cleanup-implementation.md](04-plan/26-runtime-cleanup-implementation.md) | Automatic runtime refresh, general purge and protected index retirement |
+| [27-management-upload-interface.md](04-plan/27-management-upload-interface.md) | Management/upload contract shared by backend and UI |
+| [28-management-upload-implementation.md](04-plan/28-management-upload-implementation.md) | Dynamic provider projection, safe setup APIs, bounded upload/download and acceptance journal |
+| [29-main-product-acceptance.md](04-plan/29-main-product-acceptance.md) | Coordinator's actual browser, worker, deployment, persistence and lifecycle acceptance evidence |
+| [30-model-bounded-chunk-repair.md](04-plan/30-model-bounded-chunk-repair.md) | September16 long-document/model-token limit regression, source-preserving repair and actual user recovery |
+| [31-generic-mcp-implementation.md](04-plan/31-generic-mcp-implementation.md) | Cairn-only read-only MCP scope, implementation and independent protocol/deployment acceptance |
+| [32-mcp-web-management-design.md](04-plan/32-mcp-web-management-design.md) | Approved MCP web management architecture, durable control and real lifecycle acceptance |
+| [33-agent-mcp-integration-proposal.md](04-plan/33-agent-mcp-integration-proposal.md) | Approved Agent backend integration, CLI then WebSocket evidence, restart recovery and remaining live-model gates |
+| [34-pdf-ocr-continuation.md](04-plan/34-pdf-ocr-continuation.md) | PDF/OCR baseline, public-corpus measurement, advanced retrieval and September22 green full-suite closure |
+| [35-web-workbench-redesign.md](04-plan/35-web-workbench-redesign.md) | Frontend rebuilt as a workbench: stack, identity, information architecture, browser acceptance evidence |
 
 ### 05 — Quality
 
@@ -117,6 +132,7 @@ acceptance criteria.
 | [01-test-strategy.md](05-quality/01-test-strategy.md) | Test pyramid, fixtures, coverage gates, golden datasets, CI |
 | [02-performance-slo.md](05-quality/02-performance-slo.md) | SLIs, SLOs, benchmark harness, load profiles, capacity model |
 | [03-security-baseline.md](05-quality/03-security-baseline.md) | Threat model, controls checklist, sandbox and SSRF requirements |
+| [04-pdf-ocr-evaluation.md](05-quality/04-pdf-ocr-evaluation.md) | Public 30-artifact PDF/OCR measurement; table F1/reading-order gate still OPEN |
 
 ### 06 — Operations
 
@@ -124,6 +140,10 @@ acceptance criteria.
 | --- | --- |
 | [01-deployment.md](06-ops/01-deployment.md) | Compose topology, sizing presets, Helm/K8s, config reference, upgrades |
 | [02-observability-runbook.md](06-ops/02-observability-runbook.md) | Metrics, traces, dashboards, alerts, incident runbooks |
+| [04-local-product-quickstart.md](06-ops/04-local-product-quickstart.md) | Supported-format local product startup, model/storage setup and persistent worker lifecycle |
+| [05-mcp-quickstart.md](06-ops/05-mcp-quickstart.md) | Generic Streamable HTTP MCP connection, scoped keys, client smoke and compatibility limits |
+| [06-mcp-service-management.md](06-ops/06-mcp-service-management.md) | Web-controlled port/start/stop/restart, state, logs, deployment and recovery |
+| [07-pdf-and-retrieval.md](06-ops/07-pdf-and-retrieval.md) | OCR runtime settings, rerank endpoint configuration, weighted fusion and parent context |
 
 ---
 

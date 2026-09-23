@@ -1,20 +1,68 @@
 {
   "common": {
     "cancel": "Cancel",
+    "confirm": "Confirm",
     "create": "Create",
     "save": "Save",
     "delete": "Delete",
+    "deleteFailed": "Could not delete",
     "done": "Done",
-    "close": "Close"
+    "close": "Close",
+    "copy": "Copy",
+    "copied": "Copied",
+    "edit": "Edit",
+    "open": "Open",
+    "refresh": "Refresh",
+    "retry": "Retry",
+    "loadMore": "Load more",
+    "actions": "Actions",
+    "name": "Name",
+    "description": "Description",
+    "select": "Select…",
+    "recommended": "Recommended",
+    "disabled": "Disabled",
+    "on": "On",
+    "off": "Off"
   },
   "nav": {
-    "dashboard": "Dashboard",
+    "primary": "Main navigation",
+    "openMenu": "Open menu",
+    "dashboard": "Overview",
     "knowledge": "Knowledge bases",
+    "models": "Models",
+    "storage": "Storage",
     "users": "Users",
     "apiKeys": "API keys",
     "audit": "Audit log",
+    "mcpService": "MCP service",
     "settings": "Settings",
-    "phase": "Phase {n}"
+    "groups": {
+      "work": "Work",
+      "connect": "Connect",
+      "setup": "Setup",
+      "admin": "Administration"
+    }
+  },
+  "shell": {
+    "toggleTheme": "Switch light or dark theme",
+    "changePassword": "Change password",
+    "changePasswordHint": "Choose a new password for your account. You stay signed in.",
+    "passwordChanged": "Password changed.",
+    "offline": "You are offline. Changes will fail until the connection returns.",
+    "serverUnreachable": "The server cannot be reached. Retrying automatically."
+  },
+  "palette": {
+    "trigger": "Search or jump to…",
+    "placeholder": "Type a page, a knowledge base or an action",
+    "empty": "Nothing matches.",
+    "newKnowledgeBase": "New knowledge base",
+    "darkTheme": "Switch to dark theme",
+    "lightTheme": "Switch to light theme",
+    "groups": {
+      "pages": "Pages",
+      "knowledge": "Knowledge bases",
+      "actions": "Actions"
+    }
   },
   "secret": {
     "onceTitle": "Copy this now — it is shown only once",
@@ -24,7 +72,10 @@
     "acknowledge": "I have saved this somewhere safe"
   },
   "login": {
-    "tagline": "Knowledge base platform for Agents",
+    "headline": "Knowledge, stacked for agents to find.",
+    "tagline": "Upload documents, index them, and let any agent retrieve cited passages through one API.",
+    "title": "Sign in",
+    "subtitle": "Use the account an administrator created for you.",
     "username": "Username",
     "password": "Password",
     "submit": "Sign in",
@@ -49,54 +100,413 @@
     }
   },
   "dashboard": {
-    "welcome": "Welcome, {name}",
-    "phaseNotice": "This deployment is running Phase 1. Knowledge bases, ingestion, and retrieval arrive in Phase 2.",
+    "greeting": {
+      "morning": "Good morning, {name}",
+      "afternoon": "Good afternoon, {name}",
+      "evening": "Good evening, {name}",
+      "night": "Working late, {name}"
+    },
+    "lede": "What needs attention, and where to pick up.",
     "admin": "Administrator",
     "signOut": "Sign out",
-    "available": "Available now",
-    "comingLater": "Arriving in later phases",
-    "phase": "Phase {n}",
-    "shortcuts": {
-      "users": "Create accounts and manage what each one can reach.",
-      "apiKeys": "Issue and revoke keys for Agents and applications.",
-      "audit": "Every credential, permission, and administrative change.",
-      "settings": "Access policy, rate limits, and retention."
+    "setup": {
+      "title": "Finish setting up",
+      "description": "Three steps before the first document can be indexed.",
+      "model": "Register an embedding model",
+      "modelHint": "Point at the TEI or Infinity service and test it.",
+      "storage": "Add storage",
+      "storageHint": "One binding for document files, one for vectors.",
+      "knowledge": "Create a knowledge base",
+      "knowledgeHint": "Then upload documents and search."
     },
-    "modules": {
-      "knowledge": {
-        "title": "Knowledge bases",
-        "detail": "Create and configure knowledge bases, storage backends, and indexing."
+    "attention": {
+      "title": "Needs attention",
+      "clear": "Nothing needs attention right now.",
+      "failedDocuments": "{n} failed documents in {kb}",
+      "building": "{kb} is building index v{v}",
+      "reindexRequired": "{kb} needs a rebuild to apply its new settings",
+      "kbError": "{kb} is in an error state",
+      "mcpError": "The MCP service reported an error",
+      "queueStalled": "The {queue} queue has work waiting for {minutes} min"
+    },
+    "bases": {
+      "title": "Knowledge bases",
+      "all": "View all"
+    },
+    "connect": {
+      "title": "Connect an agent",
+      "description": "Agents call the retrieval API or the MCP endpoint with an API key.",
+      "retrieval": "Retrieval API",
+      "mcp": "MCP endpoint",
+      "keysHint": "Issue and scope keys under"
+    }
+  },
+  "knowledge": {
+    "lede": "Everything you index, searchable by people and agents.",
+    "new": "New knowledge base",
+    "filter": "Filter by name",
+    "noMatch": "No knowledge base matches “{q}”.",
+    "rebuildRequired": "Rebuild required",
+    "columns": {
+      "name": "Name",
+      "status": "Status",
+      "documents": "Documents",
+      "chunks": "Chunks",
+      "size": "Size",
+      "lastIndexed": "Last indexed"
+    },
+    "status": {
+      "active": "Active",
+      "indexing": "Indexing",
+      "error": "Error",
+      "deleting": "Deleting",
+      "archived": "Archived"
+    },
+    "facts": {
+      "activeIndex": "Active index",
+      "documents": "{n} documents",
+      "processing": "{n} processing",
+      "failed": "{n} failed"
+    },
+    "empty": {
+      "title": "No knowledge bases yet",
+      "description": "Create one, upload documents, and search them within minutes.",
+      "setupFirst": "Register a model and add storage first; the setup steps above walk through it."
+    },
+    "tabs": {
+      "label": "Knowledge base sections",
+      "documents": "Documents",
+      "search": "Search",
+      "versions": "Index versions",
+      "settings": "Settings"
+    },
+    "create": {
+      "title": "New knowledge base",
+      "description": "The model and storage are fixed into the first index version.",
+      "done": "Created {name}.",
+      "model": "Embedding model",
+      "modelHint": "Changing the model later requires a rebuild.",
+      "objectStorage": "Document storage",
+      "vectorStorage": "Vector storage",
+      "strategyHint": "Parent–child keeps small searchable chunks with wider context.",
+      "setupMissing": "An administrator must register an embedding model and add document and vector storage first."
+    },
+    "delete": {
+      "action": "Delete knowledge base",
+      "title": "Delete {name}?",
+      "description": "All documents, chunks and vectors are removed. API keys scoped to it lose that scope.",
+      "done": "Deleted {name}.",
+      "failed": "Could not delete the knowledge base"
+    },
+    "rebuild": {
+      "action": "Rebuild index",
+      "title": "Rebuild the index?",
+      "description": "About {chunks} chunks will be re-embedded, roughly {minutes} min. Search keeps using the current index until the new one is ready.",
+      "confirm": "Start rebuild",
+      "started": "Rebuild started.",
+      "failed": "Could not start the rebuild"
+    },
+    "build": {
+      "inProgress": "Building index v{v}",
+      "eta": "about {time} left"
+    },
+    "access": {
+      "blockedTitle": "Content access is restricted",
+      "blockedBody": "You manage this knowledge base but do not have content access. Open a time-limited, audited window to read its documents.",
+      "request": "Request temporary access",
+      "dialogTitle": "Open temporary access",
+      "dialogBody": "The owner is notified and the reason is recorded in the audit log.",
+      "reason": "Reason",
+      "reasonHint": "At least 10 characters. Say what you need to look at and why.",
+      "ttl": "Duration (minutes)",
+      "ttlHint": "Leave empty to use the workspace default.",
+      "open": "Open access"
+    },
+    "documents": {
+      "upload": "Upload documents",
+      "browse": "browse files",
+      "dropHint": "Drop files here or",
+      "filter": "Filter documents",
+      "noMatch": "No document matches the filter.",
+      "detail": "Document detail",
+      "selectHint": "Select a document to see its progress, errors and chunks.",
+      "selectHintEmpty": "Uploaded documents appear here with their indexing progress.",
+      "progress": "Indexing progress",
+      "uploaded": "{n} documents queued for indexing.",
+      "tooLarge": "Larger than the {limit} upload limit",
+      "retry": "Retry",
+      "retried": "Retry queued.",
+      "retryFailed": "Could not retry",
+      "download": "Download",
+      "deleted": "Document deleted.",
+      "deleteFailed": "Could not delete the document",
+      "failedHint": "Correct the source or the deployment and retry. Invalid source bytes need a new upload.",
+      "filters": {
+        "label": "Filter by state",
+        "all": "All",
+        "processing": "Processing",
+        "indexed": "Indexed",
+        "failed": "Failed"
       },
-      "ingestion": {
-        "title": "Ingestion",
-        "detail": "Upload documents, crawl the web, parse, chunk, and embed."
+      "empty": {
+        "title": "No documents yet",
+        "description": "Upload Markdown, text, HTML, JSON, Office files, PDFs or scanned images. Scans use OCR.",
+        "readOnly": "Nothing has been uploaded to this knowledge base."
+      },
+      "delete": {
+        "title": "Delete {name}?",
+        "description": "Its chunks and vectors are removed from the index."
+      },
+      "facts": {
+        "type": "Type",
+        "size": "Size",
+        "pages": "Pages",
+        "revision": "Revision",
+        "indexedAt": "Indexed"
+      },
+      "uploadStatus": {
+        "uploading": "Uploading",
+        "accepted": "Queued",
+        "skipped": "Already indexed",
+        "rejected": "Rejected",
+        "error": "Failed"
+      },
+      "stages": {
+        "fetch": "Fetching",
+        "parse": "Parsing",
+        "chunk": "Chunking",
+        "embed": "Embedding",
+        "index": "Indexing",
+        "done": "Indexed"
+      },
+      "states": {
+        "registered": "Queued",
+        "fetching": "Fetching",
+        "fetched": "Fetched",
+        "parsing": "Parsing",
+        "parsed": "Parsed",
+        "chunking": "Chunking",
+        "chunked": "Chunked",
+        "embedding": "Embedding",
+        "embedded": "Embedded",
+        "indexing": "Indexing",
+        "indexed": "Indexed",
+        "failed": "Failed",
+        "skipped": "Skipped",
+        "deleting": "Deleting"
+      }
+    },
+    "chunks": {
+      "title": "Chunks",
+      "empty": "No chunks were produced for this document.",
+      "pending": "Chunks appear once the document is indexed.",
+      "lockedDuringBuild": "Editing is paused while an index is building.",
+      "searchable": "Searchable",
+      "parent": "Parent context",
+      "tokens": "{n} tokens",
+      "page": "Page {n}",
+      "edited": "Edited",
+      "childEditHint": "Saving re-embeds this one chunk. Parent context is not expanded for this knowledge base until the next rebuild.",
+      "parentEditHint": "Parent chunks are not searched. Saving changes the context returned with its child chunks.",
+      "saved": "Chunk saved.",
+      "savedHint": "The searchable vector updates in the background.",
+      "saveFailed": "Could not save the chunk"
+    },
+    "search": {
+      "placeholder": "Ask a question or paste a phrase from your documents",
+      "run": "Search",
+      "hint": "Runs the same query an agent would run, with your knowledge base defaults.",
+      "mode": "Search mode",
+      "modes": {
+        "hybrid": "Hybrid",
+        "vector": "Vector",
+        "fulltext": "Full text"
+      },
+      "expandParent": "Return parent context",
+      "advanced": "Options",
+      "topK": "Results",
+      "fusion": "Fusion",
+      "fusions": {
+        "rrf": "Reciprocal rank (RRF)",
+        "weighted": "Weighted scores"
+      },
+      "denseWeight": "Vector weight",
+      "sparseWeight": "Full-text weight",
+      "rerank": "Rerank with a cross-encoder",
+      "rerankUnavailable": "no rerank endpoint is configured",
+      "rerankModel": "Rerank model",
+      "rerankTopN": "Rerank top N",
+      "summary": "{n} passages",
+      "latency": "{ms} ms",
+      "embeddingTokens": "{n} embedding tokens",
+      "truncated": "Trimmed to the token budget",
+      "score": "Score",
+      "matchedChildren": "{n} matching child chunks",
+      "openDocument": "Open document",
+      "noResults": "No matching passages",
+      "noResultsHint": "Try other words, switch to full text, or check that the documents are indexed."
+    },
+    "versions": {
+      "lede": "Each rebuild creates a new version. Search uses the active one; failed builds keep their error so they stay diagnosable.",
+      "empty": "No index has been built yet.",
+      "chunks": "{done} / {total} chunks",
+      "started": "Started",
+      "completed": "Completed",
+      "states": {
+        "building": "Building",
+        "active": "Active",
+        "retired": "Retired",
+        "failed": "Failed"
+      }
+    },
+    "settings": {
+      "saved": "Settings saved.",
+      "general": {
+        "title": "General",
+        "metric": "Metric",
+        "modelFrozen": "The embedding model is fixed per index version. Rebuild to move to a different vector space."
       },
       "retrieval": {
-        "title": "Retrieval",
-        "detail": "Hybrid search, reranking, and the public retrieval API."
+        "title": "Retrieval defaults",
+        "description": "Applied to every query that does not override them, including agents.",
+        "searchMode": "Search mode",
+        "candidateK": "Candidates",
+        "scoreThreshold": "Minimum score",
+        "expandParent": "Return parent context by default",
+        "expandParentHint": "Indexes built before parent snapshots existed return the child chunk with a notice instead.",
+        "rerank": "Rerank results",
+        "rerankHint": "The name of a rerank endpoint configured by the operator."
       },
-      "mcp": {
-        "title": "MCP server",
-        "detail": "Expose knowledge bases as tools to any MCP client."
+      "chunking": {
+        "title": "Chunking",
+        "description": "Changes apply on the next rebuild, not to the current index.",
+        "strategy": "Strategy",
+        "strategies": {
+          "parent_child": "Parent–child",
+          "recursive": "Recursive",
+          "markdown": "Markdown headings",
+          "fixed": "Fixed size",
+          "semantic": "Semantic"
+        },
+        "childTokens": "Chunk tokens",
+        "childOverlap": "Overlap tokens",
+        "parentTokens": "Parent tokens",
+        "minChunkTokens": "Minimum chunk tokens",
+        "keepTables": "Keep tables intact",
+        "prependHeadings": "Prepend heading path"
       },
-      "models": {
-        "title": "Model providers",
-        "detail": "Connect OpenAI, Claude, Gemini, Qwen, DeepSeek, Llama, and compatible endpoints."
-      },
-      "pipelines": {
-        "title": "Pipelines",
-        "detail": "Compose ingestion and retrieval as versioned graphs."
+      "danger": {
+        "title": "Danger zone",
+        "description": "Deleting removes every document, chunk and vector. This cannot be undone."
       }
     }
+  },
+  "models": {
+    "title": "Models",
+    "lede": "The embedding service used to index documents and embed queries.",
+    "health": {
+      "unknown": "Not tested",
+      "healthy": "Healthy",
+      "unhealthy": "Unhealthy",
+      "unavailable": "Unavailable",
+      "degraded": "Degraded",
+      "error": "Error"
+    },
+    "provider": {
+      "title": "Providers",
+      "description": "TEI and Infinity endpoints this deployment may call.",
+      "one": "Provider",
+      "add": "Add provider",
+      "addHint": "The local Compose service is http://embedding:80. Only add addresses you trust.",
+      "emptyTitle": "No provider yet",
+      "emptyBody": "Add the local embedding service to begin.",
+      "dialect": "Dialect",
+      "endpoint": "Endpoint URL",
+      "endpointHint": "Private addresses require the checkbox below.",
+      "revision": "Deployment revision",
+      "revisionHint": "A label for the deployed model files, recorded in each index version.",
+      "allowPrivate": "Allow a trusted private-network address",
+      "modelCount": "{n} models",
+      "created": "Provider added.",
+      "deleteTitle": "Delete provider {name}?",
+      "deleteBody": "Providers with registered models cannot be deleted.",
+      "deleted": "Provider deleted."
+    },
+    "model": {
+      "title": "Models",
+      "description": "Dimensions and the token limit must match the deployed model.",
+      "add": "Register model",
+      "addHint": "Defaults match the bundled MiniLM model.",
+      "emptyTitle": "No model registered",
+      "emptyBody": "Register the model served by your provider, then test it.",
+      "emptyNeedsProvider": "Add a provider first.",
+      "displayName": "Display name",
+      "key": "Model key",
+      "dimension": "Vector dimensions",
+      "maxTokens": "Input token limit",
+      "tokenizer": "Tokenizer",
+      "tokenizerHint": "A tokenizer deployed with this server.",
+      "batchSize": "Batch size",
+      "normalize": "Normalize vectors",
+      "register": "Register",
+      "test": "Test",
+      "testOk": "Healthy · {dims} dimensions · {tokens} tokens",
+      "testFailed": "The endpoint did not return a valid embedding.",
+      "tokenLimit": "{n} tokens",
+      "created": "Model registered.",
+      "deleteTitle": "Delete model {name}?",
+      "deleteBody": "Models used by a knowledge base cannot be deleted.",
+      "deleted": "Model deleted."
+    }
+  },
+  "storage": {
+    "title": "Storage",
+    "lede": "Where document files are kept and where vectors are indexed.",
+    "add": "Add storage",
+    "addHint": "The binding is tested right after it is created.",
+    "emptyTitle": "No storage yet",
+    "emptyBody": "Add one binding for document files and one for vectors before creating a knowledge base.",
+    "kind": "Kind",
+    "kinds": {
+      "object": "Document files",
+      "vector": "Vectors"
+    },
+    "health": {
+      "unknown": "Not tested",
+      "healthy": "Healthy",
+      "unhealthy": "Unhealthy",
+      "unavailable": "Unavailable",
+      "degraded": "Degraded",
+      "error": "Error"
+    },
+    "localHint": "Local files in the persistent directory configured by the deployment.",
+    "pgvectorHint": "pgvector indexes in the platform's PostgreSQL database.",
+    "test": "Test",
+    "testOk": "Storage connection is healthy.",
+    "testFailed": "Storage connection failed. Check the deployment configuration.",
+    "createAndTest": "Create and test",
+    "created": "Added {name}.",
+    "deleteTitle": "Delete storage binding {name}?",
+    "deleteBody": "Only unused bindings can be deleted. The underlying volume is not touched.",
+    "deleted": "Storage binding deleted."
   },
   "users": {
     "title": "Users",
     "subtitle": "Administrators manage the platform; regular users work inside the knowledge bases they are granted.",
     "new": "New user",
+    "emptyTitle": "No users",
     "username": "Username",
     "email": "Email",
     "displayName": "Display name",
     "role": "Role",
+    "roles": {
+      "admin": "Administrator",
+      "user": "User"
+    },
+    "roleHints": {
+      "admin": "Manages users, models, storage and settings.",
+      "user": "Works inside the knowledge bases they are granted."
+    },
     "status": "Status",
     "lastLogin": "Last sign-in",
     "never": "Never",
@@ -105,122 +515,228 @@
     "disabled": "Disabled",
     "mustChange": "Credential change pending",
     "permissions": "Permissions",
-    "forceChange": "Force change",
+    "forceChange": "Require password change",
+    "forceChangeTitle": "Require a password change for {name}?",
+    "forceChangeBody": "Their current sessions end and they must choose a new password at the next sign-in.",
+    "forceChangeDone": "Password change required at next sign-in.",
     "disable": "Disable",
     "enable": "Enable",
-    "confirmDelete": "Delete this account? Their API keys and grants are revoked too.",
+    "deleteTitle": "Delete {name}?",
+    "confirmDelete": "Their API keys and grants are revoked as well.",
+    "deleted": "User deleted.",
     "createdTitle": "Account created",
     "initialPasswordFor": "Initial password for {name}",
-    "initialPasswordHint": "Give this to the user directly. They must change it at first sign-in, so it is a handover credential rather than one you keep."
+    "initialPasswordHint": "Hand it to the user directly. They must change it at first sign-in, so this is a one-time handover credential, not a password you keep."
   },
   "grants": {
     "title": "Permissions — {name}",
     "effective": "Effective permissions",
-    "effectiveHint": "What the system actually evaluates, after role-implied capabilities and implication (kb:manage satisfies kb:read).",
+    "effectiveHint": "What the system actually evaluates, including role-implied capabilities and implication (kb:manage satisfies kb:read).",
     "held": "Grants",
-    "heldHint": "The individual rows that were written down. Revoke one of these to remove access.",
+    "heldHint": "The rows that were written. Revoke one to take that access away.",
     "workspaceWide": "Workspace-wide",
-    "resource": "Resource",
     "resourceType": "Resource type",
+    "resourceTypes": {
+      "workspace": "Workspace",
+      "knowledge_base": "Knowledge base",
+      "pipeline": "Pipeline",
+      "function": "Function",
+      "model": "Model",
+      "golden_set": "Golden set"
+    },
     "resourceId": "Resource ID",
     "permissions": "Permissions",
     "add": "Add a grant",
     "grant": "Grant",
+    "granted": "Grant added.",
     "revoke": "Revoke",
-    "none": "No permissions granted.",
-    "breakGlass": "Break-glass, expires {at}"
+    "revoked": "Grant revoked.",
+    "none": "No permissions granted yet.",
+    "breakGlass": "Temporary access, expires {at}"
   },
   "keys": {
     "title": "API keys",
-    "subtitle": "How Agents and applications authenticate to the retrieval API.",
+    "subtitle": "Credentials agents and applications use to call the retrieval API and MCP.",
+    "list": "Keys",
     "new": "New key",
+    "createHint": "The key is shown once after it is created.",
+    "namePlaceholder": "e.g. support-bot",
     "showAll": "All users",
-    "name": "Name",
+    "emptyTitle": "No API keys yet",
+    "emptyBody": "Create a key, scope it to the knowledge bases an agent needs, and copy it once.",
     "scopes": "Scopes",
-    "usage": "Usage",
-    "status": "Status",
+    "scopesHint": "A key never exceeds its owner's permissions; the intersection is recomputed on every request.",
+    "scopeHints": {
+      "kb_query": "search",
+      "kb_read": "read documents and chunks",
+      "kb_write": "upload and edit",
+      "kb_manage": "settings, rebuilds and deletion"
+    },
+    "knowledgeBases": "Knowledge bases",
+    "knowledgeBasesHint": "Leave all unchecked to cover every knowledge base the owner can reach.",
+    "noKnowledgeBases": "No knowledge bases exist yet; the key will cover any the owner can reach.",
+    "rateLimit": "Rate limit (requests per minute)",
+    "rateLimitDefault": "Workspace default",
+    "expires": "Expires",
+    "expiresHint": "Optional. The key stops working at this time.",
+    "ipAllowlist": "IP allowlist (CIDR)",
+    "ipAllowlistHint": "Comma-separated. Requests from other addresses are rejected.",
     "active": "Active",
-    "revoked": "Revoked",
+    "expired": "Expired",
+    "revokedState": "Revoked",
     "revoke": "Revoke",
+    "revokeTitle": "Revoke {name}?",
+    "confirmRevoke": "Every copy of this key stops working immediately.",
+    "revoked": "Key revoked.",
+    "revokeFailed": "Could not revoke the key",
     "calls": "{n} calls",
     "neverUsed": "Never used",
-    "scopedTo": "Scoped to {n} knowledge base(s)",
     "allOwnerKbs": "All knowledge bases the owner can reach",
-    "knowledgeBases": "Knowledge bases",
-    "knowledgeBasesHint": "Leave blank to cover every knowledge base the owner can reach — the key then narrows automatically as their access does.",
-    "scopesHint": "A key can never exceed its owner's own permissions; the intersection is recomputed on every request.",
-    "rateLimit": "Rate limit (requests/minute)",
-    "ipAllowlist": "IP allowlist (CIDR)",
-    "confirmRevoke": "Revoke this key? It stops working immediately across every replica.",
     "createdTitle": "Key created",
     "keyFor": "API key for {name}",
-    "keyHint": "Store this in your secret manager now. Only its hash is kept, so it cannot be shown again.",
-    "intersectionExplainer": "A key's effective permissions are the intersection of its scopes with its owner's permissions, recomputed at every request. Revoking a user's access therefore narrows every key they issued — instantly, with no cleanup."
+    "keyHint": "Store it in your secrets manager now. Only a hash is kept, so it cannot be shown again.",
+    "intersectionExplainer": "A key's effective permission is the intersection of its scopes and its owner's permissions, recomputed on every request. Revoking a user's access narrows all of their keys at once.",
+    "connect": {
+      "title": "Connect",
+      "description": "Send the key as a bearer token. The example targets your first knowledge base."
+    }
   },
   "audit": {
     "title": "Audit log",
-    "subtitle": "Append-only. Every credential change, permission change, and administrative action.",
+    "subtitle": "Append-only. Every credential, permission and administrative change.",
     "export": "Export JSONL",
-    "when": "When",
-    "actor": "Actor",
-    "action": "Action",
-    "outcome": "Outcome",
-    "source": "Source",
-    "detail": "Detail",
+    "detail": "Details",
     "hide": "Hide",
     "actionPrefix": "Action prefix, e.g. grant.",
     "actorId": "Actor ID",
-    "loadMore": "Load more",
-    "end": "End of results.",
+    "since": "Since",
+    "anyOutcome": "Any outcome",
+    "outcomes": {
+      "success": "Success",
+      "failure": "Failure",
+      "denied": "Denied"
+    },
+    "end": "End of log.",
     "empty": "No entries match these filters.",
     "quick": {
+      "label": "Quick filters",
       "all": "All",
       "auth": "Sign-in",
       "user": "Accounts",
       "grant": "Grants",
-      "breakGlass": "Break-glass",
+      "breakGlass": "Temporary access",
       "apikey": "API keys",
-      "denied": "Denials"
+      "denied": "Denied"
     }
   },
   "settings": {
     "title": "Settings",
-    "subtitle": "Workspace policy. Changes marked hot take effect immediately; the rest need a restart.",
+    "subtitle": "Workspace policy. Hot settings apply immediately; the rest need a restart.",
     "saved": "Settings saved.",
-    "restartNeeded": "These settings need a restart to take effect: {keys}",
-    "hot": "hot",
-    "restart": "restart",
+    "restartNeeded": "These settings take effect after a restart: {keys}",
+    "hot": "Hot",
+    "restart": "Restart",
     "accessTitle": "Administrator access to knowledge base content",
+    "accessDescription": "Whether administrators can read documents in knowledge bases they were not granted.",
     "access": {
       "break_glass": {
-        "label": "Break-glass (recommended)",
-        "detail": "Administrators manage knowledge bases but cannot read their content without opening a time-boxed, reasoned window. The grant is audited and the owner is notified."
+        "label": "Temporary access",
+        "detail": "Administrators manage knowledge bases but must open a time-limited window with a reason to read content. The grant is audited and the owner is notified."
       },
       "on_grant": {
-        "label": "On explicit grant",
-        "detail": "Administrators read content only where a knowledge base owner has granted it to them directly."
+        "label": "Only when granted",
+        "detail": "Administrators read content only when the owner grants it directly."
       },
       "always": {
         "label": "Always",
-        "detail": "Administrators can read every knowledge base's content. Appropriate for a single-team deployment; a compliance problem for a shared one."
+        "detail": "Administrators can read every knowledge base. Fine for a single team; a compliance problem when teams share a deployment."
       }
     },
-    "breakGlassTtl": "Break-glass window (minutes)",
-    "defaultRpm": "Default rate limit (requests/minute)",
+    "limitsTitle": "Limits and retention",
+    "limitsDescription": "Defaults for new keys and sessions, and how long records are kept.",
+    "breakGlassTtl": "Temporary access duration (minutes)",
+    "defaultRpm": "Default rate limit (per minute)",
     "auditRetention": "Audit retention (days)",
     "sessionTtl": "Session lifetime (minutes)",
+    "maxUpload": "Upload limit (bytes)",
     "queuesTitle": "Task queues",
-    "queuesHint": "Oldest-ready age is the signal that matters — depth alone can look healthy while one task sits behind a saturated workspace.",
-    "queue": "Queue",
-    "ready": "Ready",
-    "oldestReady": "Oldest ready"
+    "queuesHint": "The oldest waiting task is the signal: depth alone can look fine while one task sits behind a saturated workspace.",
+    "readyCount": "{n} waiting",
+    "idle": "Idle"
+  },
+  "mcp": {
+    "title": "MCP service",
+    "subtitle": "The managed listener that exposes knowledge bases as tools to MCP clients.",
+    "deploymentNotConfigured": "This deployment does not manage an MCP listener. Settings and actions stay disabled until an operator enables it.",
+    "states": {
+      "stopped": "Stopped",
+      "starting": "Starting",
+      "running": "Running",
+      "stopping": "Stopping",
+      "error": "Error",
+      "unknown": "Unknown"
+    },
+    "status": {
+      "title": "Service status",
+      "desired": "Desired state",
+      "generation": "Applied / desired generation",
+      "effectivePort": "Effective port",
+      "heartbeat": "Last heartbeat",
+      "started": "Started",
+      "pending": "Applying change",
+      "lastError": "Last error"
+    },
+    "actions": {
+      "start": "Start",
+      "stop": "Stop",
+      "restart": "Restart",
+      "accepted": "{action} requested; waiting for the supervisor to confirm."
+    },
+    "endpoints": {
+      "title": "Endpoints",
+      "hint": "Shown only while the listener is confirmed running. Access still requires an API key.",
+      "compatibility": "Compatibility endpoint",
+      "direct": "Direct listener on this host"
+    },
+    "config": {
+      "title": "Configuration",
+      "hint": "Ports come from the deployment allowlist. Hosts and origins are one per line.",
+      "port": "Listening port",
+      "autoStart": "Start automatically",
+      "timeout": "Request timeout (seconds)",
+      "maxBytes": "Request size limit (bytes)",
+      "hosts": "Allowed hosts",
+      "hostsHint": "One per line, e.g. cairn.example",
+      "origins": "Allowed origins",
+      "originsHint": "One per line, e.g. https://cairn.example",
+      "save": "Save configuration",
+      "saved": "Configuration saved; the supervisor is applying it."
+    },
+    "logs": {
+      "title": "Recent logs",
+      "hint": "Service and request metadata only; never secrets or document content.",
+      "download": "Download JSONL",
+      "level": "All levels",
+      "since": "Since",
+      "apply": "Apply filters",
+      "liveFollow": "Follow live",
+      "empty": "No log entries match.",
+      "status": "Status",
+      "levels": {
+        "info": "Info",
+        "warning": "Warning",
+        "error": "Error"
+      }
+    }
   },
   "notFound": {
     "detail": "That page does not exist.",
-    "home": "Back to the dashboard"
+    "home": "Back to the overview"
   },
   "errors": {
-    "network": "The server could not be reached. Check that Cairn is running.",
-    "unexpected": "Something went wrong. Try again."
+    "network": "The server cannot be reached. Check that the service is running.",
+    "unexpected": "Something went wrong. Try again.",
+    "requestId": "Request ID",
+    "pageLoad": "The page could not be loaded. Check the connection and try again."
   }
 }

@@ -8,7 +8,9 @@ import os
 from hashlib import sha256
 from pathlib import Path
 
+import httpx
 import pytest
+from mcp.client.streamable_http import streamable_http_client
 from sqlalchemy import text
 from tests.integration.test_ingestion_pipeline import (
     _execute_one,
@@ -16,15 +18,21 @@ from tests.integration.test_ingestion_pipeline import (
     pipeline_admin,
 )
 
+from apps.api.main import create_app
 from apps.worker.main import build_worker
 from cairn.authz.model import Principal
+from cairn.authz.service import ApiKeySpec, AuthzService
 from cairn.catalog.config import ChunkConfig, ChunkStrategy
 from cairn.catalog.dto import CreateKbSpec, ReindexSpec, UploadSpec
 from cairn.catalog.ingestion import CatalogIngestionFacade
+from cairn.catalog.maintenance import RuntimeRefresher
 from cairn.catalog.service import CatalogService
 from cairn.core.cache import get_cache
+from cairn.core.config import get_settings
 from cairn.core.db import get_engine, session_scope
+from cairn.core.ids import encode_id
 from cairn.ingestion.artifacts import decode_embedding_manifest
+from cairn.ingestion.pipeline import PipelineArtifactError
 from cairn.ingestion.runtime import PipelineRuntime
 from cairn.ingestion.runtime_config import get_ingestion_runtime_settings
 from cairn.modelgw.catalog import ModelCatalog
@@ -32,6 +40,7 @@ from cairn.modelgw.dto import RegisterModelSpec
 from cairn.objectstore.local import LocalObjectStore
 from cairn.vectorstore.base import Namespace, VectorQuery
 from cairn.vectorstore.pgvector import PgVectorStore
+from mcp import ClientSession
 
 __all__ = ["pipeline_admin"]
 
@@ -41,12 +50,21 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-@pytest.mark.parametrize("strategy", ["markdown", "semantic"])
+@pytest.mark.parametrize(
+    "strategy,source_format",
+    [
+        ("markdown", "markdown"),
+        ("semantic", "markdown"),
+        ("parent_child", "markdown"),
+        ("markdown", "pdf"),
+    ],
+)
 async def test_live_model_runtime_indexes_and_replaces_document(
     pipeline_admin: Principal,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     strategy: ChunkStrategy,
+    source_format: str,
 ) -> None:
     tokenizer = Path(os.environ["CAIRN_TEST_TEI_TOKENIZER"])
     monkeypatch.setenv(
@@ -96,8 +114,12 @@ async def test_live_model_runtime_indexes_and_replaces_document(
             embedding_model_id=model.id,
             vector_binding_id=vectors.id,
             object_binding_id=objects.id,
-            chunk_config=ChunkConfig(
-                strategy=strategy, child_tokens=64, child_overlap=0, min_chunk_tokens=8
+            chunk_config=(
+                None
+                if strategy == "parent_child"
+                else ChunkConfig(
+                    strategy=strategy, child_tokens=64, child_overlap=0, min_chunk_tokens=8
+                )
             ),
         ),
     )
@@ -105,26 +127,50 @@ async def test_live_model_runtime_indexes_and_replaces_document(
         b"# Astronomy\n\nThe planet Saturn has prominent rings made of ice and rock. "
         b"Its moons orbit the gas giant. Marine scientists study currents in the ocean."
     )
+    if strategy == "parent_child":
+        source += b" Saturn has rings of ice and rock and many moons." * 100
+    if source_format == "pdf":
+        from tests.unit.ingestion.test_pdf import _text_pdf
+
+        source = _text_pdf("The planet Saturn has prominent rings made of ice and rock.")
+    mime_type = "application/pdf" if source_format == "pdf" else "text/markdown"
     digest = sha256(source).hexdigest()
     key = f"{pipeline_admin.workspace_id}/{kb.id}/originals/{digest}"
     object_store = LocalObjectStore(tmp_path)
-    await object_store.put(key, source, content_type="text/markdown")
+    await object_store.put(key, source, content_type=mime_type)
     registration = await catalog.register_upload(
         pipeline_admin,
         kb.id,
         UploadSpec(
-            filename="astronomy.md",
+            filename="astronomy.pdf" if source_format == "pdf" else "astronomy.md",
             content_hash=digest,
             size_bytes=len(source),
-            mime_type="text/markdown",
+            mime_type=mime_type,
             object_key=key,
         ),
     )
     assert registration.document is not None
     runtime = PipelineRuntime()
     try:
+        original_upsert = PgVectorStore.upsert
+        failed_once = False
+
+        async def fail_first_index(store, namespace, points):
+            nonlocal failed_once
+            if not failed_once:
+                failed_once = True
+                raise PipelineArtifactError("Injected terminal index failure")
+            return await original_upsert(store, namespace, points)
+
+        monkeypatch.setattr(PgVectorStore, "upsert", fail_first_index)
+        monkeypatch.setattr("cairn.ingestion.runtime.get_pipeline_runtime", lambda: runtime)
         await _execute_pipeline(runtime.pipeline)
         document = await catalog.get_document(registration.document.id)
+        assert document.state == "failed" and document.revision == 1
+        await catalog.retry_document(pipeline_admin, document.id)
+        assert (await catalog.get_document(document.id)).revision == 1
+        await _execute_one(build_worker("index"))
+        document = await catalog.get_document(document.id)
         assert document.state == "indexed"
         assert (await catalog.get_kb(kb.id)).active_index_version == 1
         vector_store = PgVectorStore(get_engine())
@@ -202,6 +248,65 @@ async def test_live_model_runtime_indexes_and_replaces_document(
             Namespace(kb.id, 2), VectorQuery(dense=trench_query.values, top_k=3)
         )
         assert manual_hits and "Mariana Trench" in manual_hits[0].content
+        monkeypatch.setenv("CAIRN_RETRIEVAL__EMBEDDING_ENDPOINTS", "{}")
+        monkeypatch.setenv(
+            "CAIRN_RETRIEVAL__TOKENIZER_FILES", json.dumps({"live-minilm": str(tokenizer)})
+        )
+        get_settings.cache_clear()
+        await RuntimeRefresher(models=models, catalog=catalog).refresh(10)
+        authz = AuthzService()
+        principal = await authz.principal_for_user(pipeline_admin.id)
+        assert principal is not None
+        _api_key, raw_key = await authz.create_api_key(
+            principal, ApiKeySpec(name="live-http-retrieval", scopes=["kb:query"], kb_ids=[kb.id])
+        )
+        app = create_app()
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+            ) as http,
+        ):
+            response = await http.post(
+                "/v1/retrieval/query",
+                headers={"Authorization": f"Bearer {raw_key}"},
+                json={
+                    "targets": [{"knowledge_base_id": encode_id("kb", kb.id)}],
+                    "query": "Where is the Mariana Trench?",
+                    "search_mode": "vector",
+                    "rerank": {"enabled": False},
+                    "options": {"expand_parent": False},
+                },
+            )
+            http.headers["Authorization"] = f"Bearer {raw_key}"
+            async with (
+                streamable_http_client("http://localhost/mcp", http_client=http) as (
+                    reader,
+                    writer,
+                    _session_id,
+                ),
+                ClientSession(reader, writer) as mcp_session,
+            ):
+                await mcp_session.initialize()
+                await mcp_session.list_tools()
+                tool_result = await mcp_session.call_tool(
+                    "search_knowledge_base",
+                    {
+                        "query": "Where is the Mariana Trench?",
+                        "knowledge_base_id": encode_id("kb", kb.id),
+                    },
+                )
+                assert not tool_result.isError, tool_result
+                assert tool_result.structuredContent is not None
+                assert any(
+                    "Mariana Trench" in hit["content"]
+                    for hit in tool_result.structuredContent["results"]
+                )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["results"] and "Mariana Trench" in body["results"][0]["content"]
+        assert body["results"][0]["document_id"] == encode_id("doc", document.id)
+        assert body["usage"]["index_versions"][encode_id("kb", kb.id)] == 2
     finally:
         await runtime.close()
         get_ingestion_runtime_settings.cache_clear()

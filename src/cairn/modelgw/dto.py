@@ -40,6 +40,10 @@ class ModelView:
     capability: Capability
     dimension: int | None
     max_input_tokens: int | None
+    tokenizer_id: str | None
+    normalize: bool
+    query_prefix: str | None
+    optimal_batch_size: int
     is_enabled: bool
     health_state: str
     checked_at: datetime | None

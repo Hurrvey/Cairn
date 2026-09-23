@@ -188,7 +188,7 @@ async def test_meta_is_public_and_declares_capabilities(client: httpx.AsyncClien
     assert body["api_version"] == "v1"
     # Phase 0 honestly reports what it does not yet have, so a client can adapt
     # rather than discovering a missing feature via a 404.
-    assert body["capabilities"]["mcp"] is False
+    assert body["capabilities"]["mcp"] is True
 
 
 async def test_request_id_is_echoed(client: httpx.AsyncClient) -> None:

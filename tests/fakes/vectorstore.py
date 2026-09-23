@@ -61,6 +61,15 @@ class FakeVectorStore:
     async def namespace_exists(self, ns: Namespace) -> bool:
         return ns.key() in self._specs
 
+    async def list_namespaces(self, kb_id: UUID) -> tuple[Namespace, ...]:
+        prefix = f"cairn_vec_{kb_id.hex}_v"
+        versions = sorted(
+            int(key.removeprefix(prefix))
+            for key in self._specs
+            if key.startswith(prefix) and key.removeprefix(prefix).isdigit()
+        )
+        return tuple(Namespace(kb_id, version) for version in versions)
+
     async def drop_namespace(self, ns: Namespace) -> None:
         self._specs.pop(ns.key(), None)
         self._points.pop(ns.key(), None)

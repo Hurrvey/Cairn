@@ -174,6 +174,7 @@ class ReindexFanoutService:
             if (
                 kb is None
                 or kb.workspace_id != context.workspace_id
+                or kb.status in {"deleting", "archived"}
                 or kb.building_index_version != index_version
             ):
                 return TaskResult.skipped("reindex no longer owns the building version")

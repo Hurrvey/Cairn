@@ -6,25 +6,16 @@
  * navigation, and cursor pagination not silently resetting.
  */
 
-import ElementPlus from "element-plus";
-import { createPinia, setActivePinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
-import { createI18n } from "vue-i18n";
 
 import enUS from "@/locales/en-US.json";
 import zhCN from "@/locales/zh-CN.json";
 import SecretReveal from "@/shared/components/SecretReveal.vue";
 import { usePermissions } from "@/shared/composables/usePermissions";
-import { useSessionStore } from "@/stores/session";
 
-const i18n = createI18n({
-  legacy: false,
-  locale: "en-US",
-  fallbackLocale: "en-US",
-  messages: { "en-US": enUS, "zh-CN": zhCN },
-});
+import { freshPinia, makeI18n, signIn } from "./helpers";
 
 /** Mount SecretReveal with its real prop types intact — a generic `unknown`
  *  helper would erase them and hide exactly the kind of contract drift these
@@ -32,26 +23,9 @@ const i18n = createI18n({
 function mountSecret(props: { value: string; label: string; hint?: string }) {
   return mount(SecretReveal, {
     props,
-    global: { plugins: [i18n, ElementPlus] },
+    global: { plugins: [makeI18n()] },
     attachTo: document.body,
   });
-}
-
-function signedIn(role: "admin" | "user", permissions: string[] = []) {
-  const session = useSessionStore();
-  session.user = {
-    id: "usr_01H",
-    username: role === "admin" ? "dana.ops" : "wei",
-    email: null,
-    display_name: null,
-    role,
-    must_change_password: false,
-    is_active: true,
-    last_login_at: null,
-    created_at: "2026-09-01T00:00:00Z",
-  };
-  session.permissions = permissions;
-  return session;
 }
 
 const ADMIN_CAPS = [
@@ -63,10 +37,10 @@ const ADMIN_CAPS = [
 ];
 
 describe("usePermissions", () => {
-  beforeEach(() => setActivePinia(createPinia()));
+  beforeEach(() => freshPinia());
 
   it("TC-M16-13: reflects the capabilities the server reported", () => {
-    signedIn("admin", ADMIN_CAPS);
+    signIn("admin", ADMIN_CAPS);
     const permissions = usePermissions();
     expect(permissions.isAdmin.value).toBe(true);
     expect(permissions.canManageUsers.value).toBe(true);
@@ -74,7 +48,7 @@ describe("usePermissions", () => {
   });
 
   it("grants nothing to a regular user", () => {
-    signedIn("user", []);
+    signIn("user", []);
     const permissions = usePermissions();
     expect(permissions.isAdmin.value).toBe(false);
     expect(permissions.canManageUsers.value).toBe(false);
@@ -84,14 +58,14 @@ describe("usePermissions", () => {
   it("never infers a capability from the role alone", () => {
     // The server is the authority on capabilities. Inferring them from `role`
     // would drift the moment the permission model changes.
-    signedIn("admin", []);
+    signIn("admin", []);
     expect(usePermissions().canManageUsers.value).toBe(false);
   });
 });
 
 describe("SecretReveal", () => {
   beforeEach(() => {
-    setActivePinia(createPinia());
+    freshPinia();
     document.body.innerHTML = "";
   });
   afterEach(() => {
@@ -114,10 +88,8 @@ describe("SecretReveal", () => {
   it("starts unacknowledged so the caller can gate the close button", async () => {
     const wrapper = mountSecret({ value: "secret", label: "Key" });
     await nextTick();
-    const checkbox = document.body.querySelector(
-      '[data-test="secret-ack"] input',
-    ) as HTMLInputElement | null;
-    expect(checkbox?.checked).toBe(false);
+    const checkbox = document.body.querySelector('[data-test="secret-ack"] [role="checkbox"]');
+    expect(checkbox?.getAttribute("aria-checked")).toBe("false");
     expect(wrapper.html()).toContain("saved this somewhere safe");
   });
 
@@ -146,7 +118,7 @@ describe("SecretReveal", () => {
 });
 
 describe("admin API surface", () => {
-  beforeEach(() => setActivePinia(createPinia()));
+  beforeEach(() => freshPinia());
   afterEach(() => vi.unstubAllGlobals());
 
   it("builds audit queries with only the filters that are set", async () => {

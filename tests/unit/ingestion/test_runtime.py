@@ -13,7 +13,7 @@ from cairn.core.modelref import ModelRef
 from cairn.embedding.errors import TokenizerUnavailable
 from cairn.embedding.tokenizers import TokenizerRegistry
 from cairn.ingestion import runtime as runtime_module
-from cairn.ingestion.runtime import PipelineRuntime
+from cairn.ingestion.runtime import PipelineRuntime, _binding_fingerprint
 from cairn.modelgw.dto import EmbeddingRuntimeRef
 
 
@@ -192,3 +192,33 @@ async def test_registered_model_drift_is_rejected_before_provider_startup(
         await runtime.embedding_for(original.model)
 
     assert _Provider.instances == []
+
+
+@pytest.mark.anyio
+async def test_dynamic_provider_provenance_does_not_look_like_model_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    old_snapshot = _runtime_ref()
+    assert old_snapshot.model.dynamic_provider is False
+    registered = replace(
+        old_snapshot,
+        model=replace(old_snapshot.model, dynamic_provider=True),
+    )
+    runtime = _build_runtime(monkeypatch, _Models(registered))
+
+    prepared = await runtime.embedding_for(old_snapshot.model)
+
+    assert prepared.model.dynamic_provider is True
+    await runtime.close()
+
+
+def test_dynamic_provider_provenance_does_not_change_binding_fingerprint() -> None:
+    old_snapshot = _runtime_ref()
+    registered = replace(
+        old_snapshot,
+        model=replace(old_snapshot.model, dynamic_provider=True),
+    )
+
+    assert _binding_fingerprint(old_snapshot, _Tokenizer()) == _binding_fingerprint(
+        registered, _Tokenizer()
+    )

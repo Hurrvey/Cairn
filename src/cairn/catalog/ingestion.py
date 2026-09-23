@@ -64,6 +64,7 @@ class IngestionRun:
     stale_point_ids: tuple[UUID, ...]
     active_index_version: int | None
     building_index_version: int | None
+    recovery_generation: int = 0
 
     @property
     def chunk_config(self) -> ChunkConfig:
@@ -189,6 +190,8 @@ class CatalogIngestionFacade:
             kb = await self._repo.get_kb(session, document.kb_id, for_update=True)
             if kb is None:
                 raise NotFound("Knowledge base not found.")
+            if kb.status in {"deleting", "archived"}:
+                raise IngestionOwnershipError("The knowledge base does not accept new revisions.")
             if not source_key_in_scope(
                 object_key,
                 workspace_id=document.workspace_id,
@@ -244,7 +247,7 @@ class CatalogIngestionFacade:
         identity = _identity(context)
         if identity is None:
             return None
-        document_id, revision, index_version = identity
+        document_id, revision, index_version, recovery_generation = identity
         async with session_scope() as session:
             document = await self._repo.get_document(session, document_id)
             run = await self._repo.get_document_ingestion(
@@ -253,7 +256,7 @@ class CatalogIngestionFacade:
             if document is None or run is None or document.deleted_at is not None:
                 return None
             kb = await self._repo.get_kb(session, run.kb_id)
-            if kb is None:
+            if kb is None or kb.status in {"deleting", "archived"}:
                 return None
             version = await self._repo.get_index_version(session, run.kb_id, run.index_version)
             version_config = _load_version_config(version)
@@ -268,6 +271,7 @@ class CatalogIngestionFacade:
                 or kb.workspace_id != document.workspace_id
                 or document.revision != revision
                 or document.content_hash != run.source_content_hash
+                or run.recovery_generation != recovery_generation
                 or index_version not in {kb.active_index_version, kb.building_index_version}
                 or object_binding.workspace_id != document.workspace_id
                 or object_binding.kind != "object"
@@ -331,7 +335,7 @@ class CatalogIngestionFacade:
         identity = _identity(context)
         if identity is None or context.kb_id is None:
             return ()
-        document_id, _revision, index_version = identity
+        document_id, _revision, index_version, _recovery_generation = identity
         async with session_scope() as session:
             rows = await self._repo.ingestion_chunks(
                 session,
@@ -533,6 +537,15 @@ class CatalogIngestionFacade:
             existing = await self._repo.ingestion_chunks(
                 session, run.kb_id, document.id, run.index_version
             )
+            if (
+                run.recovery_generation > 0
+                and run.chunks_object_key is None
+                and existing
+                and await self._repo.edited_chunks(session, kb.id, document.id)
+            ):
+                raise ValidationFailed(
+                    "Rechunking cannot replace manual edits created during recovery."
+                )
             actual_stale = {
                 row.id for row in existing if row.chunk_metadata.get("embed", True) is not False
             } - {chunk.id for chunk in chunks if chunk.metadata.get("embed", True) is not False}
@@ -809,10 +822,14 @@ class CatalogIngestionFacade:
             if locked is None:
                 return
             document, run, _kb = locked
+            if run.state == "failed":
+                return
             document.stage_detail = stage
             document.error_code = error_code
             document.error_detail = detail
             if terminal:
+                run.failed_stage = stage
+                run.previous_committed_state = run.state
                 document.state = "failed"
                 run.state = "failed"
 
@@ -841,7 +858,7 @@ class CatalogIngestionFacade:
         identity = _identity(context)
         if identity is None:
             return None
-        document_id, revision, index_version = identity
+        document_id, revision, index_version, recovery_generation = identity
         document = await self._repo.get_document(session, document_id, for_update=True)
         if document is None or document.deleted_at is not None:
             return None
@@ -859,6 +876,8 @@ class CatalogIngestionFacade:
             or run.kb_id != document.kb_id
             or document.revision != revision
             or document.content_hash != run.source_content_hash
+            or run.recovery_generation != recovery_generation
+            or kb.status in {"deleting", "archived"}
             or index_version not in {kb.active_index_version, kb.building_index_version}
         ):
             return None
@@ -913,16 +932,26 @@ def _compact_uuid(value: UUID) -> str:
     return urlsafe_b64encode(value.bytes).rstrip(b"=").decode("ascii")
 
 
-def _identity(context: TaskContext) -> tuple[UUID, int, int] | None:
+def _identity(context: TaskContext) -> tuple[UUID, int, int, int] | None:
     if context.document_id is None or context.kb_id is None:
         return None
     revision = context.payload.get("revision")
     index_version = context.payload.get("index_version")
-    if type(revision) is not int or type(index_version) is not int:
+    recovery_generation = context.payload.get("recovery_generation", 0)
+    if (
+        type(revision) is not int
+        or type(index_version) is not int
+        or type(recovery_generation) is not int
+    ):
         return None
-    if revision < 1 or index_version < 1:
+    if revision < 1 or index_version < 1 or recovery_generation < 0:
         return None
-    return context.document_id, revision, index_version
+    return context.document_id, revision, index_version, recovery_generation
+
+
+def _recovery_generation(context: TaskContext) -> int:
+    generation = context.payload.get("recovery_generation", 0)
+    return generation if type(generation) is int and generation >= 0 else -1
 
 
 def _deleted_identity(context: TaskContext) -> tuple[UUID, int] | None:
@@ -938,6 +967,11 @@ def _next_task(context: TaskContext, *, queue: str, kind: str) -> TaskSpec:
     assert context.document_id is not None and context.kb_id is not None
     revision = int(context.payload["revision"])
     index_version = int(context.payload["index_version"])
+    payload = {"revision": revision, "index_version": index_version}
+    recovery_generation = _recovery_generation(context)
+    if recovery_generation > 0:
+        payload["recovery_generation"] = recovery_generation
+    generation_suffix = f":{recovery_generation}" if recovery_generation > 0 else ""
     return TaskSpec(
         queue=queue,  # type: ignore[arg-type]
         kind=kind,
@@ -945,8 +979,8 @@ def _next_task(context: TaskContext, *, queue: str, kind: str) -> TaskSpec:
         kb_id=context.kb_id,
         document_id=context.document_id,
         correlation_id=context.correlation_id,
-        payload={"revision": revision, "index_version": index_version},
-        dedupe_key=f"{kind}:{context.document_id}:{revision}:{index_version}",
+        payload=payload,
+        dedupe_key=(f"{kind}:{context.document_id}:{revision}:{index_version}{generation_suffix}"),
     )
 
 
@@ -1003,6 +1037,7 @@ def _run_view(
         kb_id=document.kb_id,
         revision=run.revision,
         index_version=run.index_version,
+        recovery_generation=run.recovery_generation,
         state=run.state,  # type: ignore[arg-type]
         source_content_hash=run.source_content_hash,
         object_key=document.object_key,

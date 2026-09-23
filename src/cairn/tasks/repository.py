@@ -433,6 +433,94 @@ class TaskRepository:
         )
         return int(getattr(result, "rowcount", 0) or 0)
 
+    async def cancel_ready_for_document(
+        self, session: AsyncSession, document_id: UUID, *, exclude_task_id: int
+    ) -> int:
+        result = await session.execute(
+            text(
+                "WITH cancellable AS ("
+                "SELECT id FROM task WHERE document_id=:document_id "
+                "AND id<>:exclude_task_id AND state='ready' FOR UPDATE SKIP LOCKED"
+                ") UPDATE task SET state='cancelled', finished_at=now() "
+                "FROM cancellable WHERE task.id=cancellable.id"
+            ),
+            {"document_id": document_id, "exclude_task_id": exclude_task_id},
+        )
+        return int(getattr(result, "rowcount", 0) or 0)
+
+    async def has_live_for_document(
+        self, session: AsyncSession, document_id: UUID, *, exclude_task_id: int
+    ) -> bool:
+        return bool(
+            await session.scalar(
+                text(
+                    "SELECT EXISTS (SELECT 1 FROM task WHERE document_id=:document_id "
+                    "AND id<>:exclude_task_id AND state IN ('ready','running'))"
+                ),
+                {"document_id": document_id, "exclude_task_id": exclude_task_id},
+            )
+        )
+
+    async def cancel_ready_for_kb(
+        self, session: AsyncSession, kb_id: UUID, *, exclude_task_id: int | None = None
+    ) -> int:
+        exclusion = "" if exclude_task_id is None else " AND id<>:exclude_task_id"
+        result = await session.execute(
+            text(
+                "WITH cancellable AS (SELECT id FROM task "
+                f"WHERE kb_id=:kb_id AND state='ready'{exclusion} FOR UPDATE SKIP LOCKED) "
+                "UPDATE task SET state='cancelled', finished_at=now() "
+                "FROM cancellable WHERE task.id=cancellable.id"
+            ),
+            (
+                {"kb_id": kb_id}
+                if exclude_task_id is None
+                else {"kb_id": kb_id, "exclude_task_id": exclude_task_id}
+            ),
+        )
+        return int(getattr(result, "rowcount", 0) or 0)
+
+    async def has_live_for_kb(
+        self, session: AsyncSession, kb_id: UUID, *, exclude_task_id: int
+    ) -> bool:
+        return bool(
+            await session.scalar(
+                text(
+                    "SELECT EXISTS (SELECT 1 FROM task WHERE kb_id=:kb_id "
+                    "AND id<>:exclude_task_id AND state IN ('ready','running'))"
+                ),
+                {"kb_id": kb_id, "exclude_task_id": exclude_task_id},
+            )
+        )
+
+    async def cancel_ready_ingestion_generation(
+        self,
+        session: AsyncSession,
+        *,
+        document_id: UUID,
+        revision: int,
+        index_version: int,
+        recovery_generation: int,
+    ) -> int:
+        result = await session.execute(
+            text(
+                "UPDATE task SET state='cancelled', finished_at=now() "
+                "WHERE document_id=:document_id AND state='ready' "
+                "AND kind IN ('document.parse','document.chunk','document.embed','document.index') "
+                "AND payload->>'revision'=:revision "
+                "AND payload->>'index_version'=:index_version "
+                "AND ((:recovery_generation=0 AND payload->'recovery_generation' IS NULL) OR "
+                "payload->'recovery_generation'=to_jsonb(CAST(:recovery_generation AS integer)))"
+            ),
+            {
+                "document_id": document_id,
+                "revision": str(revision),
+                "index_version": str(index_version),
+                "recovery_generation": recovery_generation,
+            },
+        )
+        return int(getattr(result, "rowcount", 0) or 0)
+
     async def set_workspace_concurrency(
         self, session: AsyncSession, workspace_id: UUID, limit: int
     ) -> None:

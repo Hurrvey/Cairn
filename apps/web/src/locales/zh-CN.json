@@ -1,30 +1,81 @@
 {
   "common": {
     "cancel": "取消",
+    "confirm": "确认",
     "create": "创建",
     "save": "保存",
     "delete": "删除",
+    "deleteFailed": "删除失败",
     "done": "完成",
-    "close": "关闭"
+    "close": "关闭",
+    "copy": "复制",
+    "copied": "已复制",
+    "edit": "编辑",
+    "open": "打开",
+    "refresh": "刷新",
+    "retry": "重试",
+    "loadMore": "加载更多",
+    "actions": "操作",
+    "name": "名称",
+    "description": "描述",
+    "select": "请选择…",
+    "recommended": "推荐",
+    "disabled": "已停用",
+    "on": "开启",
+    "off": "关闭"
   },
   "nav": {
-    "dashboard": "控制台",
+    "primary": "主导航",
+    "openMenu": "打开菜单",
+    "dashboard": "总览",
     "knowledge": "知识库",
+    "models": "模型",
+    "storage": "存储",
     "users": "用户",
     "apiKeys": "API 密钥",
     "audit": "审计日志",
+    "mcpService": "MCP 服务",
     "settings": "设置",
-    "phase": "第 {n} 阶段"
+    "groups": {
+      "work": "工作",
+      "connect": "接入",
+      "setup": "部署配置",
+      "admin": "管理"
+    }
+  },
+  "shell": {
+    "toggleTheme": "切换浅色或深色主题",
+    "changePassword": "修改密码",
+    "changePasswordHint": "为当前账户设置新密码，无需重新登录。",
+    "passwordChanged": "密码已修改。",
+    "offline": "当前处于离线状态，恢复连接前操作会失败。",
+    "serverUnreachable": "无法连接到服务器，正在自动重试。"
+  },
+  "palette": {
+    "trigger": "搜索或跳转…",
+    "placeholder": "输入页面、知识库或操作",
+    "empty": "没有匹配项。",
+    "newKnowledgeBase": "新建知识库",
+    "darkTheme": "切换到深色主题",
+    "lightTheme": "切换到浅色主题",
+    "groups": {
+      "pages": "页面",
+      "knowledge": "知识库",
+      "actions": "操作"
+    }
   },
   "secret": {
-    "onceTitle": "请立即复制 — 此内容仅显示一次",
+    "onceTitle": "请立即复制，此内容仅显示一次",
     "onceBody": "系统不会以可恢复的形式保存该值。一旦丢失，只能重新签发。",
     "copy": "复制",
     "copied": "已复制",
     "acknowledge": "我已妥善保存"
   },
   "login": {
-    "tagline": "面向 Agent 的知识库平台",
+    "headline": "把知识垒起来，让 Agent 找得到。",
+    "tagline": "上传文档并建立索引，任何 Agent 都能通过同一个接口检索到带引用的段落。",
+    "title": "登录",
+    "subtitle": "使用管理员为你创建的账户。",
     "username": "用户名",
     "password": "密码",
     "submit": "登录",
@@ -35,7 +86,7 @@
     "ledeInitial": "此账户正在使用系统生成的初始密码。请设置新的凭据后继续。",
     "ledeAdminForced": "管理员已要求此账户更改凭据。请设置新的凭据后继续。",
     "username": "用户名",
-    "usernameHint": "可选 — 保持不变即可沿用当前用户名。",
+    "usernameHint": "可选，保持不变即可沿用当前用户名。",
     "currentPassword": "当前密码",
     "newPassword": "新密码",
     "confirmPassword": "确认新密码",
@@ -49,54 +100,413 @@
     }
   },
   "dashboard": {
-    "welcome": "欢迎，{name}",
-    "phaseNotice": "当前部署运行于第 1 阶段。知识库、数据摄取与检索功能将在第 2 阶段提供。",
+    "greeting": {
+      "morning": "早上好，{name}",
+      "afternoon": "下午好，{name}",
+      "evening": "晚上好，{name}",
+      "night": "夜深了，{name}"
+    },
+    "lede": "看看哪些事情需要处理，从哪里继续。",
     "admin": "管理员",
     "signOut": "退出登录",
-    "available": "当前可用",
-    "comingLater": "后续阶段提供",
-    "phase": "第 {n} 阶段",
-    "shortcuts": {
-      "users": "创建账户并管理各自可访问的范围。",
-      "apiKeys": "为 Agent 与应用签发和吊销密钥。",
-      "audit": "记录所有凭据、权限与管理操作的变更。",
-      "settings": "访问策略、限流与数据保留。"
+    "setup": {
+      "title": "完成初始配置",
+      "description": "索引第一份文档前还差三步。",
+      "model": "注册向量模型",
+      "modelHint": "填写 TEI 或 Infinity 服务地址并测试。",
+      "storage": "添加存储",
+      "storageHint": "一个存放文档文件，一个存放向量。",
+      "knowledge": "创建知识库",
+      "knowledgeHint": "然后上传文档并检索。"
     },
-    "modules": {
-      "knowledge": {
-        "title": "知识库",
-        "detail": "创建并配置知识库、存储后端与索引方式。"
+    "attention": {
+      "title": "需要处理",
+      "clear": "目前没有需要处理的事项。",
+      "failedDocuments": "{kb} 中有 {n} 份文档处理失败",
+      "building": "{kb} 正在构建索引 v{v}",
+      "reindexRequired": "{kb} 需要重建索引以应用新设置",
+      "kbError": "{kb} 处于错误状态",
+      "mcpError": "MCP 服务报告了错误",
+      "queueStalled": "{queue} 队列已有任务等待 {minutes} 分钟"
+    },
+    "bases": {
+      "title": "知识库",
+      "all": "查看全部"
+    },
+    "connect": {
+      "title": "接入 Agent",
+      "description": "Agent 使用 API 密钥调用检索接口或 MCP 端点。",
+      "retrieval": "检索接口",
+      "mcp": "MCP 端点",
+      "keysHint": "签发并限定密钥范围："
+    }
+  },
+  "knowledge": {
+    "lede": "你索引的所有内容，供人和 Agent 检索。",
+    "new": "新建知识库",
+    "filter": "按名称筛选",
+    "noMatch": "没有名称匹配“{q}”的知识库。",
+    "rebuildRequired": "需要重建",
+    "columns": {
+      "name": "名称",
+      "status": "状态",
+      "documents": "文档",
+      "chunks": "分块",
+      "size": "大小",
+      "lastIndexed": "最近索引"
+    },
+    "status": {
+      "active": "可用",
+      "indexing": "索引中",
+      "error": "错误",
+      "deleting": "删除中",
+      "archived": "已归档"
+    },
+    "facts": {
+      "activeIndex": "当前索引",
+      "documents": "{n} 份文档",
+      "processing": "{n} 份处理中",
+      "failed": "{n} 份失败"
+    },
+    "empty": {
+      "title": "还没有知识库",
+      "description": "创建一个，上传文档，几分钟内就能开始检索。",
+      "setupFirst": "请先注册模型并添加存储，上方的配置步骤会引导你完成。"
+    },
+    "tabs": {
+      "label": "知识库分区",
+      "documents": "文档",
+      "search": "检索",
+      "versions": "索引版本",
+      "settings": "设置"
+    },
+    "create": {
+      "title": "新建知识库",
+      "description": "模型和存储会固定到第一个索引版本中。",
+      "done": "已创建 {name}。",
+      "model": "向量模型",
+      "modelHint": "之后更换模型需要重建索引。",
+      "objectStorage": "文档存储",
+      "vectorStorage": "向量存储",
+      "strategyHint": "父子分块在保留小块可检索的同时提供更宽的上下文。",
+      "setupMissing": "请管理员先注册向量模型，并添加文档存储和向量存储。"
+    },
+    "delete": {
+      "action": "删除知识库",
+      "title": "删除 {name}？",
+      "description": "其全部文档、分块和向量都会被移除，限定到它的 API 密钥会失去该范围。",
+      "done": "已删除 {name}。",
+      "failed": "知识库删除失败"
+    },
+    "rebuild": {
+      "action": "重建索引",
+      "title": "重建索引？",
+      "description": "约 {chunks} 个分块需要重新向量化，预计 {minutes} 分钟。新索引就绪前检索继续使用当前索引。",
+      "confirm": "开始重建",
+      "started": "已开始重建。",
+      "failed": "无法开始重建"
+    },
+    "build": {
+      "inProgress": "正在构建索引 v{v}",
+      "eta": "预计还需 {time}"
+    },
+    "access": {
+      "blockedTitle": "内容访问受限",
+      "blockedBody": "你管理这个知识库，但没有内容访问权限。可以开启一个有时限、会被审计的访问窗口来查看文档。",
+      "request": "申请临时访问",
+      "dialogTitle": "开启临时访问",
+      "dialogBody": "所有者会收到通知，理由会记入审计日志。",
+      "reason": "理由",
+      "reasonHint": "至少 10 个字符，说明需要查看什么以及原因。",
+      "ttl": "时长（分钟）",
+      "ttlHint": "留空则使用工作空间默认值。",
+      "open": "开启访问"
+    },
+    "documents": {
+      "upload": "上传文档",
+      "browse": "选择文件",
+      "dropHint": "把文件拖到这里，或",
+      "filter": "筛选文档",
+      "noMatch": "没有符合条件的文档。",
+      "detail": "文档详情",
+      "selectHint": "选择一份文档查看进度、错误和分块。",
+      "selectHintEmpty": "上传后的文档会连同索引进度显示在这里。",
+      "progress": "索引进度",
+      "uploaded": "{n} 份文档已加入索引队列。",
+      "tooLarge": "超过 {limit} 的上传上限",
+      "retry": "重试",
+      "retried": "已重新加入队列。",
+      "retryFailed": "重试失败",
+      "download": "下载",
+      "deleted": "文档已删除。",
+      "deleteFailed": "文档删除失败",
+      "failedHint": "修正来源文件或部署配置后重试；文件本身无效时需要重新上传。",
+      "filters": {
+        "label": "按状态筛选",
+        "all": "全部",
+        "processing": "处理中",
+        "indexed": "已索引",
+        "failed": "失败"
       },
-      "ingestion": {
-        "title": "数据摄取",
-        "detail": "上传文档、自动爬取网页、解析、分块与向量化。"
+      "empty": {
+        "title": "还没有文档",
+        "description": "支持 Markdown、文本、HTML、JSON、Office 文件、PDF 和扫描图片，扫描件会自动识别文字。",
+        "readOnly": "这个知识库还没有上传任何内容。"
+      },
+      "delete": {
+        "title": "删除 {name}？",
+        "description": "它的分块和向量会从索引中移除。"
+      },
+      "facts": {
+        "type": "类型",
+        "size": "大小",
+        "pages": "页数",
+        "revision": "修订",
+        "indexedAt": "索引时间"
+      },
+      "uploadStatus": {
+        "uploading": "上传中",
+        "accepted": "已排队",
+        "skipped": "已存在",
+        "rejected": "已拒绝",
+        "error": "失败"
+      },
+      "stages": {
+        "fetch": "读取中",
+        "parse": "解析中",
+        "chunk": "分块中",
+        "embed": "向量化中",
+        "index": "写入索引中",
+        "done": "已索引"
+      },
+      "states": {
+        "registered": "排队中",
+        "fetching": "读取中",
+        "fetched": "已读取",
+        "parsing": "解析中",
+        "parsed": "已解析",
+        "chunking": "分块中",
+        "chunked": "已分块",
+        "embedding": "向量化中",
+        "embedded": "已向量化",
+        "indexing": "写入索引中",
+        "indexed": "已索引",
+        "failed": "失败",
+        "skipped": "已跳过",
+        "deleting": "删除中"
+      }
+    },
+    "chunks": {
+      "title": "分块",
+      "empty": "这份文档没有产生分块。",
+      "pending": "文档索引完成后会显示分块。",
+      "lockedDuringBuild": "索引构建期间暂停编辑。",
+      "searchable": "可检索",
+      "parent": "父块上下文",
+      "tokens": "{n} tokens",
+      "page": "第 {n} 页",
+      "edited": "已编辑",
+      "childEditHint": "保存后只重新向量化这一个分块。在下次重建前，这个知识库不再展开父块上下文。",
+      "parentEditHint": "父块不参与检索，保存后只改变随子块返回的上下文。",
+      "saved": "分块已保存。",
+      "savedHint": "可检索向量会在后台更新。",
+      "saveFailed": "分块保存失败"
+    },
+    "search": {
+      "placeholder": "输入问题，或粘贴文档中的一句话",
+      "run": "检索",
+      "hint": "使用知识库默认设置，运行与 Agent 相同的检索请求。",
+      "mode": "检索方式",
+      "modes": {
+        "hybrid": "混合",
+        "vector": "向量",
+        "fulltext": "全文"
+      },
+      "expandParent": "返回父块上下文",
+      "advanced": "选项",
+      "topK": "结果数",
+      "fusion": "融合方式",
+      "fusions": {
+        "rrf": "倒数排名融合（RRF）",
+        "weighted": "加权分数"
+      },
+      "denseWeight": "向量权重",
+      "sparseWeight": "全文权重",
+      "rerank": "使用重排序模型",
+      "rerankUnavailable": "尚未配置重排序端点",
+      "rerankModel": "重排序模型",
+      "rerankTopN": "重排序数量",
+      "summary": "{n} 条段落",
+      "latency": "{ms} 毫秒",
+      "embeddingTokens": "{n} 个向量化 tokens",
+      "truncated": "已按 token 预算截断",
+      "score": "得分",
+      "matchedChildren": "{n} 个匹配子块",
+      "openDocument": "打开文档",
+      "noResults": "没有匹配的段落",
+      "noResultsHint": "换个说法、改用全文检索，或确认文档已经索引完成。"
+    },
+    "versions": {
+      "lede": "每次重建都会生成一个新版本。检索使用当前版本；失败的构建会保留错误信息以便排查。",
+      "empty": "还没有构建过索引。",
+      "chunks": "{done} / {total} 个分块",
+      "started": "开始于",
+      "completed": "完成于",
+      "states": {
+        "building": "构建中",
+        "active": "当前",
+        "retired": "已退役",
+        "failed": "失败"
+      }
+    },
+    "settings": {
+      "saved": "设置已保存。",
+      "general": {
+        "title": "基本信息",
+        "metric": "距离度量",
+        "modelFrozen": "向量模型按索引版本固定，更换向量空间需要重建索引。"
       },
       "retrieval": {
-        "title": "检索",
-        "detail": "混合检索、重排序，以及对外开放的检索 API。"
+        "title": "检索默认值",
+        "description": "对所有未显式指定参数的检索请求生效，包括 Agent 的请求。",
+        "searchMode": "检索方式",
+        "candidateK": "候选数",
+        "scoreThreshold": "最低得分",
+        "expandParent": "默认返回父块上下文",
+        "expandParentHint": "没有父块快照的旧索引会返回子块并附带提示。",
+        "rerank": "重排序结果",
+        "rerankHint": "由运维配置的重排序端点名称。"
       },
-      "mcp": {
-        "title": "MCP 服务",
-        "detail": "将知识库作为工具开放给任意 MCP 客户端。"
+      "chunking": {
+        "title": "分块",
+        "description": "修改在下次重建时生效，不影响当前索引。",
+        "strategy": "策略",
+        "strategies": {
+          "parent_child": "父子分块",
+          "recursive": "递归分割",
+          "markdown": "按 Markdown 标题",
+          "fixed": "固定长度",
+          "semantic": "语义分块"
+        },
+        "childTokens": "分块 tokens",
+        "childOverlap": "重叠 tokens",
+        "parentTokens": "父块 tokens",
+        "minChunkTokens": "最小分块 tokens",
+        "keepTables": "保持表格完整",
+        "prependHeadings": "在分块前附加标题路径"
       },
-      "models": {
-        "title": "模型供应商",
-        "detail": "接入 OpenAI、Claude、Gemini、Qwen、DeepSeek、Llama 及兼容接口。"
-      },
-      "pipelines": {
-        "title": "流水线",
-        "detail": "以版本化的图编排数据摄取与检索流程。"
+      "danger": {
+        "title": "危险操作",
+        "description": "删除会移除所有文档、分块和向量，且无法恢复。"
       }
     }
+  },
+  "models": {
+    "title": "模型",
+    "lede": "用于索引文档和向量化查询的向量模型服务。",
+    "health": {
+      "unknown": "未测试",
+      "healthy": "正常",
+      "unhealthy": "异常",
+      "unavailable": "不可用",
+      "degraded": "降级",
+      "error": "错误"
+    },
+    "provider": {
+      "title": "服务商",
+      "description": "本部署允许调用的 TEI 和 Infinity 服务端点。",
+      "one": "服务商",
+      "add": "添加服务商",
+      "addHint": "本地 Compose 服务地址为 http://embedding:80，请只添加可信地址。",
+      "emptyTitle": "还没有服务商",
+      "emptyBody": "先添加本地向量服务。",
+      "dialect": "接口类型",
+      "endpoint": "服务地址",
+      "endpointHint": "内网地址需要勾选下方选项。",
+      "revision": "部署修订标识",
+      "revisionHint": "用于标记已部署模型文件的标签，会记录到每个索引版本中。",
+      "allowPrivate": "允许可信的内网地址",
+      "modelCount": "{n} 个模型",
+      "created": "服务商已添加。",
+      "deleteTitle": "删除服务商 {name}？",
+      "deleteBody": "仍有已注册模型的服务商无法删除。",
+      "deleted": "服务商已删除。"
+    },
+    "model": {
+      "title": "模型",
+      "description": "向量维度和 token 上限必须与实际部署的模型一致。",
+      "add": "注册模型",
+      "addHint": "默认值对应内置的 MiniLM 模型。",
+      "emptyTitle": "还没有注册模型",
+      "emptyBody": "注册服务商提供的模型，然后测试连通性。",
+      "emptyNeedsProvider": "请先添加服务商。",
+      "displayName": "显示名称",
+      "key": "模型标识",
+      "dimension": "向量维度",
+      "maxTokens": "输入 token 上限",
+      "tokenizer": "分词器",
+      "tokenizerHint": "随本服务部署的分词器。",
+      "batchSize": "批大小",
+      "normalize": "归一化向量",
+      "register": "注册",
+      "test": "测试",
+      "testOk": "正常 · {dims} 维 · {tokens} tokens",
+      "testFailed": "服务端点没有返回有效向量。",
+      "tokenLimit": "{n} tokens",
+      "created": "模型已注册。",
+      "deleteTitle": "删除模型 {name}？",
+      "deleteBody": "被知识库使用的模型无法删除。",
+      "deleted": "模型已删除。"
+    }
+  },
+  "storage": {
+    "title": "存储",
+    "lede": "文档文件的存放位置与向量索引的存放位置。",
+    "add": "添加存储",
+    "addHint": "创建后会立即测试连接。",
+    "emptyTitle": "还没有存储",
+    "emptyBody": "创建知识库前，请分别添加一个文档存储和一个向量存储。",
+    "kind": "类型",
+    "kinds": {
+      "object": "文档文件",
+      "vector": "向量"
+    },
+    "health": {
+      "unknown": "未测试",
+      "healthy": "正常",
+      "unhealthy": "异常",
+      "unavailable": "不可用",
+      "degraded": "降级",
+      "error": "错误"
+    },
+    "localHint": "存放在部署配置的持久化目录中的本地文件。",
+    "pgvectorHint": "平台 PostgreSQL 数据库中的 pgvector 索引。",
+    "test": "测试",
+    "testOk": "存储连接正常。",
+    "testFailed": "存储连接失败，请检查部署配置。",
+    "createAndTest": "创建并测试",
+    "created": "已添加 {name}。",
+    "deleteTitle": "删除存储绑定 {name}？",
+    "deleteBody": "只能删除未被使用的绑定，底层存储卷不会受影响。",
+    "deleted": "存储绑定已删除。"
   },
   "users": {
     "title": "用户",
     "subtitle": "管理员负责平台管理；普通用户在被授权的知识库范围内工作。",
     "new": "新建用户",
+    "emptyTitle": "没有用户",
     "username": "用户名",
     "email": "邮箱",
     "displayName": "显示名称",
     "role": "角色",
+    "roles": {
+      "admin": "管理员",
+      "user": "普通用户"
+    },
+    "roleHints": {
+      "admin": "管理用户、模型、存储和设置。",
+      "user": "在被授权的知识库范围内工作。"
+    },
     "status": "状态",
     "lastLogin": "最近登录",
     "never": "从未",
@@ -105,13 +515,18 @@
     "disabled": "已停用",
     "mustChange": "待更改凭据",
     "permissions": "权限",
-    "forceChange": "强制改密",
+    "forceChange": "要求改密",
+    "forceChangeTitle": "要求 {name} 更改密码？",
+    "forceChangeBody": "其现有会话会被结束，下次登录时必须设置新密码。",
+    "forceChangeDone": "已设置为下次登录时必须改密。",
     "disable": "停用",
     "enable": "启用",
-    "confirmDelete": "确认删除此账户？其 API 密钥与授权也将一并吊销。",
+    "deleteTitle": "删除 {name}？",
+    "confirmDelete": "其 API 密钥与授权也会一并吊销。",
+    "deleted": "用户已删除。",
     "createdTitle": "账户已创建",
     "initialPasswordFor": "{name} 的初始密码",
-    "initialPasswordHint": "请直接交给该用户。首次登录时必须更改，因此这是一次性交接凭据，而非您需要保管的密码。"
+    "initialPasswordHint": "请直接交给该用户。首次登录时必须更改，因此这是一次性交接凭据，而非你需要保管的密码。"
   },
   "grants": {
     "title": "权限 — {name}",
@@ -120,65 +535,96 @@
     "held": "授权记录",
     "heldHint": "实际写入的授权行。吊销其中一条即可收回相应访问权限。",
     "workspaceWide": "工作空间级",
-    "resource": "资源",
     "resourceType": "资源类型",
+    "resourceTypes": {
+      "workspace": "工作空间",
+      "knowledge_base": "知识库",
+      "pipeline": "流水线",
+      "function": "函数",
+      "model": "模型",
+      "golden_set": "评测集"
+    },
     "resourceId": "资源 ID",
     "permissions": "权限",
     "add": "新增授权",
     "grant": "授权",
+    "granted": "已添加授权。",
     "revoke": "吊销",
+    "revoked": "授权已吊销。",
     "none": "尚未授予任何权限。",
-    "breakGlass": "紧急访问，{at} 到期"
+    "breakGlass": "临时访问，{at} 到期"
   },
   "keys": {
     "title": "API 密钥",
-    "subtitle": "Agent 与应用访问检索 API 的凭据。",
+    "subtitle": "Agent 与应用调用检索接口和 MCP 时使用的凭据。",
+    "list": "密钥",
     "new": "新建密钥",
+    "createHint": "密钥创建后只显示一次。",
+    "namePlaceholder": "例如 support-bot",
     "showAll": "全部用户",
-    "name": "名称",
+    "emptyTitle": "还没有 API 密钥",
+    "emptyBody": "创建密钥，限定到 Agent 需要的知识库，然后复制一次。",
     "scopes": "权限范围",
-    "usage": "使用情况",
-    "status": "状态",
+    "scopesHint": "密钥权限永远不会超过其所属用户；每次请求都会重新计算两者的交集。",
+    "scopeHints": {
+      "kb_query": "检索",
+      "kb_read": "读取文档和分块",
+      "kb_write": "上传和编辑",
+      "kb_manage": "设置、重建和删除"
+    },
+    "knowledgeBases": "知识库",
+    "knowledgeBasesHint": "全部不勾选表示覆盖所属用户可访问的全部知识库。",
+    "noKnowledgeBases": "还没有知识库，密钥将覆盖所属用户可访问的全部知识库。",
+    "rateLimit": "限流（次/分钟）",
+    "rateLimitDefault": "工作空间默认值",
+    "expires": "到期时间",
+    "expiresHint": "可选。到期后密钥停止生效。",
+    "ipAllowlist": "IP 白名单（CIDR）",
+    "ipAllowlistHint": "用逗号分隔，其他地址的请求会被拒绝。",
     "active": "有效",
-    "revoked": "已吊销",
+    "expired": "已过期",
+    "revokedState": "已吊销",
     "revoke": "吊销",
+    "revokeTitle": "吊销 {name}？",
+    "confirmRevoke": "该密钥的所有副本会立即失效。",
+    "revoked": "密钥已吊销。",
+    "revokeFailed": "密钥吊销失败",
     "calls": "{n} 次调用",
     "neverUsed": "从未使用",
-    "scopedTo": "限定 {n} 个知识库",
     "allOwnerKbs": "所属用户可访问的全部知识库",
-    "knowledgeBases": "知识库",
-    "knowledgeBasesHint": "留空表示覆盖所属用户可访问的全部知识库；其访问范围收窄时，密钥也会自动收窄。",
-    "scopesHint": "密钥权限永远不会超过其所属用户；每次请求都会重新计算两者的交集。",
-    "rateLimit": "限流（次/分钟）",
-    "ipAllowlist": "IP 白名单（CIDR）",
-    "confirmRevoke": "确认吊销此密钥？所有副本将立即停止接受该密钥。",
     "createdTitle": "密钥已创建",
     "keyFor": "{name} 的 API 密钥",
     "keyHint": "请立即存入密钥管理系统。系统仅保存其哈希值，无法再次显示。",
-    "intersectionExplainer": "密钥的生效权限是其权限范围与所属用户权限的交集，且每次请求都会重新计算。因此收回某位用户的访问权限时，其签发的所有密钥都会立即随之收窄，无需任何清理。"
+    "intersectionExplainer": "密钥的生效权限是其权限范围与所属用户权限的交集，且每次请求都会重新计算。收回某位用户的访问权限时，其签发的所有密钥都会立即随之收窄。",
+    "connect": {
+      "title": "接入方式",
+      "description": "以 Bearer 令牌的形式发送密钥。示例以你的第一个知识库为目标。"
+    }
   },
   "audit": {
     "title": "审计日志",
     "subtitle": "仅追加。记录所有凭据变更、权限变更与管理操作。",
     "export": "导出 JSONL",
-    "when": "时间",
-    "actor": "操作者",
-    "action": "操作",
-    "outcome": "结果",
-    "source": "来源",
     "detail": "详情",
     "hide": "收起",
     "actionPrefix": "操作前缀，例如 grant.",
     "actorId": "操作者 ID",
-    "loadMore": "加载更多",
+    "since": "起始时间",
+    "anyOutcome": "全部结果",
+    "outcomes": {
+      "success": "成功",
+      "failure": "失败",
+      "denied": "拒绝"
+    },
     "end": "已到末尾。",
     "empty": "没有符合筛选条件的记录。",
     "quick": {
+      "label": "快捷筛选",
       "all": "全部",
       "auth": "登录",
       "user": "账户",
       "grant": "授权",
-      "breakGlass": "紧急访问",
+      "breakGlass": "临时访问",
       "apikey": "API 密钥",
       "denied": "拒绝记录"
     }
@@ -191,9 +637,10 @@
     "hot": "热更新",
     "restart": "需重启",
     "accessTitle": "管理员对知识库内容的访问权限",
+    "accessDescription": "管理员是否可以阅读未被授权的知识库中的文档。",
     "access": {
       "break_glass": {
-        "label": "紧急访问（推荐）",
+        "label": "临时访问",
         "detail": "管理员可管理知识库，但需开启一个有时限、须填写理由的窗口才能读取其内容。该授权会被审计，并通知知识库所有者。"
       },
       "on_grant": {
@@ -205,22 +652,91 @@
         "detail": "管理员可读取所有知识库的内容。适用于单一团队的部署；在多团队共用场景下会带来合规问题。"
       }
     },
-    "breakGlassTtl": "紧急访问时长（分钟）",
+    "limitsTitle": "限额与保留期",
+    "limitsDescription": "新密钥与会话的默认值，以及各类记录的保留时长。",
+    "breakGlassTtl": "临时访问时长（分钟）",
     "defaultRpm": "默认限流（次/分钟）",
     "auditRetention": "审计保留期（天）",
     "sessionTtl": "会话有效期（分钟）",
+    "maxUpload": "上传上限（字节）",
     "queuesTitle": "任务队列",
-    "queuesHint": "「最早就绪时长」才是关键信号 — 仅看队列深度可能看起来正常，而某个任务正卡在饱和的工作空间之后。",
-    "queue": "队列",
-    "ready": "就绪",
-    "oldestReady": "最早就绪时长"
+    "queuesHint": "「最早就绪时长」才是关键信号。仅看队列深度可能看起来正常，而某个任务正卡在饱和的工作空间之后。",
+    "readyCount": "{n} 个等待中",
+    "idle": "空闲"
+  },
+  "mcp": {
+    "title": "MCP 服务",
+    "subtitle": "由部署环境托管的监听服务，把知识库作为工具开放给 MCP 客户端。",
+    "deploymentNotConfigured": "当前部署尚未配置托管 MCP。运维人员启用前，设置与服务操作均不可用。",
+    "states": {
+      "stopped": "已停止",
+      "starting": "正在启动",
+      "running": "运行中",
+      "stopping": "正在停止",
+      "error": "错误",
+      "unknown": "未知"
+    },
+    "status": {
+      "title": "服务状态",
+      "desired": "期望状态",
+      "generation": "已应用 / 期望版本",
+      "effectivePort": "生效端口",
+      "heartbeat": "最近心跳",
+      "started": "启动时间",
+      "pending": "变更处理中",
+      "lastError": "最近错误"
+    },
+    "actions": {
+      "start": "启动",
+      "stop": "停止",
+      "restart": "重启",
+      "accepted": "已请求{action}，正在等待管理进程确认。"
+    },
+    "endpoints": {
+      "title": "连接端点",
+      "hint": "仅在确认监听服务运行时显示；访问仍需 API 密钥。",
+      "compatibility": "兼容端点",
+      "direct": "当前主机上的专用监听端点"
+    },
+    "config": {
+      "title": "服务配置",
+      "hint": "端口来自部署允许列表。允许的主机与来源均每行填写一项。",
+      "port": "监听端口",
+      "autoStart": "自动启动",
+      "timeout": "请求超时（秒）",
+      "maxBytes": "请求大小上限（字节）",
+      "hosts": "允许的主机",
+      "hostsHint": "每行一个主机，例如 cairn.example",
+      "origins": "允许的来源",
+      "originsHint": "每行一个来源，例如 https://cairn.example",
+      "save": "保存配置",
+      "saved": "配置已保存，管理进程正在应用。"
+    },
+    "logs": {
+      "title": "近期运行日志",
+      "hint": "这里只显示服务与请求元数据；绝不显示密钥或文档内容。",
+      "download": "下载 JSONL",
+      "level": "全部级别",
+      "since": "起始时间",
+      "apply": "应用筛选",
+      "liveFollow": "实时跟随",
+      "empty": "没有符合筛选条件的日志。",
+      "status": "状态",
+      "levels": {
+        "info": "信息",
+        "warning": "警告",
+        "error": "错误"
+      }
+    }
   },
   "notFound": {
     "detail": "该页面不存在。",
-    "home": "返回控制台"
+    "home": "返回总览"
   },
   "errors": {
-    "network": "无法连接到服务器。请确认 Cairn 正在运行。",
-    "unexpected": "发生了未知错误，请重试。"
+    "network": "无法连接到服务器，请确认服务正在运行。",
+    "unexpected": "发生了未知错误，请重试。",
+    "requestId": "请求 ID",
+    "pageLoad": "页面加载失败，请检查网络连接后重试。"
   }
 }

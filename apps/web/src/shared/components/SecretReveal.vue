@@ -10,6 +10,10 @@
 import { ref } from "vue";
 import { useI18n } from "vue-i18n";
 
+import Button from "@/components/ui/Button.vue";
+import Checkbox from "@/components/ui/Checkbox.vue";
+import Notice from "@/components/ui/Notice.vue";
+
 const props = defineProps<{
   value: string;
   label: string;
@@ -35,52 +39,23 @@ async function copy(): Promise<void> {
 </script>
 
 <template>
-  <div class="secret" data-test="secret-reveal">
-    <el-alert type="warning" :closable="false" show-icon class="warn">
-      <template #title>{{ t("secret.onceTitle") }}</template>
-      {{ hint ?? t("secret.onceBody") }}
-    </el-alert>
+  <div class="grid gap-3" data-test="secret-reveal">
+    <Notice tone="warn" :title="t('secret.onceTitle')">{{ hint ?? t("secret.onceBody") }}</Notice>
 
-    <label>{{ label }}</label>
-    <div class="row">
-      <code data-test="secret-value">{{ value }}</code>
-      <el-button size="small" data-test="secret-copy" @click="copy">
-        {{ copied ? t("secret.copied") : t("secret.copy") }}
-      </el-button>
+    <div>
+      <p class="mb-1 text-[12px] font-medium text-ink-2">{{ label }}</p>
+      <div class="flex items-stretch gap-2">
+        <code
+          class="min-w-0 flex-1 select-all break-all rounded-sm border border-line bg-surface-2 px-3 py-2 font-mono text-[13px] leading-relaxed text-ink"
+          data-test="secret-value"
+          >{{ value }}</code
+        >
+        <Button variant="secondary" class="shrink-0 self-center" data-test="secret-copy" @click="copy">
+          {{ copied ? t("secret.copied") : t("secret.copy") }}
+        </Button>
+      </div>
     </div>
 
-    <el-checkbox v-model="acknowledged" data-test="secret-ack">
-      {{ t("secret.acknowledge") }}
-    </el-checkbox>
+    <Checkbox v-model="acknowledged" data-test="secret-ack">{{ t("secret.acknowledge") }}</Checkbox>
   </div>
 </template>
-
-<style scoped>
-.secret {
-  display: grid;
-  gap: var(--cairn-space-3);
-}
-.warn {
-  margin-bottom: 0;
-}
-label {
-  font-size: 12px;
-  color: var(--cairn-text-muted);
-}
-.row {
-  display: flex;
-  gap: var(--cairn-space-2);
-  align-items: center;
-}
-code {
-  flex: 1;
-  padding: 10px 12px;
-  background: var(--cairn-surface-sunken);
-  border: 1px solid var(--cairn-border);
-  border-radius: 6px;
-  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-  font-size: 13px;
-  word-break: break-all;
-  user-select: all;
-}
-</style>

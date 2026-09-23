@@ -1,6 +1,6 @@
 """Credential-free model reference shared by control and data planes."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 from uuid import UUID
 
@@ -19,3 +19,5 @@ class ModelRef:
     query_prefix: str | None = None
     optimal_batch_size: int = 64
     tokenizer_id: str | None = None
+    provider_id: UUID | None = None
+    dynamic_provider: bool = field(default=False, compare=False)

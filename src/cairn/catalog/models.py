@@ -319,6 +319,16 @@ class DocumentIngestion(Base):
         CheckConstraint("revision > 0", name="revision_positive"),
         CheckConstraint("index_version > 0", name="index_version_positive"),
         CheckConstraint("point_count >= 0", name="point_count_nonnegative"),
+        CheckConstraint(
+            "failed_stage IS NULL OR failed_stage IN ('parse','chunk','embed','index')",
+            name="failed_stage",
+        ),
+        CheckConstraint(
+            "previous_committed_state IS NULL OR previous_committed_state IN "
+            "('registered','parsed','chunked','embedded','indexed')",
+            name="previous_committed_state",
+        ),
+        CheckConstraint("recovery_generation >= 0", name="recovery_generation_nonnegative"),
         Index("ix_document_ingestion_build_state", "kb_id", "index_version", "state"),
     )
 
@@ -332,6 +342,9 @@ class DocumentIngestion(Base):
     index_version: Mapped[int] = mapped_column(Integer, primary_key=True)
     source_content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     state: Mapped[str] = mapped_column(String(16), nullable=False, default="registered")
+    failed_stage: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    previous_committed_state: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    recovery_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     prior_parsed_object_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     parsed_object_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     chunks_object_key: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -19,6 +19,7 @@ __all__ = [
     "InternalError",
     "InvalidId",
     "NotFound",
+    "PayloadTooLarge",
     "PermissionDenied",
     "QuotaExceeded",
     "RateLimitExceeded",
@@ -137,6 +138,12 @@ class QuotaExceeded(CairnError):
     code = "QUOTA_EXCEEDED"
     http_status = 429
     title = "Quota exceeded"
+
+
+class PayloadTooLarge(CairnError):
+    code = "PAYLOAD_TOO_LARGE"
+    http_status = 413
+    title = "Payload too large"
 
 
 class RateLimitExceeded(CairnError):

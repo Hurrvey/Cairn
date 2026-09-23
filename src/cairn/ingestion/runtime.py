@@ -167,7 +167,11 @@ class PipelineRuntime:
 
 def _binding_fingerprint(runtime: EmbeddingRuntimeRef, tokenizer: Tokenizer) -> str:
     model = asdict(runtime.model)
+    model.pop("dynamic_provider", None)
     model["id"] = str(runtime.model.id)
+    model["provider_id"] = (
+        str(runtime.model.provider_id) if runtime.model.provider_id is not None else None
+    )
     identity = {
         "model": model,
         "provider": {

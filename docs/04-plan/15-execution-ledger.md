@@ -1,11 +1,128 @@
 # Ingestion execution ledger
 
-Date: 2026-09-14. Execution: RESUMED, IN PROGRESS. Knowledge-base E2E NOT ACCEPTED.
+Date: 2026-09-18. Supported-format product and search MCP ACCEPTED. Original full KB E2E gate OPEN.
 
 This ledger is the durable restart point. Read it together with `13-ingestion-completion-coordination.md`
 before dispatching work. Preserve the dirty worktree; do not infer completion from existing files.
 
 ## Latest checkpoint (read before historical steps)
+
+September23 WEB WORKBENCH REDESIGN: document35 owns the evidence. Element Plus replaced by Tailwind v4
++ reka-ui primitives with a stone/juniper identity, grouped navigation, command palette, overview with
+attention list and setup checklist, master-detail knowledge base pages, in-place chunk editing, search
+console with fusion/parent/rerank options, light/dark, zh-CN/en-US, offline and error handling. Frontend
+60 unit tests, typecheck, i18n check, build and the production web image pass; the live Playwright
+acceptance (`scripts/browser_ui_acceptance.py`) passes 24 checks against a real local stack with zero
+console errors. No backend change. Company fork resynchronised with its own brand file. No commit.
+
+September22 FULL BACKEND GREEN / ADVANCED RETRIEVAL / FORK SYNC: document34 P04-P05 owns the
+evidence. PDF/OCR adapters, public-corpus measurement, weighted fusion, parent expansion and rerank
+adapter are implemented. First zero-exit full backend: **1066 passed,0 failed,0 collection errors,
+0 skips,coverage84.62%** with real PG/pgvector, Redis and pinned TEI; static gates, frontend48 and
+API drift pass. Only a retrieval unit fixture and formatter changes were made in this closure.
+Company fork resynchronized, rebuilt and healthy. Still OPEN: genuine annotated30-PDF quality gate
+(document 05-quality/04), M12 sandbox, S3/Qdrant, crawler, full model gateway, pipelines/eval, HTTPS
+production perimeter. Disposable `pdf-20260921` containers were left running for reuse; remove them
+only after label verification. No commit or push was made in this closure.
+
+September18 dev merge/push AUTHORIZED and DONE: Agent devc6c9b40 merges origin/rag9b95ef0 into
+origin/dev012b099. Resolved go.mod only; kept dev published common module1.2.709-dev and disabled
+local replacement. Ordinary full build, focused tests/vet and Linux amd64 production build pass.
+Remote dev verified atc6c9b40; rag unchanged, Agent tree clean on dev. Server auto-deploy result and
+real LLM are not verified. MCP needs service environment RAG_BACKEND=mcp, MCP_*, and Go1.25+ build.
+Document33 contains exact evidence; prior no-dev-push/unresolved-conflict notes are historical.
+
+September18 authorized push: user clarified dev alone auto-deploys and approved pushing rag.
+Agent9b95ef0 is now on origin/rag, verified by ls-remote. Origin/dev remains012b099; no merge or
+dev push. Earlier no-push notes below are historical checkpoints; go.mod conflict remains unresolved.
+
+September18 generic naming follow-up: user requested brand-free Agent source/docs/history. Renamed
+all Agent integration identifiers/config/files to MCP, including RAG_BACKEND=mcp and MCP_* env.
+Amended the unpushed commit to9b95ef0 (`feat(rag): integrate MCP retrieval backend`); earlierbbb194b
+is superseded, not part of branch history. Reachable-history name scans and regression/race/vet pass.
+Agent tree clean, no push. Dev pre-merge still has only go.mod conflict. See document33 follow-up.
+
+September18 follow-up: user authorized local Agent commit and dev conflict inspection. Agent rag
+commitbbb194b created, working tree clean, one ahead of origin/rag; no push or deployment. Latest
+origin/dev012b099 virtual merge has one go.mod conflict; router/init.go auto-merges. No actual merge
+performed. Signing issue recovered without bypass; detailed conflict/resolution notes in document33.
+
+September18 AGENT MCP IMPLEMENTED: document33 now owns implementation and acceptance evidence.
+User approved changes to adjacent Agent repository on branchrag; Cairn branchdev dirty work preserved.
+One sol/high adapter worker Hooke CLOSED; parent reviewed and accepted adapter/composition/tests.
+Default local Retriever preserved; official Go MCP SDK1.6.1, Go>=1.25, strict Cairn failure policy,
+CLI configuration and production shutdown wired. Real isolated Cairn/TEI/pgvector/Redis ingestion,
+Go MCP search, CLI and real WS transport through SessionHandler passed with a deterministic chat
+endpoint, including MCP stop/failure/start and recovery using the same client. Live external LLM
+is NOT accepted (baseline remote EOF). Default root build needs matching local common-module
+checkout; published-module alternate build passed. No full production device/business rollout.
+Reproduction: scripts/agent_mcp_acceptance.py and Agent doc/cairn-mcp-integration.md. Test-only
+project cairn-agent-acceptance was removed after label/name verification; no owned container remains.
+Its named volumes, model assets and evidence are retained; final cleanup details in document33 A11.
+No commit/push; no changes to deferred PDF/OCR or full KB E2E gates. Historical September17 user
+container inventory below is not a statement of current engine state after Docker Desktop restart.
+
+September17 MCP WEB MANAGEMENT ACCEPTED/DEPLOYED: document32. Dedicated supervisor with
+published8081..8090 range, PG desired/observed generations+logs, admin page/control, and same-state
+compatibility gateway. Sole sol/high Boyle is CLOSED after frontend delivery; parent owns final
+acceptance/deployment. Real browser port/start-stop-restart/log-download and SDK dual-endpoint search
+passed in isolatedmcpui deployment. Full968 backend passed,2deferredPDF/OCR errors,coverage85.93%.
+Migration0012 applied; private pre-upgradeDB backup537013bytes retained under
+ignoreddata/acceptance-mcpui-20260917. User DB still1indexed document, not used for test fixtures.
+Final969backend passed,2deferredcollectionerrors,0assertionfailures/skips,coverage85.97%; frontend48,
+focused59passed. Live8081 andcompat8080/mcp return existingKB hits; oldAPIembeddedroute503.
+No subagent remains, noAgentcodechanges, no commits. Cleanup ownership recorded indocument32.
+
+September17 MCP ACCEPTED/DEPLOYED: generic Cairn-only read-only search MCP, explicitly NO Agent
+development. Document31 owns plan/evidence. Sole sol/high Bohr is CLOSED; no running subagent. Official
+MCP SDK1.30.0 pinned, protocol baseline2025-11-25, Streamable HTTP stateless JSON. M13 list/get/resources
+and Agent wiring remain out of this accepted MVP scope. Preserve live user's Compose and Agent repo.
+Real SDK/network/isolated Compose and user deployment search passed, including actualTEI/pgvector.
+Full backend954 passed,0 assertion failures/skips,2 unchanged PDF/OCR collection errors,coverage86.29%.
+MCP module coverage93%; frontend36 tests passed. User `/mcp` served atport8080, original document still
+indexed. Temporary query verification key revoked. Agent repo remains clean at662972d. Document31 M09
+confirms only new MCP test containers/network removed; user's11Cairn services and bothM08 stay running.
+Final focused MCP/network/live-model matrix43 passed. No subagent or test process remains.
+
+September16 regression FIXED/DEPLOYED: document30 records default512 versus MiniLM256 repair.
+Actual failed user document recovered without re-upload: indexed100%, revision1, source hash intact,
+125 searchable vectors, max255 tokens, successful5-hit real-model retrieval. Full backend915 passed,
+2 unchanged PDF/OCR collection errors,0 assertion failures/skips,coverage85.84%. Sole sol/high worker
+Kierkegaard is CLOSED. User Compose is now running and must NOT be removed as disposable test state.
+Never run truncating tests against its `cairn` DB. Private ignored pre-repair DB backup retained.
+
+Five-part delivery started: document25 is the current full user objective (UI/config/deployment/
+runtime refresh/purge-retirement). Hume and Tesla are CLOSED after bounded package delivery.
+No running subagent. Final independent acceptance completed:893 backend passed,0 assertion failures/
+skips,2 deferred PDF/OCR collection errors,coverage85.82%;36 frontend tests passed. Documents25 and29
+record all five accepted user deliverables and actual browser/deployment evidence. L127 confirms
+owned test containers removed; Compose volumes/model/image/evidence artifacts retained, M08 untouched.
+L115 onward supersedes older resource state; no five-part completion claim. PDF/OCR stays deferred.
+
+September15: bounded public retrieval slice ACCEPTED in L113. Aristotle
+`01a0a2d2-184a-7fe0-a76f-dd1f70709328` (gpt-5.6-sol/high) is explicitly CLOSED; no running
+subagents. Independent evidence:138 focused passed; **856 full-backend passed,2 known PDF/OCR
+collection errors,no assertion failures/skips,coverage85.20%**. Full command exits1. Journal24
+records scope/limitations. Next focus is runtime refresh plus management/upload/UI/deployment
+journey; general purge/retirement and permission audits remain release gates. Overall E2E OPEN.
+
+Owned retrieval test containers were label-verified and removed in L114. No test process remains.
+
+### Historical checkpoints (superseded by the September15 summary)
+
+Main-flow continuation: bounded failed-stage recovery ACCEPTED in L99. Helmholtz
+`01a09ef9-a55e-7161-99e2-4b09414c7e12` (gpt-5.6-sol/high) is CLOSED; no running subagents.
+Independent results: **45 focused passed;780 full-backend passed,2 known PDF/OCR collection errors,
+no assertion failures/skips,coverage85.96%**. Full command exits1. See document22/L91 onward.
+Next main-product implementation is public retrieval API (document23 preflight); essential cleanup/
+retirement/cache ordering remain required before end-user release, not reasons to postpone retrieval
+indefinitely. Overall E2E remains OPEN. Owned service cleanup is recorded in L100.
+
+User priority update after checkpoint45ab477: prioritize a runnable supported-format product
+journey before PDF/OCR and advanced features. See document21 for verified project-wide gaps and
+sequencing. No new implementation/test run in this status update; no running agents or new services.
+Lifecycle slice4 remains the next bounded backend task, but public retrieval/UI/deployment must
+follow rather than continuing to polish ingestion indefinitely. L90 records the audit.
 
 September14: bounded slice3 ACCEPTED in L87. Euclid `01a09dfa-a006-7c02-b589-cdd3a1d2e563`
 (gpt-5.6-sol/high) is explicitly CLOSED; no running subagents. Final independent evidence:
@@ -28,8 +145,8 @@ knowledge-base E2E remains OPEN. Owned service cleanup is recorded in L73.
 - Advanced semantic/custom package: coordinator independently passed **106 tests**; semantic is wired
   to the actual model service. Custom needs an explicitly injected scoped executor and otherwise fails
   closed; production M12 sandbox execution is NOT implemented or accepted.
-- Full-KB lifecycle: OPEN. Snapshots, bounded fan-out/enrollment/deletion/activation barriers and
-  manual reembedding are accepted. General stage recovery, purge/retirement and broader cache ordering
+- Full-KB lifecycle: OPEN. Snapshots, bounded fan-out/enrollment/deletion/activation barriers,
+  manual reembedding and bounded failed-stage recovery are accepted. Purge/retirement and broader cache ordering
   remain open; terminal failed documents deliberately block nonempty rebuilds.
 - PDF/OCR: OPEN, missing implementation modules still cause collection errors. Real 30-document PDF
   quality evaluation remains OPEN; there is no annotated benchmark or measured quality pass.
@@ -702,17 +819,324 @@ The containing commit identifies this checkpoint; final push outcome is verified
 refs rather than assumed here. No new branch, force-push, history rewrite or resource startup is
 authorized or required. Earlier no-commit statements describe their historical development steps.
 
-## Concrete next action
+L90: User explicitly permits PDF/OCR deferral and prioritizes a fully runnable main product flow.
+Coordinator inspected README, development plan, API router mounting, source module directories,
+web routes, upload registration endpoint and Compose services. Recorded project-wide status and
+reduced-format release priorities in document21. Important gaps: no public retrieval implementation,
+no KB/document/retrieval web journey, no ingestion workers in current Compose, and no complete
+browser upload/model setup path. Direct vector-driver integration tests are NOT public API E2E.
+Existing accepted lifecycle/test evidence remains unchanged. This status/documentation update
+does not start agents/services, run new tests, change business code or push another commit.
+
+L91: User continued under document21 main-product priority. Read current plan/ledger and retry,
+failure-recording, task-ownership seams. Baseline is committed45ab477; only priority/status docs
+were dirty and are preserved. No AGENTS.md found. Dispatched sole sol/high Helmholtz
+`01a09ef9-a55e-7161-99e2-4b09414c7e12`, no descendants, for bounded durable failed-stage recovery;
+no retrieval/UI/PDF/cleanup scope expansion in this assignment. Parent independently builds
+`test_stage_recovery_acceptance.py` and owns live-model acceptance. Recreating dedicated PG/Redis
+with `completion-recovery-20260914` label; M08 services untouched. Worker waits for DB window.
+
+L92: Parent independent four-stage RED completed **4 failed in5.95s**, all reproducing retry
+incorrectly bumping source revision1 to2 instead of resuming. Fresh migrations0001..0010 ran on
+dedicated PG/Redis; one existing Alembic warning. Report stage-red.xml under ignored
+data/acceptance-recovery-20260914. Parent fixed one formatting-only issue; lint passed. Released
+exclusive DB window to Helmholtz. Parent will investigate retrieval integration separately (docs
+only) while the worker implements recovery, so the next main-product seam is not forgotten.
+
+L93: Reviewed/approved document22 design: same run, durable failed stage/previous committed state,
+monotonic recovery generation and direct stage queue; no storage I/O under retry locks. Required
+ambiguity refusal for multiple failed index runs, stale failure-record fencing, and correct handling
+when a stage commit succeeds before notification/publication fails (not just ordinary pre-commit
+failure). Missing/corrupt artifacts must fail safely with real object-store error taxonomy; unknown
+legacy failure metadata must not be guessed. Same worker proceeds TDD; scope stays bounded.
+
+L94: Parent investigated next retrieval seam and recorded concrete DTO/import/auth/IP-filter/
+parent-read-model gaps in document23 (no retrieval implementation yet). This work does not overlap
+the recovery worker and avoids losing the runnable-product priority. Restored pinned TEI with
+matching asset SHA256; health200. Extended both existing real-model scenarios to first experience
+terminal index failure, contributor retry at the same revision, then continue all prior query/
+replacement/rebuild/manual-edit assertions. Parent test files pass lint/format; live recovery not
+yet GREEN. Three owned containers use completion-recovery-20260914 and require eventual cleanup.
+
+L95: Interim recovery review requested original resumepoint preservation on duplicate terminal
+failure recording and consistent document->run->KB lock order. Parent added fifth independent
+repeat-failure test. Also found retry route authorizes path KB but service receives only doc ID:
+same-workspace document from another KB could bypass path authorization. Required binding expected
+path KB to actual document before retry mutation and a regression; other historical router audits
+remain a follow-up, not permission to expand this bounded package. No independent GREEN yet.
+
+L96: Worker checkpoint reports combined recovery12 passed and adjacent manual-edit/parse-reuse33
+passed. Repeat failure now preserves the first resumepoint; HTTP retry path is bound to actual KB
+with a scoped API-key regression; retry lock order is document->run->KB->version. Ready-stage
+cancellation is limited to the exact run generation, never running/manual-edit tasks. Coordinator
+requested remaining prerequisite corruption/legacy/stale-version/concurrent-double-click tests
+and actual TEI recovery before DB handoff. No independent final acceptance yet.
+
+L97: Recovery-generation review found a pending-manual-edit loss scenario: index commits, a user
+edit queues, publication fails terminally, contributor recovery increments run generation and only
+republishes; a new generation check on manual tasks would now skip the still-current edit forever.
+Requested a regression and either separation of independent manual-edit identity from run recovery
+generation or safe reissue of pending edits. Must preserve revision/version/hash/edit fences and
+must not silently discard user work. Same worker continues, no acceptance yet.
+
+L98: Worker delivered and released DB window. Parent explicitly closed Helmholtz (no running
+subagents) and independently passed **45 focused tests,no skips,38.74s**, including all recovery/
+pending-edit/HTTP scope tests, actual TEI recovery/query, prior lifecycle and real migration
+round-trip through head0011. Report recovery-independent.xml. Independent lint,mypy111,import6,
+route50/8 passed. Overbroad format scan included historical migrations (7 unrelated formatting
+failures left untouched); normal src/apps/tests scope found4 touched files needing formatting.
+Parent formatted only those4, then normal scope+new0011 passed175 files. Started full backend
+with actual TEI and unchanged coverage80; report backend-final.xml/coverage.xml, result pending.
+
+L99: Final independent full backend command completed with actual PG/pgvector, Redis and pinned TEI:
+
+```powershell
+uv run python -m pytest -o addopts= tests --continue-on-collection-errors --cov --cov-report=xml:data/acceptance-recovery-20260914/coverage.xml --cov-fail-under=80 --junitxml=data/acceptance-recovery-20260914/backend-final.xml -q --tb=short
+```
+
+**780 passed,2 collection errors,no assertion failures/skips,188.00s,coverage85.96%**. Four warnings
+are existing Alembic path_separator notices. Errors are exactly missing OCR module imports in
+test_ocr.py/test_pdf.py; command exits1 and coverage80 remains unchanged. Coordinator ACCEPTS
+bounded slice4 after independent45 tests, full backend, static gates and review corrections. Missing/
+corrupt prerequisites fail safely rather than being silently reparsed; unknown legacy resumepoints
+and ambiguous/retired runs require explicit source replacement/rebuild. Pending manual edits survive
+publication recovery. This is not whole-product/E2E acceptance. Updated module/status docs and kept
+next retrieval seam visible. No code commit or push was requested for this development round.
+
+L100: With all tests completed and Helmholtz closed, verified each exact container's `cairn.task`
+label equals `completion-recovery-20260914`, then removed only cairn-completion-tei,
+cairn-completion-redis and cairn-completion-pg. Final inventory contains untouched pre-existing M08
+Redis39716/PG38906. Preserved reports, pinned model assets and all code/docs in the workspace.
+No application DB migration, unrelated cleanup, commit, push, branch or worktree was performed.
+No subagent or test process remains running. One documentation patch initially failed its expected
+heading check because the worker's handoff heading changed; re-read exact heading and reapplied,
+without business-code changes. Restart from document23 public-retrieval preflight and document21
+main-product acceptance, not an automatic repeat of already-accepted ingestion tasks.
+
+L101: User requested next development phase. Read retrieval preflight and normative public API;
+inspected dirty recovery/docs on dev, preserved all. No AGENTS.md found. Dispatched sole sol/high
+Aristotle `01a0a2d2-184a-7fe0-a76f-dd1f70709328`, no descendants, for bounded POST retrieval query:
+authorized all targets, active runtime, data-plane-safe DTO/model resolver, existing vector/fulltext/
+hybrid drivers, source citations and explicit unsupported/degraded options. Parent owns
+`test_retrieval_acceptance.py`, worker owns document24 and scoped implementation/tests. New dedicated
+PG/Redis containers started under retrieval-20260915; old M08 containers remain untouched. Worker
+awaits initial RED/DB window before service tests. No new commit/push authorized this round.
+
+L102: Fresh dedicated PG/Redis readiness passed; migrations0001..0011 executed through fixtures.
+Parent added three independent HTTP acceptance tests (401 without auth, scoped fulltext200 with
+indexed IDs/version, mixed unauthorized target403 before config resolution). RED: **3 failed in
+5.44s**, all404 due absent endpoint; one existing Alembic warning. Report http-red.xml under
+data/acceptance-retrieval-20260915. Released exclusive DB window to Aristotle; parent prepares
+non-overlapping security/real-model acceptance and does not run truncating tests concurrently.
+
+L103: Parent expanded HTTP acceptance to7 cases: strict failure for foreign-workspace/deleting/
+missing runtime and restricted API key after IP-policy-cache eviction. Added no-query-text leakage
+assertion on failures; corrected local import/format issues. Restored owned TEI, verified pinned
+model/tokenizer SHA256 and health200. No new HTTP implementation evidence yet. Parent waits for
+declared retrieval resolver configuration before adding live-model endpoint test; all DB testing
+remains exclusively with Aristotle.
+
+L104: Coordinator approved document24 bounded design: shared credential-free runtime DTOs, provider-
+ID-keyed operator endpoint config, Redis-only active runtime, auth-before-all-I/O, existing fulltext/
+vector/hybrid RRF, explicit unsupported options/default degradation and honest data-role composition.
+Required correction: status=indexing with a valid ACTIVE snapshot must keep old-index queries alive
+during rebuild. Requested query-vector bounds, key-expiry preservation in atomic IP/auth cache,
+all-target failure not disguised as empty200, backwards DTO tests and explicit runtime-cache expiry
+rollout limitations. No broad M09 completion claim. Same Aristotle proceeds TDD; DB window retained.
+
+L105: Parent extended actual TEI markdown/semantic scenarios with scoped API-key HTTP vector query
+after recovery/rebuild/manual edit. Uses document24's public endpoint/tokenizer environment config
+and real app lifespan; no injected retrieval implementation. Requires Mariana Trench content and
+public document/KB version IDs from the response. Existing pipeline assertions retained. Parent
+corrected Ruff import/context formatting; no production edits or concurrent DB tests.
+
+L106: Parent acceptance now13 cases: fulltext/supplied-vector/hybrid in active and rebuilding states,
+plus wrong-KB-ID runtime corruption. Supplied vectors intentionally avoid fake endpoint requirements.
+Parent fixed one decorator formatting issue. Shared DTO review requested preserving ModelRef's old
+positional field order when adding optional provider_id and documenting legacy snapshot impact on
+both query embedding and ingestion writes rather than silently rewriting immutable provenance.
+
+L107: Parent added deployment-role HTTP checks (control404,data/all401 without credentials), total
+16 independent cases. Requested exact query-prefix/special-token budget validation to avoid silent
+query truncation, role-correct capability discovery, point-ID/KB/version validation on denormalized
+hits and finite scores. These protect the new public surface; no retrieval work was delegated to
+a second agent. Parent lint/format pass; worker remains exclusive DB owner.
+
+L108: Reviewed first service implementation: required full immutable ModelRef equality for supplied-
+vector multi-KB compatibility (same ID/dimension alone is insufficient), configured threshold/dedupe
+precedence or explicit degradation, no silently ignored weights, and target-isolated runtime/model
+failures for non-strict requests. Authorization/cross-workspace failures must still fail the request,
+not become partial data leakage. Worker has unit RED/GREEN for runtime, DTO, auth envelopes and
+basic search; no final HTTP or whole-M09 acceptance yet.
+
+L109: Parent strengthened six valid HTTP cases with a warmed real API-key cache and failing spies
+on auth key DB resolution, catalog KB hydration and model-gateway runtime lookup; pgvector SQL
+remains allowed. Requested spec-consistent single-mode scores/RRF target weights and per-target
+validation before assembly so malformed hits cannot bypass partial-failure semantics. Parent
+tests pass lint/format. No final endpoint acceptance yet; sole worker continues.
+
+L110: First worker-run provider-free HTTP checkpoint reports16 passed, including parent mode/
+rebuild/authorization/runtime tests. Remaining query-embedding/lifecycle/data-role integration still
+pending. Review required restricted keys to fail when peer IP is unknown, provider-ID-aware query
+cache namespaces/dialect checks, actual overall request deadlines and honest unknown cache-hit usage.
+Also flagged context-budget counts: normalized embedding-input token count is not necessarily the
+count of exact returned manual text. New read-model budgeting must not silently undercount raw text.
+
+L111: Worker checkpoint reports provider-free16 HTTP passed and one real TEI markdown HTTP path
+passed after fixing provider_id UUID fingerprint serialization. No test process/blocked DB session
+remained at read-only inspection. Parent took DB window for independent HTTP/both live/unit/authz/
+catalog/recovery verification; report independent.xml. Worker remains sole subagent but is restricted
+to static/format/documentation cleanup, no DB commands or uncoordinated behavior edits. Static gates
+are not yet accepted; reported outstanding style findings remain visible in document24.
+
+L112: Independent focused acceptance passed **138 tests,no skips,50.34s**, including both actual
+TEI HTTP query scenarios, all16 parent role/runtime/authorization/mode/rebuild cases, owned units,
+existing authz/catalog and stage recovery. One existing Alembic warning. Report independent.xml.
+Started full backend with actual TEI and unchanged coverage80 threshold; backend-full.xml and
+coverage.xml pending. Worker remains restricted to static/docs cleanup; no concurrent DB tests.
+This is first independently verified public retrieval path, not yet complete product/M09 acceptance.
+
+L113: Independent full backend completed with real PG/pgvector, Redis and pinned TEI enabled:
+
+```powershell
+uv run python -m pytest -o addopts= tests --continue-on-collection-errors --cov --cov-report=xml:data/acceptance-retrieval-20260915/coverage.xml --cov-fail-under=80 --junitxml=data/acceptance-retrieval-20260915/backend-full.xml -q --tb=short
+```
+
+Result: **856 passed,2 collection errors,no assertion failures/skips,210.54s,coverage85.20%**.
+Errors remain exactly missing `cairn.ingestion.ocr` imports in test_ocr.py/test_pdf.py; four existing
+Alembic warnings. Command exits1; coverage80 unchanged. Final independent lint/format191,mypy119,
+import7 and route51/8 passed. Coordinator ACCEPTS bounded first public query slice, not full M09 or
+product release. Worker static/doc cleanup was reviewed and worker explicitly closed. A subsequent
+status message to the already-closed ID returned not-found; no second agent or code change resulted.
+Parent owns final acceptance documentation. Runtime cache idle expiry (300s), unavailable advanced
+options, legacy snapshot/token-count limits and missing management/deployment journey remain open.
+
+L114: After all tests and Aristotle's closure, verified each exact `retrieval-20260915` container
+label, then removed only completion-tei, completion-redis and completion-pg. Final inventory leaves
+only untouched M08 PG38906/Redis39716. Preserved code/docs, ignored reports and pinned assets; no
+application database migration, commit, push, branch or unrelated cleanup. `git diff --check`
+passes with only CRLF conversion notices. No agent/test process remains. Restart at document21/24
+next runtime-refresh/UI/deployment slice, not PDF/OCR unless priority changes.
+
+L115: User explicitly requested all five main-product deliverables. Coordinator wrote delivery
+document25 with package ordering, scope and release acceptance, inspected current worker/catalog/
+storage/frontend seams, preserved dirty recovery/retrieval work. Dispatched sole sol/high Hume
+`01a0a3ed-812e-7f40-9147-d8a23bbcb80b` for packageA (items4/5), no descendants. Parent prepares
+interface/acceptance planning for later packages without overlapping source writes. Dedicated test
+PG/Redis being recreated with label mainproduct-20260915; existing M08 services untouched. No commit.
+
+L116: Parent maintenance acceptance RED: **2 failed,1 passed in5.41s** (missing purge/drop handlers
+and remaining vectors after document deletion); deleted-KB republish case passed. Fresh test DB
+migrations executed, one existing Alembic warning. Report maintenance-red.xml under ignored
+data/acceptance-product-20260915. Released exclusive PG/Redis window to Hume. Parent must not run
+truncating DB tests concurrently; packageA not accepted yet.
+
+L117: Approved packageA document26: KB-row-serialized publication, bounded automatic maintain
+scheduler/advisory leadership, lease-fenced purge and retired drop. Required timeout-bounded Redis
+writes, no task-drain waits under KB locks, deletion fences on new/stage writes, and preservation of
+referenced old parse artifacts (safe retention until document/KB purge preferable to deleting reused
+prerequisites). Parent concurrently built a real backend image successfully and prepared Compose/
+model assets in disjoint deployment files; these are not yet whole-stack acceptance. PackageB/C
+interface contract captured in document27. Five-part objective remains active and incomplete.
+
+L118: Parent delivered disjoint initial UI/API-client implementation and Compose/Docker wiring;
+frontend typecheck, multipart test and page smoke tests passed (28 prior+multipart and3 new pages).
+Exact backend endpoints await packageB; no UI acceptance claimed yet. Approved packageA runtime/
+cleanup design, reviewed advisory transaction release, SKIP LOCKED drain, shared-source references,
+and API-key allowlist narrowing on KB purge. Returned unbounded 1..high_water namespace enumeration:
+must list actual namespaces through the vector driver or bounded durable cursor to avoid sparse-
+version DoS. CurrentsoleagentHume fixes finalA edges then releasesDB forparentacceptance.
+
+L119: Parent independently passed packageA14 tests in11.68s (real PG/Redis/object/vector, scheduler
+repair, cleanup and sparse namespace enumeration), mypy120 passed. Initial command used wrong
+scheduler test filename and ran zero tests; corrected path used for actual evidence. Hume explicitly
+closed before next agent. Parent UI build passed and31 frontend tests passed. Overall five-part
+delivery still incomplete; proceed model/upload configuration backend packageB. No commit/push.
+
+L120: Dispatched sole sol/high Tesla `01a0a436-80f4-7bd3-a633-fdc2d7ca85b1` for packageB after
+closing Hume. Scope: usable config APIs, actual bounded upload/download, nested ownership, dynamic
+provider projection; parent owns all frontend/deployment. DB window transferred to Tesla. Parent
+starts separate Compose project cairn-product-acceptance stores/TEI with its own persistent volumes
+and database, distinct from truncating integration DB. Browser tooling prepared outside project
+dependency lock. PackageA finalcombined regression and full UI/deployment acceptance still pending.
+
+L121: Separate Compose migration/bootstrap and API/data/web/TEI startup passed after fixing
+installed-CLI migration path via container PYTHONPATH. Browser login passed with real cookies.
+Browser found mandatory credential completion left the user on login; parent reproduced with a
+RED Vue routing test, added completion event/navigation, and focused8 tests passed. The original
+browser harness also used wrong ElementPlus input selectors; observed live DOM and corrected them.
+New document-pagination polling test reproduced stale progress whenever next_cursor existed;
+parent is fixing refresh while retaining loaded pages. No full five-part completion claimed.
+
+## Concrete next action (current September15 delivery)
+
+L127 CLEANUP COMPLETE: Verified `cairn.task=mainproduct-20260915` before removing exactly the three
+completion PG/Redis/TEI containers. Verified Compose project labels and ran down (without `-v`) only
+for cairn-product-acceptance; its12 containers and network are gone. The three named demo volumes,
+downloaded models, images and ignored acceptance reports/screenshots remain. Both M08 containers
+still show8 days uptime. No final pytest process or subagent remains. Application `.env` was never
+created/touched. `git diff --check` passes; branchdev still points to45ab477 with all changes uncommitted.
+No more work is pending for user items1-5; await next priority for the explicitly deferred scope.
+
+L126 FINAL ACCEPTANCE: Full backend rerun completed893 passed,2 known PDF/OCR collection errors,
+0 assertion failures/skips,4 existing Alembic warnings,235.61s,coverage85.82% (80% gate unchanged).
+Report backend-final.xml and coverage-final.xml;43 focused tests passed. Fresh final-image browser
+setup/upload/query and follow-up lifecycle/cache-loss recovery passed. All five user items accepted
+in document29; PDF/OCR/genuine30 and other original scope remain open. No agent running, no new
+commit/push. Parent now removes only label/project-verified disposable containers, retaining Compose
+volumes, model assets, images and local evidence; application .env/M08 state must remain untouched.
+
+L125: Parent full regression completed with890 passed,3 failures,2 deferred collection errors,
+coverage84.49%. Failures were two old live-TEI test compositions missing provider publication and
+one obsolete maintain-handler expectation. Updated fixtures to call real RuntimeRefresher with
+empty environment provider overrides, and explicitly assert all new destructive handlers. Focused
+independent acceptance then passed43 tests in36.33s (actual TEI, PG/Redis, upload/body limits,
+maintenance, worker boot). Full rerun is now running. All213 Python files pass Ruff lint/format;
+36 frontend tests/typecheck/API drift pass. Fresh final-image browser setup/upload/query passed in
+one uninterrupted run, followed by successful incremental/rebuild/bearer/deletion lifecycle script.
+
+L124: PackageB documented completion and explicit DB release in document28 P16. Parent closed Tesla;
+no agent remains. Parent final full-backend attempt initially used the historical test password,
+causing service skips/setup errors; interrupted immediately, inspected the owned container's actual
+configuration, and restarted with its disposable credential. Do not use that aborted attempt as
+evidence. Parent has exclusive integration DB window. KB-wide browser deletion passed: KB/chunk
+rows, all vector namespaces and all object files removed; last-KB-scoped key revoked, not broadened.
+Full Compose stop/start persistence and browser manual chunk edit/reembedding also passed.
+
+L123: Document25 P08-P10 record real CSRF Host/Origin fix, five-process ORM bootstrap repair and
+successful browser/HTTP lifecycle acceptance. Uploaded Markdown parsed/chunked/embedded/indexed;
+normal retry reused existing artifacts; browser retrieval, actual TEI model setup, incremental TXT,
+rebuild, scoped bearer query, doc purge and accelerated old-index retirement passed. Isolated Redis
+FLUSHDB recovered automatically. New-user forced-credential flow and390px read-only UI passed.
+Full container-stop/start persistence and final combined regression remain required. Sole Tesla is
+finishing B compatibility/static checks; do not run truncating integration tests until DB release.
+
+L122: Document25 P07 records parent UI onboarding/pagination/dashboard/permission improvements.
+All five Compose workers are running in isolated cairn-product-acceptance, plus API/web/TEI and
+persistent PG/Redis/object volumes. Fresh pinned model download verified every checksum. Sole Tesla
+still owns backendB and integration DB window. Parent added real-ingress lifecycle acceptance script;
+do not mistake an unexecuted script for evidence. Browser session password changed successfully,
+but full first-run redirect requires rebuilt web image. No application .env or production data touched.
+
+1. This five-part delivery is accepted; do not redispatch its implementation or reopen completed
+   tasks based on older historical checkpoints. Read document29 and the quickstart for exact scope.
+2. User items6/7, PDF/OCR/genuine30 and unsupported modules were deferred; wait for the user's next
+   priority before starting them. Original complete-project/E2E gate stays open.
+3. Check the latest cleanup entry before assuming any local service is running. Future truncating
+   tests need dedicated disposable services; never use retained demo or application databases.
+
+## Historical next action (superseded)
 
 1. Read this latest checkpoint, then document 16. There is no running worker to wait for or assume
    is fixing anything. Dispatch at most one new `gpt-5.6-sol/high` worker.
 2. Recreate disposable services before any database test; never point truncating fixtures at the
    pre-existing M08 or application databases. Use dedicated database names as in the inventory below.
-3. Bounded slices1-3 are accepted; do not redispatch snapshot/fanout/manual-reembed work. Next is
-   package16 slice4: persist failed stage and resume validated committed artifacts without gratuitous
-   reparse/reembedding, preserving task/revision/version fencing and manual edits. Then general
-   purge/retirement and broader runtime cache-generation ordering. Read documents17/19/20 limits,
-   especially legacy unavailable snapshots and identity-incomplete edit-task remediation.
+3. Bounded lifecycle1-4 and the first public retrieval endpoint are accepted. Do not redispatch
+   their implementation. Next main-product work: keep runtime projections usable after idle/cache
+   loss with safe publication ordering, close nested-route permission gaps, and wire model/storage
+   setup, true upload, KB/document/chunk/retrieval UI and runnable worker deployment. Essential
+   purge/retirement remains a release gate. Read document24's unsupported capabilities and cache/
+   legacy limits; do not claim whole M09 or E2E complete or return to optional parser polishing.
 4. Then finish PDF/OCR adapters and the genuine annotated 30-document quality evaluation. Existing
    `test_pdf.py`/`test_ocr.py` are unfinished tests, not implemented parsers; keep the quality gate open.
 5. Rerun the complete backend without collection errors/failing cases before claiming the knowledge-

@@ -7,13 +7,22 @@ discovering a mismatch mid-ingest.
 
 from __future__ import annotations
 
+import asyncio
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import exists, func, select
+from sqlalchemy.exc import IntegrityError
 
+from cairn.core.cache import Cache, get_cache
 from cairn.core.db import session_scope, transaction
 from cairn.core.errors import Conflict, NotFound, ValidationFailed
 from cairn.core.logging import get_logger
+from cairn.core.provider_runtime import (
+    PROVIDER_RUNTIME_TTL,
+    ProviderRuntimeProjection,
+    provider_runtime_key,
+    provider_runtime_tombstone_key,
+)
 from cairn.modelgw.dto import (
     Capability,
     EmbeddingRuntimeRef,
@@ -27,6 +36,7 @@ from cairn.modelgw.models import Model, ModelProvider
 __all__ = ["SUPPORTED_FAMILIES", "ModelCatalog", "get_model_catalog"]
 
 log = get_logger(__name__)
+_RUNTIME_CACHE_TIMEOUT_S = 2.0
 
 #: Provider families the gateway will support. Registration accepts any of them
 #: now; the adapters that actually call them arrive with M10.
@@ -49,6 +59,13 @@ SUPPORTED_FAMILIES: frozenset[str] = frozenset(
 
 
 class ModelCatalog:
+    def __init__(self, *, cache: Cache | None = None) -> None:
+        self._cache = cache
+
+    @property
+    def cache(self) -> Cache:
+        return self._cache or get_cache()
+
     # --- providers ----------------------------------------------------------
 
     async def create_provider(
@@ -95,15 +112,79 @@ class ModelCatalog:
                 ).all()
             )
             counts = {
-                provider.id: await session.scalar(
-                    select(Model.id).where(Model.provider_id == provider.id).limit(1)
+                provider.id: int(
+                    await session.scalar(
+                        select(func.count(Model.id)).where(Model.provider_id == provider.id)
+                    )
+                    or 0
                 )
                 for provider in providers
             }
         return [
-            _provider_view(provider, model_count=1 if counts.get(provider.id) else 0)
+            _provider_view(provider, model_count=counts.get(provider.id, 0))
             for provider in providers
         ]
+
+    async def delete_provider(self, workspace_id: UUID, provider_id: UUID) -> None:
+        try:
+            async with transaction() as session:
+                provider = await session.get(ModelProvider, provider_id, with_for_update=True)
+                if provider is None or provider.workspace_id != workspace_id:
+                    raise NotFound("Provider not found.")
+                in_use = await session.scalar(
+                    select(exists().where(Model.provider_id == provider_id))
+                )
+                if in_use:
+                    raise Conflict("Delete the provider's models before deleting the provider.")
+                async with asyncio.timeout(_RUNTIME_CACHE_TIMEOUT_S):
+                    await self.cache.delete(provider_runtime_key(provider_id))
+                    await self.cache.set(
+                        provider_runtime_tombstone_key(provider_id),
+                        b"deleted",
+                        PROVIDER_RUNTIME_TTL,
+                    )
+                await session.delete(provider)
+        except IntegrityError as exc:
+            raise Conflict("The provider is still referenced by a model.") from exc
+
+    async def runtime_provider_ids(self, *, after: UUID | None, limit: int) -> list[UUID]:
+        async with session_scope() as session:
+            stmt = select(ModelProvider.id).where(
+                ModelProvider.is_enabled.is_(True),
+                ModelProvider.family.in_(("tei", "infinity")),
+            )
+            if after is not None:
+                stmt = stmt.where(ModelProvider.id > after)
+            return list((await session.scalars(stmt.order_by(ModelProvider.id).limit(limit))).all())
+
+    async def publish_provider_runtime(self, provider_id: UUID) -> bool:
+        async with transaction() as session:
+            provider = await session.get(ModelProvider, provider_id, with_for_update=True)
+            if provider is None or not provider.is_enabled:
+                async with asyncio.timeout(_RUNTIME_CACHE_TIMEOUT_S):
+                    await self.cache.delete(provider_runtime_key(provider_id))
+                    await self.cache.set(
+                        provider_runtime_tombstone_key(provider_id),
+                        b"deleted",
+                        PROVIDER_RUNTIME_TTL,
+                    )
+                return False
+            projection = _provider_runtime_projection(provider)
+            async with asyncio.timeout(_RUNTIME_CACHE_TIMEOUT_S):
+                await self.cache.set(
+                    provider_runtime_key(provider_id),
+                    projection.model_dump_json().encode(),
+                    PROVIDER_RUNTIME_TTL,
+                )
+                await self.cache.delete(provider_runtime_tombstone_key(provider_id))
+            return True
+
+    async def invalidate_provider_runtime(self, provider_id: UUID) -> None:
+        async with asyncio.timeout(_RUNTIME_CACHE_TIMEOUT_S):
+            await self.cache.delete(provider_runtime_key(provider_id))
+            await self.cache.set(
+                provider_runtime_tombstone_key(provider_id), b"deleted", PROVIDER_RUNTIME_TTL
+            )
 
     # --- models -------------------------------------------------------------
 
@@ -173,6 +254,16 @@ class ModelCatalog:
             }
         return [_model_view(model, providers[model.provider_id]) for model in models]
 
+    async def delete_model(self, workspace_id: UUID, model_id: UUID) -> None:
+        try:
+            async with transaction() as session:
+                model = await session.get(Model, model_id, with_for_update=True)
+                if model is None or model.workspace_id != workspace_id:
+                    raise NotFound("Model not found.")
+                await session.delete(model)
+        except IntegrityError as exc:
+            raise Conflict("The model is still referenced by a knowledge base.") from exc
+
     async def get_ref(self, model_id: UUID) -> ModelRef:
         """The facade other modules call. Never returns credentials."""
         async with session_scope() as session:
@@ -194,6 +285,8 @@ class ModelCatalog:
             query_prefix=model.query_prefix,
             optimal_batch_size=model.optimal_batch_size,
             tokenizer_id=model.tokenizer_id,
+            provider_id=provider.id,
+            dynamic_provider=True,
         )
 
     async def require_embedding_model(self, workspace_id: UUID, model_id: UUID) -> ModelRef:
@@ -219,10 +312,17 @@ class ModelCatalog:
 
         return await self.get_ref(model_id)
 
-    async def get_embedding_runtime(self, model_id: UUID) -> EmbeddingRuntimeRef:
+    async def get_embedding_runtime(
+        self, model_id: UUID, *, workspace_id: UUID | None = None
+    ) -> EmbeddingRuntimeRef:
         async with session_scope() as session:
             model = await session.get(Model, model_id)
-            if model is None or model.capability != "embedding" or not model.is_enabled:
+            if (
+                model is None
+                or (workspace_id is not None and model.workspace_id != workspace_id)
+                or model.capability != "embedding"
+                or not model.is_enabled
+            ):
                 raise NotFound("Embedding model not found.")
             provider = await session.get(ModelProvider, model.provider_id)
             if provider is None or not provider.is_enabled:
@@ -235,6 +335,16 @@ class ModelCatalog:
             config=dict(provider.config or {}),
             has_credentials=provider.secret_ref is not None,
         )
+
+    async def set_model_health(self, workspace_id: UUID, model_id: UUID, healthy: bool) -> None:
+        from cairn.core.time import utcnow
+
+        async with transaction() as session:
+            model = await session.get(Model, model_id, with_for_update=True)
+            if model is None or model.workspace_id != workspace_id:
+                raise NotFound("Model not found.")
+            model.health_state = "healthy" if healthy else "unavailable"
+            model.checked_at = utcnow()
 
 
 def _provider_view(provider: ModelProvider, *, model_count: int) -> ProviderView:
@@ -261,9 +371,38 @@ def _model_view(model: Model, provider: ModelProvider) -> ModelView:
         capability=model.capability,  # type: ignore[arg-type]
         dimension=model.dimension,
         max_input_tokens=model.max_input_tokens,
+        tokenizer_id=model.tokenizer_id,
+        normalize=model.normalize,
+        query_prefix=model.query_prefix,
+        optimal_batch_size=model.optimal_batch_size,
         is_enabled=model.is_enabled,
         health_state=model.health_state,
         checked_at=model.checked_at,
+    )
+
+
+def _provider_runtime_projection(provider: ModelProvider) -> ProviderRuntimeProjection:
+    if provider.family not in {"tei", "infinity"} or provider.base_url is None:
+        raise ValidationFailed("The provider does not have a supported runtime endpoint.")
+    config = dict(provider.config or {})
+    revision = config.get("binding_revision")
+    allow_private = config.get("allow_private", False)
+    max_batch_size = config.get("max_batch_size", 16)
+    if (
+        not isinstance(revision, str)
+        or not revision
+        or type(allow_private) is not bool
+        or type(max_batch_size) is not int
+    ):
+        raise ValidationFailed("The provider runtime configuration is invalid.")
+    return ProviderRuntimeProjection(
+        id=provider.id,
+        workspace_id=provider.workspace_id,
+        family=provider.family,
+        base_url=provider.base_url,
+        allow_private=allow_private,
+        binding_revision=revision,
+        max_batch_size=max_batch_size,
     )
 
 

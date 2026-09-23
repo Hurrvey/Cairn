@@ -13,14 +13,21 @@
  * the new rule here without a frontend release, and a client that disagreed with
  * the server would be worse than no hint at all.
  */
+import { Check, Circle } from "lucide-vue-next";
 import { computed, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 
 import { ApiError } from "@/api/client";
+import Button from "@/components/ui/Button.vue";
+import Dialog from "@/components/ui/Dialog.vue";
+import Field from "@/components/ui/Field.vue";
+import Input from "@/components/ui/Input.vue";
+import Notice from "@/components/ui/Notice.vue";
 import { useSessionStore } from "@/stores/session";
 
 const { t } = useI18n();
 const session = useSessionStore();
+const emit = defineEmits<{ completed: [] }>();
 
 const form = reactive({
   username: "",
@@ -33,7 +40,11 @@ const submitting = ref(false);
 const formError = ref<string | null>(null);
 const fieldErrors = ref<Record<string, string[]>>({});
 
-const visible = computed(() => session.mustChangePassword);
+const visible = computed({
+  get: () => session.mustChangePassword,
+  // The dialog cannot be closed from the UI; only the store changes this.
+  set: () => undefined,
+});
 const policy = computed(() => session.policy);
 const usernameEditable = computed(() => policy.value?.username_editable ?? true);
 
@@ -95,15 +106,13 @@ const rules = computed<Rule[]>(() => {
 });
 
 const canSubmit = computed(
-  () =>
-    !submitting.value &&
-    form.currentPassword.length > 0 &&
-    rules.value.every((rule) => rule.ok),
+  () => !submitting.value && form.currentPassword.length > 0 && rules.value.every((rule) => rule.ok),
 );
 
 // --- submit ------------------------------------------------------------------
 
 async function submit(): Promise<void> {
+  if (!canSubmit.value) return;
   formError.value = null;
   fieldErrors.value = {};
   submitting.value = true;
@@ -116,6 +125,7 @@ async function submit(): Promise<void> {
       confirmPassword: form.confirmPassword,
       newUsername: renamed ? form.username : undefined,
     });
+    emit("completed");
   } catch (error) {
     if (error instanceof ApiError) {
       formError.value = error.detail;
@@ -140,139 +150,59 @@ async function signOut(): Promise<void> {
 </script>
 
 <template>
-  <el-dialog
-    :model-value="visible"
+  <Dialog
+    v-model:open="visible"
     :title="t('credentials.title')"
-    :close-on-click-modal="false"
-    :close-on-press-escape="false"
-    :show-close="false"
-    :destroy-on-close="false"
-    align-center
-    width="480px"
-    class="credential-dialog"
-    data-test="forced-credential-dialog"
+    :description="session.changeReason === 'admin_forced' ? t('credentials.ledeAdminForced') : t('credentials.ledeInitial')"
+    :dismissable="false"
+    size="md"
+    test-id="forced-credential-dialog"
   >
-    <p class="lede">
-      {{
-        session.changeReason === "admin_forced"
-          ? t("credentials.ledeAdminForced")
-          : t("credentials.ledeInitial")
-      }}
-    </p>
+    <form class="grid gap-3.5" @submit.prevent="submit">
+      <Notice v-if="formError" tone="bad" test-id="form-error">{{ formError }}</Notice>
 
-    <el-alert
-      v-if="formError"
-      :title="formError"
-      type="error"
-      show-icon
-      :closable="false"
-      data-test="form-error"
-      class="mb"
-    />
-
-    <el-form label-position="top" @submit.prevent="submit">
-      <el-form-item
+      <Field
         v-if="usernameEditable"
         :label="t('credentials.username')"
-        :error="fieldErrors.new_username?.[0]"
+        :hint="t('credentials.usernameHint')"
+        :error="fieldErrors.new_username"
+        v-slot="{ id }"
       >
-        <el-input
-          v-model="form.username"
-          autocomplete="username"
-          data-test="username"
-          :placeholder="session.user?.username"
-        />
-        <span class="hint">{{ t("credentials.usernameHint") }}</span>
-      </el-form-item>
+        <Input :id="id" v-model="form.username" autocomplete="username" data-test="username" :placeholder="session.user?.username" />
+      </Field>
 
-      <el-form-item
-        :label="t('credentials.currentPassword')"
-        :error="fieldErrors.current_password?.[0]"
-      >
-        <el-input
-          v-model="form.currentPassword"
-          type="password"
-          show-password
-          autocomplete="current-password"
-          data-test="current-password"
-        />
-      </el-form-item>
+      <Field :label="t('credentials.currentPassword')" :error="fieldErrors.current_password" v-slot="{ id }">
+        <Input :id="id" v-model="form.currentPassword" type="password" autocomplete="current-password" data-test="current-password" />
+      </Field>
 
-      <el-form-item :label="t('credentials.newPassword')" :error="fieldErrors.new_password?.[0]">
-        <el-input
-          v-model="form.newPassword"
-          type="password"
-          show-password
-          autocomplete="new-password"
-          data-test="new-password"
-        />
-      </el-form-item>
+      <Field :label="t('credentials.newPassword')" :error="fieldErrors.new_password" v-slot="{ id }">
+        <Input :id="id" v-model="form.newPassword" type="password" autocomplete="new-password" data-test="new-password" />
+      </Field>
 
-      <el-form-item :label="t('credentials.confirmPassword')">
-        <el-input
-          v-model="form.confirmPassword"
-          type="password"
-          show-password
-          autocomplete="new-password"
-          data-test="confirm-password"
-          @keyup.enter="canSubmit && submit()"
-        />
-      </el-form-item>
-    </el-form>
+      <Field :label="t('credentials.confirmPassword')" v-slot="{ id }">
+        <Input :id="id" v-model="form.confirmPassword" type="password" autocomplete="new-password" data-test="confirm-password" />
+      </Field>
 
-    <ul v-if="rules.length" class="rules" data-test="policy-rules">
-      <li v-for="rule in rules" :key="rule.key" :class="{ ok: rule.ok }" :data-rule="rule.key">
-        <span aria-hidden="true">{{ rule.ok ? "✓" : "○" }}</span>
-        <span>{{ rule.label }}</span>
-      </li>
-    </ul>
+      <ul v-if="rules.length" class="grid gap-1 rounded-md bg-surface-2 px-3 py-2.5 text-[12.5px]" data-test="policy-rules">
+        <li
+          v-for="rule in rules"
+          :key="rule.key"
+          :class="['flex items-center gap-2 transition-colors', rule.ok ? 'ok text-ok' : 'text-ink-3']"
+          :data-rule="rule.key"
+        >
+          <Check v-if="rule.ok" class="size-3.5" aria-hidden="true" />
+          <Circle v-else class="size-3.5" aria-hidden="true" />
+          <span>{{ rule.label }}</span>
+        </li>
+      </ul>
+      <button type="submit" class="hidden" aria-hidden="true" tabindex="-1" />
+    </form>
 
     <template #footer>
-      <el-button link data-test="sign-out" @click="signOut">
-        {{ t("credentials.signOut") }}
-      </el-button>
-      <el-button
-        type="primary"
-        :disabled="!canSubmit"
-        :loading="submitting"
-        data-test="submit"
-        @click="submit"
-      >
+      <Button variant="ghost" data-test="sign-out" @click="signOut">{{ t("credentials.signOut") }}</Button>
+      <Button variant="primary" :disabled="!canSubmit" :loading="submitting" data-test="submit" @click="submit">
         {{ t("credentials.submit") }}
-      </el-button>
+      </Button>
     </template>
-  </el-dialog>
+  </Dialog>
 </template>
-
-<style scoped>
-.lede {
-  margin: 0 0 var(--cairn-space-4);
-  color: var(--cairn-text-muted);
-  line-height: 1.55;
-}
-.mb {
-  margin-bottom: var(--cairn-space-4);
-}
-.hint {
-  font-size: 12px;
-  color: var(--cairn-text-muted);
-}
-.rules {
-  list-style: none;
-  margin: var(--cairn-space-2) 0 0;
-  padding: var(--cairn-space-3);
-  background: var(--cairn-surface-sunken);
-  border-radius: 6px;
-  font-size: 13px;
-}
-.rules li {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-  padding: 3px 0;
-  color: var(--cairn-text-muted);
-}
-.rules li.ok {
-  color: var(--cairn-success);
-}
-</style>

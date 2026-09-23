@@ -12,15 +12,20 @@ Zero code duplication, independent scaling, independent blast radius.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from apps.api.middleware import ErrorHandlingMiddleware, RequestContextMiddleware
-from cairn.authz.router import router as authz_router
-from cairn.catalog.router import router as catalog_router
+from apps.api.middleware import (
+    DataPlaneAuthenticationMiddleware,
+    DataPlaneRateLimitMiddleware,
+    ErrorHandlingMiddleware,
+    RequestContextMiddleware,
+    RetrievalDeadlineMiddleware,
+    UploadBodyLimitMiddleware,
+)
 from cairn.core import health
 from cairn.core.config import Settings, get_settings
 from cairn.core.db import dispose_engine
@@ -28,15 +33,6 @@ from cairn.core.errors import CairnError, FieldError, InternalError, ValidationF
 from cairn.core.ids import new_public_id
 from cairn.core.logging import configure_logging, get_logger
 from cairn.core.telemetry import CONTENT_TYPE_LATEST, configure_tracing, render_metrics
-from cairn.identity.middleware import (
-    AuthenticationMiddleware,
-    CsrfMiddleware,
-    ForcedCredentialChangeMiddleware,
-    RateLimitMiddleware,
-)
-from cairn.identity.router import router as auth_router
-from cairn.identity.users_router import router as users_router
-from cairn.platform.router import router as platform_router
 
 __all__ = ["app", "create_app"]
 
@@ -57,7 +53,7 @@ endpoints arrive in Phase 2.
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    settings = get_settings()
+    settings = getattr(app.state, "settings", None) or get_settings()
     log.info(
         "app.starting",
         role=settings.role,
@@ -65,9 +61,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         version="0.1.0",
     )
     configure_tracing(settings, app)
+    retrieval_runtime = getattr(app.state, "retrieval_runtime", None)
     try:
-        yield
+        if retrieval_runtime is not None:
+            await retrieval_runtime.start()
+        async with AsyncExitStack() as stack:
+            mcp_server = getattr(app.state, "mcp_server", None)
+            if mcp_server is not None:
+                await stack.enter_async_context(mcp_server.run())
+            yield
     finally:
+        if retrieval_runtime is not None:
+            await retrieval_runtime.close()
         from cairn.core.cache import close_cache
 
         await close_cache()
@@ -88,16 +93,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         redoc_url=None,
         lifespan=lifespan,
     )
+    app.state.settings = cfg
 
     # ---- middleware ---------------------------------------------------------
     # Starlette applies user middleware with the LAST-ADDED as OUTERMOST, so
     # this block is written in reverse of execution order. Reading top-to-bottom
     # here gives innermost-to-outermost; a request traverses it bottom-up.
-    app.add_middleware(RateLimitMiddleware)  # 5th
-    app.add_middleware(CsrfMiddleware)  # 4th
-    app.add_middleware(ForcedCredentialChangeMiddleware)  # 3rd
-    app.add_middleware(AuthenticationMiddleware)  # 2nd
+    app.add_middleware(UploadBodyLimitMiddleware)
+    if cfg.serves_control_plane:
+        from cairn.identity.middleware import (
+            AuthenticationMiddleware,
+            CsrfMiddleware,
+            ForcedCredentialChangeMiddleware,
+            RateLimitMiddleware,
+        )
+
+        app.add_middleware(RateLimitMiddleware)  # 5th
+        app.add_middleware(CsrfMiddleware)  # 4th
+        app.add_middleware(ForcedCredentialChangeMiddleware)  # 3rd
+        app.add_middleware(AuthenticationMiddleware)  # 2nd
+    else:
+        app.add_middleware(DataPlaneRateLimitMiddleware)
+        app.add_middleware(DataPlaneAuthenticationMiddleware)
     app.add_middleware(RequestContextMiddleware)  # 1st
+    app.add_middleware(RetrievalDeadlineMiddleware, timeout_s=cfg.retrieval.request_timeout_s)
     app.add_middleware(ErrorHandlingMiddleware)  # outermost — catches the above
 
     # ---- exception handlers (for errors raised inside routes) ---------------
@@ -109,16 +128,49 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router)
 
     if cfg.serves_control_plane:
+        from cairn.authz.router import router as authz_router
+        from cairn.catalog.router import router as catalog_router
+        from cairn.catalog.service import CatalogModelUsage
+        from cairn.embedding.probe import EmbeddingModelProbe
+        from cairn.identity.router import router as auth_router
+        from cairn.identity.users_router import router as users_router
+        from cairn.modelgw.router import router as model_router
+        from cairn.modelgw.service import ModelManagementService
+        from cairn.platform.mcp_router import router as mcp_management_router
+        from cairn.platform.router import router as platform_router
+
+        app.state.model_management_service = ModelManagementService(
+            usage=CatalogModelUsage(), probe=EmbeddingModelProbe()
+        )
         app.include_router(auth_router)
         app.include_router(users_router)
         app.include_router(authz_router)
         app.include_router(platform_router)
+        app.include_router(mcp_management_router)
         app.include_router(catalog_router)
+        app.include_router(model_router)
         log.info("app.routers_mounted", plane="control")
 
     if cfg.serves_data_plane:
-        # Phase 2: retrieval_router; Phase 3: mcp_router.
-        log.info("app.routers_mounted", plane="data", note="no data-plane routes until Phase 2")
+        from cairn.retrieval.router import router as retrieval_router
+        from cairn.retrieval.runtime import KnowledgeBaseRuntimeLoader, QueryEmbeddingRuntime
+        from cairn.retrieval.service import RetrievalService
+
+        app.state.retrieval_runtime = QueryEmbeddingRuntime(cfg.retrieval)
+        app.state.retrieval_service = RetrievalService(
+            runtime_loader=KnowledgeBaseRuntimeLoader(timeout_s=cfg.retrieval.runtime_timeout_s),
+            embeddings=app.state.retrieval_runtime,
+            search_timeout_s=cfg.retrieval.search_timeout_s,
+            request_timeout_s=cfg.retrieval.request_timeout_s,
+        )
+        app.include_router(retrieval_router)
+        from cairn.mcpserver.server import MCPServer
+        from cairn.mcpserver.server import router as mcp_router
+
+        if not cfg.mcp.managed:
+            app.state.mcp_server = MCPServer(app.state.retrieval_service, cfg.mcp)
+        app.include_router(mcp_router)
+        log.info("app.routers_mounted", plane="data")
 
     if cfg.telemetry.metrics_enabled:
 

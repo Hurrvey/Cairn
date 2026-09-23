@@ -531,17 +531,6 @@ class IdentityService:
                 # FR-A-13: credentials changed since this token was issued.
                 return None
 
-            principal = Principal(
-                type="user",
-                id=user.id,
-                workspace_id=user.workspace_id,
-                role="admin" if user.role == "admin" else "user",
-                username=user.username,
-                must_change_password=user.must_change_password,
-                credential_version=user.credential_version,
-                session_id=record.id,
-                scopes=frozenset(record.scopes),
-            )
             view = SessionView(
                 id=record.id,
                 user_id=record.user_id,
@@ -551,7 +540,15 @@ class IdentityService:
                 credential_version=record.credential_version,
                 csrf_token_hash=record.csrf_token_hash,
             )
-            return principal, view
+            user_id = user.id
+            session_id = record.id
+            scopes = frozenset(record.scopes)
+        from cairn.authz.service import AuthzService
+
+        principal = await AuthzService().principal_for_user(
+            user_id, session_id=session_id, scopes=scopes
+        )
+        return (principal, view) if principal is not None else None
 
     async def logout(self, token: str) -> None:
         async with transaction() as session:

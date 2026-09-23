@@ -31,7 +31,9 @@ async def test_registry_normalizes_mime_and_preserves_context(mime: str) -> None
 
 async def test_registry_rejects_unsupported_mime_without_fallback() -> None:
     with pytest.raises(ParseUnsupportedMime) as caught:
-        await get_parser_registry().parse(b"not a PDF", mime="application/pdf", ctx=ParseContext())
+        await get_parser_registry().parse(
+            b"unsupported", mime="application/x-unsupported", ctx=ParseContext()
+        )
     assert caught.value.code == "PARSE_UNSUPPORTED_MIME"
     assert caught.value.retryable is False
 

@@ -1,27 +1,9 @@
-"""Authorization.
+"""Authorization public surface, loaded lazily to preserve data-plane isolation."""
 
-Roles govern platform capability; grants govern resource permission. The two are
-kept separate on purpose (FR-B-01, FR-B-05).
+from __future__ import annotations
 
-The rule worth remembering: an API key's effective permissions are
-``key_scopes ∩ owner_permissions``, computed at authentication time rather than
-stored. Revoking a user's access therefore narrows every key they ever issued,
-instantly and with no bookkeeping.
-"""
-
-from cairn.authz.dataplane import DataPlaneAuthz, get_dataplane_authz, hash_api_key
-from cairn.authz.deps import current_principal, optional_principal, require_permission, require_role
-from cairn.authz.model import (
-    ADMIN_PLATFORM_CAPABILITIES,
-    ALL_PERMISSIONS,
-    KB_PERMISSIONS,
-    Principal,
-    PrincipalType,
-    ResourceType,
-    Role,
-)
-from cairn.authz.ratelimit import RateLimiter, RateLimitState, get_rate_limiter
-from cairn.authz.service import ApiKeySpec, AuthzService, GrantSpec, get_authz_service
+from importlib import import_module
+from typing import Any
 
 __all__ = [
     "ADMIN_PLATFORM_CAPABILITIES",
@@ -46,3 +28,36 @@ __all__ = [
     "require_permission",
     "require_role",
 ]
+
+_MODULE_BY_NAME = {
+    "ADMIN_PLATFORM_CAPABILITIES": "cairn.authz.model",
+    "ALL_PERMISSIONS": "cairn.authz.model",
+    "KB_PERMISSIONS": "cairn.authz.model",
+    "ApiKeySpec": "cairn.authz.service",
+    "AuthzService": "cairn.authz.service",
+    "DataPlaneAuthz": "cairn.authz.dataplane",
+    "GrantSpec": "cairn.authz.service",
+    "Principal": "cairn.authz.model",
+    "PrincipalType": "cairn.authz.model",
+    "RateLimitState": "cairn.authz.ratelimit",
+    "RateLimiter": "cairn.authz.ratelimit",
+    "ResourceType": "cairn.authz.model",
+    "Role": "cairn.authz.model",
+    "current_principal": "cairn.authz.deps",
+    "get_authz_service": "cairn.authz.service",
+    "get_dataplane_authz": "cairn.authz.dataplane",
+    "get_rate_limiter": "cairn.authz.ratelimit",
+    "hash_api_key": "cairn.authz.dataplane",
+    "optional_principal": "cairn.authz.deps",
+    "require_permission": "cairn.authz.deps",
+    "require_role": "cairn.authz.deps",
+}
+
+
+def __getattr__(name: str) -> Any:
+    module_name = _MODULE_BY_NAME.get(name)
+    if module_name is None:
+        raise AttributeError(name)
+    value = getattr(import_module(module_name), name)
+    globals()[name] = value
+    return value

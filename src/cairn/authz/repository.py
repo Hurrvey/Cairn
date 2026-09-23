@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TypedDict
 from uuid import UUID
 
-from sqlalchemy import select, text, update
+from sqlalchemy import any_, delete, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cairn.authz.models import ApiKey, ResourceGrant
@@ -96,6 +96,46 @@ class AuthzRepository:
             .values(revoked_at=utcnow())
         )
         return int(getattr(result, "rowcount", 0) or 0)
+
+    async def purge_knowledge_base_access(
+        self, session: AsyncSession, workspace_id: UUID, kb_id: UUID
+    ) -> tuple[set[UUID], list[str]]:
+        grants = list(
+            (
+                await session.scalars(
+                    select(ResourceGrant).where(
+                        ResourceGrant.workspace_id == workspace_id,
+                        ResourceGrant.resource_type == "knowledge_base",
+                        ResourceGrant.resource_id == kb_id,
+                    )
+                )
+            ).all()
+        )
+        user_ids = {grant.subject_id for grant in grants if grant.subject_type == "user"}
+        await session.execute(
+            delete(ResourceGrant).where(
+                ResourceGrant.workspace_id == workspace_id,
+                ResourceGrant.resource_type == "knowledge_base",
+                ResourceGrant.resource_id == kb_id,
+            )
+        )
+        keys = list(
+            (
+                await session.scalars(
+                    select(ApiKey).where(
+                        ApiKey.workspace_id == workspace_id,
+                        any_(ApiKey.kb_ids) == kb_id,
+                    )
+                )
+            ).all()
+        )
+        for key in keys:
+            remaining = [value for value in key.kb_ids if value != kb_id]
+            if remaining:
+                key.kb_ids = remaining
+            else:
+                key.revoked_at = utcnow()
+        return user_ids, [key.key_hash for key in keys]
 
     # --- api keys -----------------------------------------------------------
 

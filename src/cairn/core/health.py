@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Literal
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Request, Response
 from sqlalchemy import text
 
 from cairn.core.cache import get_cache
@@ -75,10 +75,11 @@ async def readyz(response: Response) -> dict[str, Any]:
 
 
 @router.get("/v1/meta", summary="Public capability discovery", tags=["meta"])
-async def meta() -> dict[str, Any]:
+async def meta(request: Request) -> dict[str, Any]:
     """Unauthenticated. Lets a client discover what this deployment supports
     rather than finding out via a 404."""
-    settings = get_settings()
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    retrieval_available = settings.serves_data_plane
     return {
         "product": "Cairn",
         "version": "0.1.0",
@@ -86,10 +87,13 @@ async def meta() -> dict[str, Any]:
         "role": settings.role,
         "capabilities": {
             # Phase 0: only identity exists. Each lands with its module.
-            "mcp": False,
+            "mcp": settings.serves_data_plane,
             "dify_compat": False,
-            "hybrid_search": False,
-            "rerank": False,
+            "retrieval_query": retrieval_available,
+            "hybrid_search": retrieval_available,
+            "weighted_fusion": retrieval_available,
+            "parent_expansion": retrieval_available,
+            "rerank": retrieval_available and bool(settings.retrieval.rerank_endpoints),
             "pipelines": False,
             "functions": False,
         },

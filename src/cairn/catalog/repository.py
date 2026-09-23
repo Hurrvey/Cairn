@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import delete, exists, func, insert, select, text, update
+from sqlalchemy import delete, exists, func, insert, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +23,21 @@ __all__ = ["CatalogRepository"]
 
 
 class CatalogRepository:
+    async def has_edited_chunks(
+        self, session: AsyncSession, kb_id: UUID, index_version: int
+    ) -> bool:
+        return bool(
+            await session.scalar(
+                select(
+                    exists().where(
+                        Chunk.kb_id == kb_id,
+                        Chunk.index_version == index_version,
+                        Chunk.is_edited.is_(True),
+                    )
+                )
+            )
+        )
+
     # --- knowledge bases ----------------------------------------------------
 
     async def add_kb(self, session: AsyncSession, kb: KnowledgeBase) -> KnowledgeBase:
@@ -36,6 +51,15 @@ class CatalogRepository:
         stmt = select(KnowledgeBase).where(
             KnowledgeBase.id == kb_id, KnowledgeBase.deleted_at.is_(None)
         )
+        if for_update:
+            stmt = stmt.with_for_update().execution_options(populate_existing=True)
+        kb: KnowledgeBase | None = await session.scalar(stmt)
+        return kb
+
+    async def get_kb_for_maintenance(
+        self, session: AsyncSession, kb_id: UUID, *, for_update: bool = False
+    ) -> KnowledgeBase | None:
+        stmt = select(KnowledgeBase).where(KnowledgeBase.id == kb_id)
         if for_update:
             stmt = stmt.with_for_update().execution_options(populate_existing=True)
         kb: KnowledgeBase | None = await session.scalar(stmt)
@@ -72,6 +96,40 @@ class CatalogRepository:
         if cursor_id is not None:
             stmt = stmt.where(KnowledgeBase.id > cursor_id)
         return list((await session.scalars(stmt.order_by(KnowledgeBase.id).limit(limit))).all())
+
+    async def runtime_refresh_ids(
+        self, session: AsyncSession, *, after: UUID | None, limit: int
+    ) -> list[UUID]:
+        stmt = select(KnowledgeBase.id)
+        if after is not None:
+            stmt = stmt.where(KnowledgeBase.id > after)
+        return list((await session.scalars(stmt.order_by(KnowledgeBase.id).limit(limit))).all())
+
+    async def model_is_referenced(
+        self, session: AsyncSession, workspace_id: UUID, model_id: UUID
+    ) -> bool:
+        current = await session.scalar(
+            select(
+                exists().where(
+                    KnowledgeBase.workspace_id == workspace_id,
+                    KnowledgeBase.embedding_model_id == model_id,
+                )
+            )
+        )
+        if current:
+            return True
+        snapshots = await session.scalars(
+            select(KbIndexVersion.config_snapshot).where(
+                KbIndexVersion.workspace_id == workspace_id,
+                KbIndexVersion.config_snapshot.is_not(None),
+            )
+        )
+        return any(
+            isinstance(snapshot, dict)
+            and isinstance(snapshot.get("embedding_model"), dict)
+            and snapshot["embedding_model"].get("id") == str(model_id)
+            for snapshot in snapshots
+        )
 
     async def bump_config_version(self, session: AsyncSession, kb_id: UUID) -> int:
         result = await session.execute(
@@ -215,6 +273,12 @@ class CatalogRepository:
                 KbIndexVersion.kb_id == kb_id, KbIndexVersion.version == version
             )
         )
+
+    async def finalize_index_drop(self, session: AsyncSession, kb_id: UUID, version: int) -> None:
+        await session.execute(
+            delete(Chunk).where(Chunk.kb_id == kb_id, Chunk.index_version == version)
+        )
+        await self.drop_index_version_row(session, kb_id, version)
 
     # --- documents ----------------------------------------------------------
 
@@ -370,6 +434,135 @@ class CatalogRepository:
             stmt = stmt.with_for_update().execution_options(populate_existing=True)
         row: DocumentIngestion | None = await session.scalar(stmt)
         return row
+
+    async def failed_document_ingestions(
+        self,
+        session: AsyncSession,
+        document: Document,
+        *,
+        for_update: bool = False,
+    ) -> list[DocumentIngestion]:
+        stmt = (
+            select(DocumentIngestion)
+            .where(
+                DocumentIngestion.document_id == document.id,
+                DocumentIngestion.revision == document.revision,
+                DocumentIngestion.source_content_hash == document.content_hash,
+                DocumentIngestion.state == "failed",
+            )
+            .order_by(DocumentIngestion.index_version)
+        )
+        if for_update:
+            stmt = stmt.with_for_update().execution_options(populate_existing=True)
+        return list((await session.scalars(stmt)).all())
+
+    async def lock_document_ingestions(
+        self, session: AsyncSession, document_id: UUID
+    ) -> list[DocumentIngestion]:
+        return list(
+            (
+                await session.scalars(
+                    select(DocumentIngestion)
+                    .where(DocumentIngestion.document_id == document_id)
+                    .order_by(DocumentIngestion.revision, DocumentIngestion.index_version)
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).all()
+        )
+
+    async def lock_index_versions(self, session: AsyncSession, kb_id: UUID) -> list[KbIndexVersion]:
+        return list(
+            (
+                await session.scalars(
+                    select(KbIndexVersion)
+                    .where(KbIndexVersion.kb_id == kb_id)
+                    .order_by(KbIndexVersion.version)
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+            ).all()
+        )
+
+    async def source_is_referenced_by_live_document(
+        self,
+        session: AsyncSession,
+        *,
+        kb_id: UUID,
+        document_id: UUID,
+        object_key: str,
+        content_hash: str | None,
+    ) -> bool:
+        shared_source = Document.object_key == object_key
+        if content_hash is not None:
+            shared_source = or_(shared_source, Document.content_hash == content_hash)
+        return bool(
+            await session.scalar(
+                select(
+                    exists().where(
+                        Document.kb_id == kb_id,
+                        Document.id != document_id,
+                        Document.deleted_at.is_(None),
+                        Document.state != "deleting",
+                        shared_source,
+                    )
+                )
+            )
+        )
+
+    async def count_live_chunks(
+        self, session: AsyncSession, kb_id: UUID, index_version: int
+    ) -> int:
+        return int(
+            await session.scalar(
+                select(func.count(Chunk.id))
+                .join(Document, Document.id == Chunk.document_id)
+                .where(
+                    Chunk.kb_id == kb_id,
+                    Chunk.index_version == index_version,
+                    Document.kb_id == kb_id,
+                    Document.deleted_at.is_(None),
+                    Document.state != "deleting",
+                )
+            )
+            or 0
+        )
+
+    async def finalize_document_purge(
+        self,
+        session: AsyncSession,
+        *,
+        document: Document,
+        kb: KnowledgeBase,
+    ) -> None:
+        await session.execute(
+            delete(Chunk).where(
+                Chunk.kb_id == document.kb_id,
+                Chunk.document_id == document.id,
+            )
+        )
+        await session.delete(document)
+        await session.flush()
+        kb.doc_count = await self.live_document_count(session, kb.id)
+        kb.bytes_used = int(
+            await session.scalar(
+                select(func.coalesce(func.sum(Document.size_bytes), 0)).where(
+                    Document.kb_id == kb.id,
+                    Document.deleted_at.is_(None),
+                    Document.state != "deleting",
+                )
+            )
+            or 0
+        )
+        kb.chunk_count = (
+            await self.count_live_chunks(session, kb.id, kb.active_index_version)
+            if kb.active_index_version is not None
+            else 0
+        )
+
+    async def finalize_kb_purge(self, session: AsyncSession, kb: KnowledgeBase) -> None:
+        await session.execute(delete(Chunk).where(Chunk.kb_id == kb.id))
+        await session.delete(kb)
 
     async def list_documents(
         self,

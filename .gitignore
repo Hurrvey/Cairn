@@ -40,3 +40,10 @@ apps/web/*.tsbuildinfo
 # Committed on purpose so CI can diff against the spec (T-M16-02).
 !apps/web/src/api/schema.d.ts
 !apps/web/openapi.json
+
+# Docs
+docs/
+
+# Test
+tests/
+

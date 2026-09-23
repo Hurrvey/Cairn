@@ -214,6 +214,44 @@ class TaskService:
         async with transaction() as session:
             return await self._repo.cancel_for_document(session, document_id)
 
+    async def drain_ready_for_document(
+        self, session: AsyncSession, *, document_id: UUID, exclude_task_id: int
+    ) -> bool:
+        await self._repo.cancel_ready_for_document(
+            session, document_id, exclude_task_id=exclude_task_id
+        )
+        return not await self._repo.has_live_for_document(
+            session, document_id, exclude_task_id=exclude_task_id
+        )
+
+    async def cancel_ready_for_kb(
+        self, session: AsyncSession, *, kb_id: UUID, exclude_task_id: int | None = None
+    ) -> int:
+        return await self._repo.cancel_ready_for_kb(session, kb_id, exclude_task_id=exclude_task_id)
+
+    async def drain_ready_for_kb(
+        self, session: AsyncSession, *, kb_id: UUID, exclude_task_id: int
+    ) -> bool:
+        await self._repo.cancel_ready_for_kb(session, kb_id, exclude_task_id=exclude_task_id)
+        return not await self._repo.has_live_for_kb(session, kb_id, exclude_task_id=exclude_task_id)
+
+    async def cancel_ready_ingestion_generation(
+        self,
+        session: AsyncSession,
+        *,
+        document_id: UUID,
+        revision: int,
+        index_version: int,
+        recovery_generation: int,
+    ) -> int:
+        return await self._repo.cancel_ready_ingestion_generation(
+            session,
+            document_id=document_id,
+            revision=revision,
+            index_version=index_version,
+            recovery_generation=recovery_generation,
+        )
+
     async def retry(self, task_id: int) -> bool:
         """Operator-initiated retry: resets the attempt counter so a task that
         exhausted its budget gets a full fresh allowance."""

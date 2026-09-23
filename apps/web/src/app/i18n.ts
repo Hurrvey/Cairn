@@ -12,9 +12,12 @@ function detect(): Locale {
   return navigator.language.startsWith("zh") ? "zh-CN" : "en-US";
 }
 
+const initialLocale = detect();
+if (typeof document !== "undefined") document.documentElement.lang = initialLocale;
+
 export const i18n = createI18n({
   legacy: false,
-  locale: detect(),
+  locale: initialLocale,
   fallbackLocale: "en-US",
   messages: { "en-US": enUS, "zh-CN": zhCN },
   // Loud in development, silent in production: a missing key should fail review,

@@ -164,6 +164,29 @@ class PgVectorStore:
             )
         return bool(found)
 
+    async def list_namespaces(self, kb_id: UUID) -> tuple[Namespace, ...]:
+        prefix = f"cairn_vec_{kb_id.hex}_v"
+        async with self._engine.connect() as conn:
+            names = list(
+                (
+                    await conn.scalars(
+                        text(
+                            "SELECT c.relname FROM pg_class c "
+                            "JOIN pg_namespace n ON n.oid=c.relnamespace "
+                            "WHERE n.nspname=current_schema() AND c.relkind='r' "
+                            "AND c.relname LIKE :pattern ORDER BY c.relname"
+                        ),
+                        {"pattern": f"{prefix}%"},
+                    )
+                ).all()
+            )
+        versions: list[int] = []
+        for name in names:
+            suffix = str(name).removeprefix(prefix)
+            if suffix.isdigit() and int(suffix) > 0:
+                versions.append(int(suffix))
+        return tuple(Namespace(kb_id, version) for version in sorted(versions))
+
     async def drop_namespace(self, ns: Namespace) -> None:
         async with self._engine.begin() as conn:
             await conn.execute(text(f"DROP TABLE IF EXISTS {ns.key()}"))

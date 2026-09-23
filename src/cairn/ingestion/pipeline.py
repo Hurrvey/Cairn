@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import unicodedata
 from base64 import urlsafe_b64encode
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -49,6 +50,10 @@ from cairn.vectorstore.base import Hit, Metric, Namespace, NamespaceSpec, Point,
 from cairn.vectorstore.filters import Compare
 
 log = get_logger(__name__)
+
+_MAX_PARENT_SNAPSHOT_CHARACTERS = 1_000_000
+_MAX_PARENT_SNAPSHOT_TOKENS = 200_000
+_MAX_PARENT_SNAPSHOT_METADATA_BYTES = 512 * 1024
 
 
 class EmbeddingInputTooLarge(CairnError):
@@ -179,9 +184,11 @@ class IngestionPipeline:
                 index_version=run.index_version,
                 semantic=semantic,
                 custom=custom,
+                max_input_tokens=prepared.model.max_input_tokens,
             ).chunk(parsed.parsed, run.chunk_config)
             await context.heartbeat()
             edits = await self._catalog.preserved_edits(context)
+            edited_ordinals = set(edits)
             chunks = [
                 replace(
                     chunk,
@@ -193,6 +200,7 @@ class IngestionPipeline:
                 else chunk
                 for chunk in chunks
             ]
+            chunks = _attach_parent_snapshots(run, chunks, edited_ordinals=edited_ordinals)
             existing = set(await self._catalog.existing_point_ids(context))
             expected = {
                 chunk.id for chunk in chunks if chunk.metadata.get("embed", True) is not False
@@ -278,13 +286,16 @@ class IngestionPipeline:
             max_tokens = prepared.model.max_input_tokens
             if max_tokens is None:
                 raise PipelineArtifactError("The embedding model has no input token limit.")
-            normalized = " ".join(unicodedata.normalize("NFKC", target.content).split())
-            actual_token_count = prepared.tokenizer.count(normalized)
-            if actual_token_count > max_tokens:
+            embedding_token_count, response_token_count = _manual_reembed_token_counts(
+                prepared.tokenizer, target.content
+            )
+            if embedding_token_count > max_tokens:
                 raise EmbeddingInputTooLarge()
             vector_store = await self._resources.vector_store_for(target.vector_binding)
             namespace = Namespace(target.kb_id, target.index_version)
-            expected_payload = _chunk_reembed_payload(target)
+            expected_payload = _chunk_reembed_payload(
+                target, actual_token_count=response_token_count
+            )
             existing = await vector_store.fetch(namespace, [target.chunk_id])
             vector: Sequence[float] | None = None
             if not _chunk_reembed_hit_matches(existing, target, expected_payload):
@@ -294,7 +305,9 @@ class IngestionPipeline:
                 vector = embedded[0].values
             async with self._catalog.chunk_reembed_mutation(context, target) as mutation:
                 if vector is not None:
-                    point = _chunk_reembed_point(target, vector)
+                    point = _chunk_reembed_point(
+                        target, vector, actual_token_count=response_token_count
+                    )
                     await mutation.apply(lambda: vector_store.upsert(namespace, [point]))
                 fetched = await mutation.apply(
                     lambda: vector_store.fetch(namespace, [target.chunk_id])
@@ -303,7 +316,7 @@ class IngestionPipeline:
                     raise PipelineArtifactError(
                         "The vector store returned a stale manual chunk payload."
                     )
-                await mutation.commit(actual_token_count)
+                await mutation.commit(embedding_token_count)
             return TaskResult.success()
         except IngestionOwnershipError:
             return TaskResult.skipped("stale manual chunk edit")
@@ -567,6 +580,7 @@ def _points(
                 "chunk_id": str(chunk.id),
                 "content": chunk.content,
                 "content_hash": chunk.content_hash,
+                "token_count": chunk.token_count,
                 "document_id": str(run.document_id),
                 "index_version": run.index_version,
                 "kb_id": str(run.kb_id),
@@ -576,6 +590,67 @@ def _points(
         )
         points.append(Point(id=chunk.id, dense=values, payload=payload))
     return points
+
+
+def _attach_parent_snapshots(
+    run: IngestionRun,
+    chunks: Sequence[ChunkSpec],
+    *,
+    edited_ordinals: set[int],
+) -> list[ChunkSpec]:
+    """Copy immutable parent context into indexed children before persistence."""
+    by_id = {chunk.id: chunk for chunk in chunks}
+    enriched: list[ChunkSpec] = []
+    for chunk in chunks:
+        if chunk.document_id != run.document_id:
+            raise PipelineArtifactError("A chunk belongs to another document.")
+        metadata = dict(chunk.metadata)
+        if chunk.ordinal in edited_ordinals:
+            metadata["_manual_edit_preserved"] = True
+        if chunk.parent_id is not None:
+            parent = by_id.get(chunk.parent_id)
+            if (
+                parent is None
+                or parent.document_id != run.document_id
+                or parent.parent_id is not None
+                or parent.metadata.get("embed", True) is not False
+                or not parent.content
+                or len(parent.content) > _MAX_PARENT_SNAPSHOT_CHARACTERS
+                or not 0 <= parent.token_count <= _MAX_PARENT_SNAPSHOT_TOKENS
+            ):
+                raise PipelineArtifactError("A child chunk has an invalid parent snapshot.")
+            metadata["_parent_snapshot"] = {
+                "id": str(parent.id),
+                "content": parent.content,
+                "token_count": parent.token_count,
+                "document_id": str(run.document_id),
+                "kb_id": str(run.kb_id),
+                "index_version": run.index_version,
+                "revision": run.revision,
+                "metadata": _parent_snapshot_metadata(parent.metadata),
+            }
+        enriched.append(replace(chunk, metadata=metadata))
+    return enriched
+
+
+def _parent_snapshot_metadata(metadata: Mapping[str, object]) -> dict[str, object]:
+    selected = {
+        key: deepcopy(metadata[key])
+        for key in ("language", "heading_path", "page", "source_url", "citations")
+        if key in metadata
+    }
+    try:
+        encoded = json.dumps(
+            selected,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode()
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise PipelineArtifactError("Parent citation metadata is invalid.") from exc
+    if len(encoded) > _MAX_PARENT_SNAPSHOT_METADATA_BYTES:
+        raise PipelineArtifactError("Parent citation metadata exceeds its safety bound.")
+    return selected
 
 
 async def _verify_expected(
@@ -590,7 +665,9 @@ async def _verify_expected(
             raise PipelineArtifactError("The vector store returned stale point payloads.")
 
 
-def _chunk_reembed_payload(target: ChunkReembedTarget) -> dict[str, object]:
+def _chunk_reembed_payload(
+    target: ChunkReembedTarget, *, actual_token_count: int | None = None
+) -> dict[str, object]:
     payload: dict[str, object] = deepcopy(target.metadata)
     payload.update(
         {
@@ -605,11 +682,27 @@ def _chunk_reembed_payload(target: ChunkReembedTarget) -> dict[str, object]:
             "manual_edit_generation": target.edit_generation,
         }
     )
+    if actual_token_count is not None:
+        payload["token_count"] = actual_token_count
     return payload
 
 
-def _chunk_reembed_point(target: ChunkReembedTarget, values: Sequence[float]) -> Point:
-    return Point(id=target.chunk_id, dense=values, payload=_chunk_reembed_payload(target))
+def _manual_reembed_token_counts(tokenizer: Tokenizer, content: str) -> tuple[int, int]:
+    normalized = " ".join(unicodedata.normalize("NFKC", content).split())
+    return tokenizer.count(normalized), tokenizer.count(content)
+
+
+def _chunk_reembed_point(
+    target: ChunkReembedTarget,
+    values: Sequence[float],
+    *,
+    actual_token_count: int | None = None,
+) -> Point:
+    return Point(
+        id=target.chunk_id,
+        dense=values,
+        payload=_chunk_reembed_payload(target, actual_token_count=actual_token_count),
+    )
 
 
 def _chunk_reembed_hit_matches(

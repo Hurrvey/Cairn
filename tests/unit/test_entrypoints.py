@@ -64,7 +64,13 @@ def test_maintenance_worker_registers_all_maintenance_handlers() -> None:
     from cairn.platform.maintenance import MAINTENANCE_KINDS
 
     worker = build_worker("maintain")
-    assert set(worker._handlers) == {*MAINTENANCE_KINDS, "kb.reindex_fanout"}
+    assert set(worker._handlers) == {
+        *MAINTENANCE_KINDS,
+        "kb.reindex_fanout",
+        "document.purge",
+        "kb.purge",
+        "index.drop",
+    }
     assert worker.queue == "maintain"
 
 

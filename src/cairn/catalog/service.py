@@ -12,7 +12,10 @@ Three behaviours in here carry most of the module's weight:
 
 from __future__ import annotations
 
+import asyncio
 import re
+from collections.abc import AsyncIterator
+from contextlib import suppress
 from datetime import timedelta
 from uuid import UUID
 
@@ -63,12 +66,15 @@ from cairn.core.logging import get_logger
 from cairn.core.modelref import ModelRef
 from cairn.core.time import utcnow
 from cairn.modelgw.catalog import ModelCatalog, get_model_catalog
+from cairn.objectstore.base import ObjectStore, Uploadable
+from cairn.objectstore.keys import ObjectKeys
+from cairn.objectstore.registry import ObjectBindingRef, get_object_registry
 from cairn.platform.audit import AuditService, get_audit_service
 from cairn.tasks.dto import TaskSpec
 from cairn.tasks.service import TaskService, get_task_service
 from cairn.vectorstore.base import Namespace, NamespaceSpec
 
-__all__ = ["RUNTIME_CACHE_TTL", "CatalogService", "get_catalog_service"]
+__all__ = ["RUNTIME_CACHE_TTL", "CatalogModelUsage", "CatalogService", "get_catalog_service"]
 
 log = get_logger(__name__)
 
@@ -76,6 +82,7 @@ log = get_logger(__name__)
 #: index switches additionally publish an explicit invalidation, because those
 #: two must be immediate.
 RUNTIME_CACHE_TTL = 300
+RUNTIME_CACHE_TIMEOUT_S = 2.0
 
 #: Fields that cannot change once a namespace exists (ADR-0006).
 IMMUTABLE_ONCE_INDEXED = frozenset({"embedding_model_id", "metric"})
@@ -298,6 +305,8 @@ class CatalogService:
             kb.deleted_at = utcnow()
             kb.config_version += 1
 
+            await self._tasks.cancel_ready_for_kb(session, kb_id=kb_id)
+
             await self._tasks.enqueue(
                 session,
                 TaskSpec(
@@ -321,7 +330,8 @@ class CatalogService:
                 before=before,
             )
 
-        await self.invalidate_runtime(kb_id)
+            await self.invalidate_runtime(kb_id)
+
         log.info("catalog.kb_deleting", kb_id=str(kb_id))
 
     # --------------------------------------------------------- runtime publication
@@ -333,9 +343,14 @@ class CatalogService:
         from Redis; it never sees a ``KnowledgeBase``, so it never acquires the
         control plane's ORM, migrations, or startup cost.
         """
-        async with session_scope() as session:
-            kb = await self._repo.get_kb(session, kb_id)
-            if kb is None or kb.active_index_version is None:
+        async with transaction() as session:
+            kb = await self._repo.get_kb_for_maintenance(session, kb_id, for_update=True)
+            if (
+                kb is None
+                or kb.deleted_at is not None
+                or kb.status in {"deleting", "archived"}
+                or kb.active_index_version is None
+            ):
                 # Nothing indexed yet: there is nothing the data plane can serve.
                 await self.invalidate_runtime(kb_id)
                 return None
@@ -343,35 +358,35 @@ class CatalogService:
             if binding is None:  # pragma: no cover — FK guarantees this
                 raise NotFound("Vector binding not found.")
             version = await self._repo.get_index_version(session, kb.id, kb.active_index_version)
-            snapshot = (kb, binding, version)
+            try:
+                config = _version_config(version)
+            except ValidationFailed:
+                await self.invalidate_runtime(kb_id)
+                raise
+            if version is None or version.state != "active":
+                await self.invalidate_runtime(kb_id)
+                return None
+            runtime = KnowledgeBaseRuntime(
+                id=kb.id,
+                workspace_id=kb.workspace_id,
+                index_version=kb.active_index_version,
+                embedding_model=config.embedding_model,
+                metric=config.metric,
+                vector_binding=BindingRefModel(
+                    id=binding.id, driver=binding.driver, config=dict(binding.config)
+                ),
+                retrieval_config=RetrievalConfig.model_validate(kb.retrieval_config),
+                config_version=kb.config_version,
+                status=kb.status,
+                parent_snapshots_safe=not await self._repo.has_edited_chunks(
+                    session, kb.id, kb.active_index_version
+                ),
+            )
 
-        kb, binding, version = snapshot
-        try:
-            config = _version_config(version)
-        except ValidationFailed:
-            # A pre-migration payload may still be cached. Never leave it
-            # reachable after discovering that provenance is unavailable.
-            await self.invalidate_runtime(kb_id)
-            raise
-        runtime = KnowledgeBaseRuntime(
-            id=kb.id,
-            workspace_id=kb.workspace_id,
-            # ACTIVE, never "latest" — this is what stops a query seeing a
-            # half-built index during a rebuild.
-            index_version=kb.active_index_version,
-            embedding_model=config.embedding_model,
-            metric=config.metric,
-            vector_binding=BindingRefModel(
-                id=binding.id, driver=binding.driver, config=dict(binding.config)
-            ),
-            retrieval_config=RetrievalConfig.model_validate(kb.retrieval_config),
-            config_version=kb.config_version,
-            status=kb.status,
-        )
-
-        await self.cache.set(
-            _runtime_key(kb_id), runtime.model_dump_json().encode(), RUNTIME_CACHE_TTL
-        )
+            async with asyncio.timeout(RUNTIME_CACHE_TIMEOUT_S):
+                await self.cache.set(
+                    _runtime_key(kb_id), runtime.model_dump_json().encode(), RUNTIME_CACHE_TTL
+                )
         log.info(
             "catalog.runtime_published",
             kb_id=str(kb_id),
@@ -386,7 +401,8 @@ class CatalogService:
         The TTL is fine for ordinary config drift, but a deleted knowledge base
         must stop answering now.
         """
-        await self.cache.delete(_runtime_key(kb_id))
+        async with asyncio.timeout(RUNTIME_CACHE_TIMEOUT_S):
+            await self.cache.delete(_runtime_key(kb_id))
 
     # ------------------------------------------------------------- index versions
 
@@ -686,97 +702,161 @@ class CatalogService:
         "document exists but nothing will ever process it" state is unreachable.
         """
         async with transaction() as session:
-            kb = await self._repo.get_kb(session, kb_id, for_update=True)
-            if kb is None:
-                raise NotFound("Knowledge base not found.")
-            if kb.status in ("deleting", "archived"):
-                raise KbNotReady(f"This knowledge base is {kb.status}.")
+            kb = await self._require_uploadable_kb(session, actor, kb_id)
+            result, notify = await self._register_upload_locked(session, kb, spec)
+        if notify:
+            await self._tasks.notify("parse")
+        return result
 
-            if not source_key_in_scope(spec.object_key, workspace_id=kb.workspace_id, kb_id=kb.id):
-                raise ValidationFailed("The source object key is outside this document's scope.")
-            existing = await self._repo.get_document_by_hash(session, kb_id, spec.content_hash)
+    async def upload_document(
+        self,
+        actor: Principal,
+        kb_id: UUID,
+        spec: UploadSpec,
+        data: Uploadable,
+    ) -> DocumentRegistration:
+        """Atomically acquire a canonical source object and register its task."""
+        async with transaction() as session:
+            kb = await self._require_uploadable_kb(session, actor, kb_id)
+            canonical_key = ObjectKeys.original(kb.workspace_id, kb.id, spec.content_hash)
+            if spec.object_key != canonical_key:
+                raise ValidationFailed("The uploaded source object key is not canonical.")
+            existing = await self._repo.get_document_by_hash(session, kb.id, spec.content_hash)
             if existing is not None and existing.deleted_at is None:
-                # Not an error. Re-uploading identical content is the expected
-                # outcome of a retried sync, and reporting it as a failure
-                # trains users to ignore failures.
-                return DocumentRegistration(
-                    filename=spec.filename,
-                    status="skipped",
-                    reason="DUPLICATE_CONTENT_HASH",
-                    document=_document_view(existing),
-                    existing_document_id=existing.id,
-                )
+                return self._duplicate_registration(spec, existing)
 
-            document = await self._repo.add_document(
-                session,
-                Document(
-                    workspace_id=kb.workspace_id,
-                    kb_id=kb_id,
-                    source_type=spec.source_type,
-                    source_ref=spec.source_ref or spec.filename,
-                    title=spec.title or spec.filename,
-                    mime_type=spec.mime_type,
-                    size_bytes=spec.size_bytes,
-                    content_hash=spec.content_hash,
-                    object_key=spec.object_key,
-                    doc_metadata=dict(spec.metadata),
-                    state="registered",
-                ),
+            binding = await self._repo.get_binding(session, kb.object_binding_id)
+            if (
+                binding is None
+                or binding.workspace_id != kb.workspace_id
+                or binding.kind != "object"
+            ):
+                raise NotFound("Object storage binding not found.")
+            store = await get_object_registry().for_binding(
+                ObjectBindingRef(binding.id, binding.driver, dict(binding.config or {}))
             )
-
-            if kb.building_index_version is not None:
-                index_version = kb.building_index_version
-            elif kb.active_index_version is not None:
-                index_version = kb.active_index_version
-            else:
-                model = await self._models.require_embedding_model(
-                    kb.workspace_id, kb.embedding_model_id
+            present = await store.head(canonical_key)
+            if present is not None and present.size != spec.size_bytes:
+                raise Conflict("The canonical source object does not match its content hash.")
+            created = present is None
+            if created:
+                await store.put(
+                    canonical_key,
+                    data,
+                    content_type=spec.mime_type,
+                    metadata={"sha256": spec.content_hash},
                 )
-                index_version = _allocate_index_version(kb)
-                kb.building_index_version = index_version
-                kb.status = "indexing"
-                await self._repo.add_index_version(
-                    session,
-                    KbIndexVersion(
-                        kb_id=kb.id,
-                        version=index_version,
-                        workspace_id=kb.workspace_id,
-                        state="building",
-                        physical_ref=Namespace(kb.id, index_version).key(),
-                        config_snapshot=_capture_version_config(kb, model),
-                    ),
-                )
+            try:
+                result, notify = await self._register_upload_locked(session, kb, spec)
+            except BaseException:
+                if created:
+                    with suppress(Exception):
+                        await store.delete(canonical_key)
+                raise
+        if notify:
+            await self._tasks.notify("parse")
+        return result
 
-            await self._repo.add_document_ingestion(
+    async def _require_uploadable_kb(
+        self, session: AsyncSession, actor: Principal, kb_id: UUID
+    ) -> KnowledgeBase:
+        kb = await self._repo.get_kb(session, kb_id, for_update=True)
+        if kb is None or kb.workspace_id != actor.workspace_id:
+            raise NotFound("Knowledge base not found.")
+        if kb.status in ("deleting", "archived"):
+            raise KbNotReady(f"This knowledge base is {kb.status}.")
+        return kb
+
+    def _duplicate_registration(self, spec: UploadSpec, existing: Document) -> DocumentRegistration:
+        return DocumentRegistration(
+            filename=spec.filename,
+            status="skipped",
+            reason="DUPLICATE_CONTENT_HASH",
+            document=_document_view(existing),
+            existing_document_id=existing.id,
+        )
+
+    async def _register_upload_locked(
+        self,
+        session: AsyncSession,
+        kb: KnowledgeBase,
+        spec: UploadSpec,
+    ) -> tuple[DocumentRegistration, bool]:
+        if not source_key_in_scope(spec.object_key, workspace_id=kb.workspace_id, kb_id=kb.id):
+            raise ValidationFailed("The source object key is outside this document's scope.")
+        existing = await self._repo.get_document_by_hash(session, kb.id, spec.content_hash)
+        if existing is not None and existing.deleted_at is None:
+            return self._duplicate_registration(spec, existing), False
+
+        document = await self._repo.add_document(
+            session,
+            Document(
+                workspace_id=kb.workspace_id,
+                kb_id=kb.id,
+                source_type=spec.source_type,
+                source_ref=spec.source_ref or spec.filename,
+                title=spec.title or spec.filename,
+                mime_type=spec.mime_type,
+                size_bytes=spec.size_bytes,
+                content_hash=spec.content_hash,
+                object_key=spec.object_key,
+                doc_metadata=dict(spec.metadata),
+                state="registered",
+            ),
+        )
+
+        if kb.building_index_version is not None:
+            index_version = kb.building_index_version
+        elif kb.active_index_version is not None:
+            index_version = kb.active_index_version
+        else:
+            model = await self._models.require_embedding_model(
+                kb.workspace_id, kb.embedding_model_id
+            )
+            index_version = _allocate_index_version(kb)
+            kb.building_index_version = index_version
+            kb.status = "indexing"
+            await self._repo.add_index_version(
                 session,
-                DocumentIngestion(
-                    document_id=document.id,
-                    revision=document.revision,
+                KbIndexVersion(
                     kb_id=kb.id,
-                    index_version=index_version,
-                    source_content_hash=document.content_hash,
-                ),
-            )
-
-            await self._tasks.enqueue(
-                session,
-                TaskSpec(
-                    queue="parse",
-                    kind="document.parse",
+                    version=index_version,
                     workspace_id=kb.workspace_id,
-                    kb_id=kb_id,
-                    document_id=document.id,
-                    payload={"revision": document.revision, "index_version": index_version},
-                    dedupe_key=f"parse:{document.id}:{document.revision}",
+                    state="building",
+                    physical_ref=Namespace(kb.id, index_version).key(),
+                    config_snapshot=_capture_version_config(kb, model),
                 ),
             )
-            await self._repo.adjust_counters(
-                session, kb_id, docs=1, bytes_used=spec.size_bytes or 0
-            )
-            view = _document_view(document)
 
-        await self._tasks.notify("parse")
-        return DocumentRegistration(filename=spec.filename, status="accepted", document=view)
+        await self._repo.add_document_ingestion(
+            session,
+            DocumentIngestion(
+                document_id=document.id,
+                revision=document.revision,
+                kb_id=kb.id,
+                index_version=index_version,
+                source_content_hash=document.content_hash,
+            ),
+        )
+        await self._tasks.enqueue(
+            session,
+            TaskSpec(
+                queue="parse",
+                kind="document.parse",
+                workspace_id=kb.workspace_id,
+                kb_id=kb.id,
+                document_id=document.id,
+                payload={"revision": document.revision, "index_version": index_version},
+                dedupe_key=f"parse:{document.id}:{document.revision}",
+            ),
+        )
+        await self._repo.adjust_counters(session, kb.id, docs=1, bytes_used=spec.size_bytes or 0)
+        return (
+            DocumentRegistration(
+                filename=spec.filename, status="accepted", document=_document_view(document)
+            ),
+            True,
+        )
 
     async def update_document_state(
         self,
@@ -813,12 +893,51 @@ class CatalogService:
                 document.indexed_at = utcnow()
                 document.progress_pct = 100
 
-    async def get_document(self, doc_id: UUID) -> DocumentView:
+    async def get_document(
+        self, doc_id: UUID, *, expected_kb_id: UUID | None = None
+    ) -> DocumentView:
         async with session_scope() as session:
             document = await self._repo.get_document(session, doc_id)
-            if document is None or document.deleted_at is not None:
+            if (
+                document is None
+                or document.deleted_at is not None
+                or (expected_kb_id is not None and document.kb_id != expected_kb_id)
+            ):
                 raise NotFound("Document not found.")
             return _document_view(document)
+
+    async def download_document(
+        self, actor: Principal, kb_id: UUID, doc_id: UUID
+    ) -> tuple[DocumentView, AsyncIterator[bytes]]:
+        async with session_scope() as session:
+            document = await self._repo.get_document(session, doc_id)
+            kb = await self._repo.get_kb(session, kb_id)
+            if (
+                document is None
+                or document.deleted_at is not None
+                or document.kb_id != kb_id
+                or document.workspace_id != actor.workspace_id
+                or kb is None
+                or kb.workspace_id != actor.workspace_id
+                or document.object_key is None
+                or not source_key_in_scope(
+                    document.object_key, workspace_id=document.workspace_id, kb_id=kb_id
+                )
+            ):
+                raise NotFound("Document not found.")
+            binding = await self._repo.get_binding(session, kb.object_binding_id)
+            if (
+                binding is None
+                or binding.workspace_id != actor.workspace_id
+                or binding.kind != "object"
+            ):
+                raise NotFound("Object storage binding not found.")
+            store: ObjectStore = await get_object_registry().for_binding(
+                ObjectBindingRef(binding.id, binding.driver, dict(binding.config or {}))
+            )
+            stream = store.get(document.object_key)
+            view = _document_view(document)
+        return view, stream
 
     async def list_documents(
         self,
@@ -846,11 +965,17 @@ class CatalogService:
         async with session_scope() as session:
             return await self._repo.count_documents_by_state(session, kb_id)
 
-    async def delete_document(self, actor: Principal, doc_id: UUID) -> None:
+    async def delete_document(
+        self, actor: Principal, doc_id: UUID, *, expected_kb_id: UUID | None = None
+    ) -> None:
         building_cleanup = False
         async with transaction() as session:
             document = await self._repo.get_document(session, doc_id, for_update=True)
-            if document is None:
+            if (
+                document is None
+                or document.workspace_id != actor.workspace_id
+                or (expected_kb_id is not None and document.kb_id != expected_kb_id)
+            ):
                 raise NotFound("Document not found.")
             kb = await self._repo.get_kb(session, document.kb_id, for_update=True)
             if kb is None:
@@ -910,54 +1035,124 @@ class CatalogService:
         if building_cleanup:
             await self._tasks.notify("index")
 
-    async def retry_document(self, actor: Principal, doc_id: UUID) -> None:
-        """Re-enqueue a failed document from the parse stage."""
+    async def retry_document(
+        self,
+        actor: Principal,
+        doc_id: UUID,
+        *,
+        expected_kb_id: UUID | None = None,
+    ) -> None:
+        """Resume the exact failed ingestion run from its durable committed state."""
+        notify_queue: str
         async with transaction() as session:
             document = await self._repo.get_document(session, doc_id, for_update=True)
-            if document is None:
+            if document is None or document.workspace_id != actor.workspace_id:
                 raise NotFound("Document not found.")
+            if expected_kb_id is not None and document.kb_id != expected_kb_id:
+                raise NotFound("Document not found.")
+            if document.deleted_at is not None or document.state == "deleting":
+                raise Conflict("A deleted document cannot be retried.")
             if document.state != "failed":
                 raise Conflict(f"Document is {document.state}, not failed.")
 
-            document.state = "registered"
+            runs = await self._repo.failed_document_ingestions(session, document, for_update=True)
+            kb = await self._repo.get_kb(session, document.kb_id, for_update=True)
+            if kb is None or kb.workspace_id != actor.workspace_id:
+                raise NotFound("Knowledge base not found.")
+            if kb.status in {"deleting", "archived"}:
+                raise Conflict("This knowledge base does not accept document retries.")
+            current_versions = {kb.active_index_version, kb.building_index_version} - {None}
+            candidates = [run for run in runs if run.index_version in current_versions]
+            if len(candidates) != 1:
+                raise Conflict(
+                    "The failed ingestion run is unavailable or ambiguous; replace the source "
+                    "or start a fresh rebuild."
+                )
+            run = candidates[0]
+            version = await self._repo.get_index_version(
+                session, run.kb_id, run.index_version, for_update=True
+            )
+            if (
+                version is None
+                or version.state not in {"active", "building"}
+                or version.workspace_id != actor.workspace_id
+                or version.snapshot_unavailable
+                or version.config_snapshot is None
+            ):
+                raise Conflict(
+                    "The failed ingestion target no longer has a retryable version snapshot."
+                )
+            recovery_targets = {
+                "registered": ("parse", "document.parse", 0),
+                "parsed": ("chunk", "document.chunk", 25),
+                "chunked": ("embed", "document.embed", 50),
+                "embedded": ("index", "document.index", 75),
+                "indexed": ("index", "document.index", 100),
+            }
+            target = recovery_targets.get(run.previous_committed_state or "")
+            if run.failed_stage is None or target is None:
+                raise Conflict(
+                    "This legacy failure has no safe resumepoint; replace the source or start "
+                    "a fresh rebuild."
+                )
+            notify_queue, kind, progress = target
+            restored_state = run.previous_committed_state
+            assert restored_state is not None
+            if (
+                document.error_code == "EMBED_INPUT_TOO_LARGE"
+                and run.failed_stage == "embed"
+                and restored_state == "chunked"
+            ):
+                if run.parsed_object_key is None:
+                    raise Conflict(
+                        "The parsed artifact needed to repair oversized chunks is missing."
+                    )
+                if _version_config(version).chunk_config.strategy == "custom":
+                    raise Conflict("Repair the custom chunker before rebuilding oversized chunks.")
+                if await self._repo.edited_chunks(session, kb.id, document.id):
+                    raise Conflict(
+                        "Rechunking would move manual edit boundaries. Preserve and reconcile "
+                        "the manual edits before rebuilding this document."
+                    )
+                restored_state = "parsed"
+                notify_queue, kind, progress = recovery_targets[restored_state]
+                run.chunks_object_key = None
+                run.embeddings_object_key = None
+            await self._tasks.cancel_ready_ingestion_generation(
+                session,
+                document_id=document.id,
+                revision=document.revision,
+                index_version=run.index_version,
+                recovery_generation=run.recovery_generation,
+            )
+            run.recovery_generation += 1
+            run.state = restored_state
+            document.state = restored_state
+            document.stage_detail = None
             document.error_code = None
             document.error_detail = None
-            document.progress_pct = 0
-            document.revision += 1  # a fresh revision frees the dedupe key
-
-            kb = await self._repo.get_kb(session, document.kb_id, for_update=True)
-            if kb is None:
-                raise NotFound("Knowledge base not found.")
-            index_version = kb.building_index_version or kb.active_index_version
-            if index_version is None:
-                raise Conflict("The knowledge base has no index version available for retry.")
-            await self._repo.add_document_ingestion(
-                session,
-                DocumentIngestion(
-                    document_id=document.id,
-                    revision=document.revision,
-                    kb_id=document.kb_id,
-                    index_version=index_version,
-                    source_content_hash=document.content_hash,
-                ),
-            )
+            document.progress_pct = progress
 
             await self._tasks.enqueue(
                 session,
                 TaskSpec(
-                    queue="parse",
-                    kind="document.parse",
+                    queue=notify_queue,  # type: ignore[arg-type]
+                    kind=kind,
                     workspace_id=document.workspace_id,
                     kb_id=document.kb_id,
                     document_id=doc_id,
                     payload={
                         "revision": document.revision,
-                        "index_version": index_version,
+                        "index_version": run.index_version,
+                        "recovery_generation": run.recovery_generation,
                     },
-                    dedupe_key=f"parse:{doc_id}:{document.revision}",
+                    dedupe_key=(
+                        f"{kind}:{doc_id}:{document.revision}:{run.index_version}:"
+                        f"{run.recovery_generation}"
+                    ),
                 ),
             )
-        await self._tasks.notify("parse")
+        await self._tasks.notify(notify_queue)
 
     # -------------------------------------------------------------------- chunks
 
@@ -1032,6 +1227,9 @@ class CatalogService:
         after_ordinal: int | None = None,
     ) -> list[ChunkView]:
         async with session_scope() as session:
+            document = await self._repo.get_document(session, document_id)
+            if document is None or document.deleted_at is not None or document.kb_id != kb_id:
+                raise NotFound("Document not found.")
             if index_version is None:
                 kb = await self._repo.get_kb(session, kb_id)
                 if kb is None:
@@ -1119,6 +1317,10 @@ class CatalogService:
             chunk.is_edited = True
             chunk.edit_generation += 1
 
+            # Publishers hold the same KB lock. Remove the old safe projection
+            # before commit so a sibling cannot expand obsolete parent content.
+            await self.invalidate_runtime(kb_id)
+
             if run.state == "indexed" and chunk.chunk_metadata.get("embed", True) is not False:
                 await self._tasks.enqueue(
                     session,
@@ -1158,6 +1360,14 @@ class CatalogService:
 
         if notify:
             await self._tasks.notify("embed")
+        try:
+            await self.publish_runtime(kb_id)
+        except Exception as exc:
+            # The edit is already committed. Maintenance retries publication;
+            # absent runtime remains unavailable instead of serving stale context.
+            log.warning(
+                "catalog.edited_runtime_publish_failed", kb_id=str(kb_id), error=type(exc).__name__
+            )
         return view
 
     # ----------------------------------------------------------- storage bindings
@@ -1304,6 +1514,17 @@ class CatalogService:
                 Namespace(kb_id, version),
                 NamespaceSpec(dim=kb.embedding_dim, metric=kb.metric),  # type: ignore[arg-type]
             )
+
+
+class CatalogModelUsage:
+    """Catalog-owned model reference facade used only at API composition."""
+
+    def __init__(self, repository: CatalogRepository | None = None) -> None:
+        self._repository = repository or CatalogRepository()
+
+    async def model_is_referenced(self, workspace_id: UUID, model_id: UUID) -> bool:
+        async with session_scope() as session:
+            return await self._repository.model_is_referenced(session, workspace_id, model_id)
 
 
 def _runtime_key(kb_id: UUID) -> str:
