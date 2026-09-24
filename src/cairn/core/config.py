@@ -73,6 +73,14 @@ class ObjectStoreSettings(BaseModel):
     max_inline_bytes: int = 8_388_608  # what `get_bytes` will materialise
 
 
+class QdrantSettings(BaseModel):
+    """The deployment's Qdrant. Vector bindings carry no connection details."""
+
+    url: str = "http://localhost:6333"
+    api_key: SecretStr | None = None
+    timeout_s: int = Field(default=10, ge=1, le=120)
+
+
 class TaskSettings(BaseModel):
     """Worker runtime. `queue` is required when CAIRN_ROLE=worker."""
 
@@ -197,6 +205,7 @@ class Settings(BaseSettings):
     retrieval: RetrievalSettings = Field(default_factory=RetrievalSettings)
     mcp: MCPSettings = Field(default_factory=MCPSettings)
     objectstore: ObjectStoreSettings = Field(default_factory=ObjectStoreSettings)
+    qdrant: QdrantSettings = Field(default_factory=QdrantSettings)
     telemetry: TelemetrySettings = Field(default_factory=TelemetrySettings)
 
     @property

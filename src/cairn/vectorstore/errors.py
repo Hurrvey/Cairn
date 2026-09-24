@@ -8,6 +8,7 @@ __all__ = [
     "DimensionMismatch",
     "NamespaceNotFound",
     "UnsupportedCapability",
+    "UnsupportedFilter",
     "VectorStoreUnavailable",
 ]
 
@@ -44,3 +45,14 @@ class UnsupportedCapability(ValidationFailed):
 
     code = "VECTOR_CAPABILITY_UNSUPPORTED"
     title = "Capability not supported by this vector store"
+
+
+class UnsupportedFilter(UnsupportedCapability):
+    """A filter this driver cannot evaluate with the normative semantics.
+
+    Refused rather than approximated: an approximation would return a result set
+    that differs from every other driver's, silently.
+    """
+
+    code = "VECTOR_FILTER_UNSUPPORTED"
+    title = "Filter not supported by this vector store"
