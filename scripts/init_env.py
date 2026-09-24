@@ -16,6 +16,7 @@ def initialize(path: Path) -> None:
         "POSTGRES_PASSWORD": secrets.token_hex(24),
         "POSTGRES_DB": "cairn",
         "CAIRN_REDIS_URL": "redis://redis:6379/0",
+        "QDRANT_API_KEY": secrets.token_urlsafe(32),
         "CAIRN_ROLE": "all",
         "CAIRN_ENVIRONMENT": "dev",
         "CAIRN_AUTH__COOKIE_SECURE": "false",

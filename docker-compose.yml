@@ -10,6 +10,8 @@ x-app: &app
   environment: &app-environment
     CAIRN_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-cairn}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-cairn}
     CAIRN_REDIS_URL: redis://redis:6379/0
+    CAIRN_QDRANT__URL: http://qdrant:6333
+    CAIRN_QDRANT__API_KEY: ${QDRANT_API_KEY:?set QDRANT_API_KEY in .env}
     CAIRN_OBJECTSTORE__LOCAL_PATH: /var/lib/cairn/objects
     CAIRN_INGESTION__TOKENIZERS_JSON: '{"minilm":"hf:/models/tokenizer.json"}'
     CAIRN_RETRIEVAL__TOKENIZER_FILES: '{"minilm":"/models/tokenizer.json"}'
@@ -19,6 +21,7 @@ x-app: &app
   depends_on:
     postgres: {condition: service_healthy}
     redis: {condition: service_healthy}
+    qdrant: {condition: service_healthy}
     migrate: {condition: service_completed_successfully}
   volumes:
     - objects:/var/lib/cairn/objects
@@ -38,7 +41,7 @@ x-worker: &worker
 
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    image: postgres:16
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-cairn}
@@ -58,6 +61,20 @@ services:
     volumes: ["redisdata:/data"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  qdrant:
+    image: qdrant/qdrant:v1.19.1@sha256:12364fe851b9f17356fc88189fc06d1b521262e04659ec7345975b00c9246a10
+    restart: unless-stopped
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?set QDRANT_API_KEY in .env}
+      QDRANT__TELEMETRY_DISABLED: "true"
+    volumes: ["qdrantdata:/qdrant/storage"]
+    healthcheck:
+      # The image ships bash but neither curl nor wget.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6333 && printf 'GET /readyz HTTP/1.0\r\n\r\n' >&3 && grep -q ' 200 ' <&3"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -88,6 +105,7 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
+      qdrant: {condition: service_healthy}
     command: ["cairn", "migrate", "--and-bootstrap"]
     restart: "no"
     healthcheck:
@@ -177,5 +195,6 @@ services:
 
 volumes:
   pgdata:
+  qdrantdata:
   redisdata:
   objects:

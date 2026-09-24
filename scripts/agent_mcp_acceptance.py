@@ -153,7 +153,7 @@ def run() -> None:
                     json={
                         "name": "Agent vectors",
                         "kind": "vector",
-                        "driver": "pgvector",
+                        "driver": "qdrant",
                         "config": {},
                     },
                 )
