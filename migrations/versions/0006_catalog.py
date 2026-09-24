@@ -145,7 +145,10 @@ def upgrade() -> None:
         sa.Column("vector_binding_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("object_binding_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column(
-            "chunk_config", postgresql.JSONB(), nullable=False, server_default=sa.text("'{}'::jsonb")
+            "chunk_config",
+            postgresql.JSONB(),
+            nullable=False,
+            server_default=sa.text("'{}'::jsonb"),
         ),
         sa.Column(
             "retrieval_config",
@@ -202,9 +205,7 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint(f"status IN {KB_STATUSES}", name="ck_knowledge_base_status"),
         sa.CheckConstraint("metric IN ('cosine','dot','l2')", name="ck_knowledge_base_metric"),
-        sa.CheckConstraint(
-            "embedding_dim > 0", name="ck_knowledge_base_embedding_dim_positive"
-        ),
+        sa.CheckConstraint("embedding_dim > 0", name="ck_knowledge_base_embedding_dim_positive"),
     )
 
     op.create_table(

@@ -31,7 +31,7 @@ def _service(request: Request) -> RetrievalService:
     responses=PROBLEM,
     summary="Retrieve cited chunks from knowledge bases",
     description=(
-        "Requires kb:query on every target. Supports bounded pgvector full-text, vector, "
+        "Requires kb:query on every target. Supports bounded full-text (BM25), vector, "
         "and hybrid search; unsupported advanced options are rejected or reported degraded."
     ),
 )

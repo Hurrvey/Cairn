@@ -138,12 +138,6 @@ ignore = [
 "src/cairn/tasks/repository.py" = ["S608"]
 "src/cairn/platform/query.py" = ["S608"]
 
-# A table name cannot be a bind parameter, so the pgvector driver interpolates
-# `Namespace.key()` into DDL and DML. That value is validated against
-# `_SAFE_IDENTIFIER` at construction (see vectorstore/base.py), and every
-# user-supplied value in these queries is a bound parameter.
-"src/cairn/vectorstore/pgvector.py" = ["S608"]
-
 [tool.ruff.lint.isort]
 known-first-party = ["cairn", "apps"]
 

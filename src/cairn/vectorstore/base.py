@@ -113,23 +113,15 @@ class Point:
 
 @dataclass(frozen=True, slots=True)
 class VectorQuery:
-    """One search against one namespace.
+    """One search against one namespace: exactly one of ``dense`` or ``sparse``.
 
-    Lexical search needs different inputs on different backends, and pretending
-    otherwise would force one of them into a lossy conversion:
-
-    * Qdrant takes a ``sparse`` vector of learned term weights.
-    * pgvector uses PostgreSQL full-text, which needs the query ``text``.
-
-    Callers supply whichever they have — usually both — and each driver uses
-    what it can. ``Capabilities.sparse_vectors`` says which is honoured.
+    Lexical search is a sparse query built by ``cairn.embedding.sparse``; a
+    driver never sees query text.
     """
 
     top_k: int = 10
     dense: Sequence[float] | None = None
     sparse: SparseVector | None = None
-    #: Raw query text for full-text backends.
-    text: str | None = None
     filter: FilterNode | None = None
     with_payload: bool = True
     #: Accuracy/latency knob. Higher searches more of the graph.

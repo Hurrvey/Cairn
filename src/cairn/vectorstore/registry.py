@@ -1,12 +1,12 @@
 """Vector driver resolution.
 
-pgvector shares the application's engine rather than opening its own pool: on
-the ``small`` preset the vectors live in the same database as everything else,
-and a second pool would double the connection count for no benefit.
+Every vector binding resolves to the deployment's Qdrant (ADR-0009); connection
+details are deployment configuration, not binding configuration.
 """
 
 from __future__ import annotations
 
+import warnings
 from typing import Any
 from uuid import UUID
 
@@ -50,6 +50,7 @@ class VectorStoreRegistry:
         store = await self._build(binding)
         status = await store.health()
         if not status.healthy:
+            await store.close()
             raise VectorStoreUnavailable(
                 f"The {binding.driver} vector store is not reachable: {status.detail}"
             )
@@ -58,25 +59,24 @@ class VectorStoreRegistry:
         return store
 
     async def _build(self, binding: VectorBindingRef) -> VectorStore:
-        if binding.driver == "pgvector":
-            from cairn.core.db import get_engine
-            from cairn.vectorstore.pgvector import PgVectorStore, ensure_extension
+        if binding.driver != "qdrant":
+            raise VectorStoreUnavailable(f"Unknown vector store driver: {binding.driver!r}")
+        from qdrant_client import AsyncQdrantClient
 
-            engine = get_engine()
-            await ensure_extension(engine)
-            return PgVectorStore(
-                engine,
-                default_text_search_config=str(binding.config.get("text_search_config", "simple")),
+        from cairn.core.config import get_settings
+        from cairn.vectorstore.qdrant import QdrantVectorStore
+
+        settings = get_settings().qdrant
+        with warnings.catch_warnings():
+            # The client warns when an API key travels over plain HTTP. Inside
+            # the Compose network that is the configured, intended transport.
+            warnings.simplefilter("ignore", UserWarning)
+            client = AsyncQdrantClient(
+                url=settings.url,
+                api_key=settings.api_key.get_secret_value() if settings.api_key else None,
+                timeout=settings.timeout_s,
             )
-        if binding.driver == "qdrant":
-            # T-M05-10, Phase 5. An explicit error beats silently using pgvector:
-            # a deployment sized for Qdrant would hit pgvector's ceiling in
-            # production rather than at configuration time.
-            raise VectorStoreUnavailable(
-                "The Qdrant driver is not implemented yet (T-M05-10). "
-                "Use the 'pgvector' driver until it lands."
-            )
-        raise VectorStoreUnavailable(f"Unknown vector store driver: {binding.driver!r}")
+        return QdrantVectorStore(client)
 
     async def close(self) -> None:
         for store in self._instances.values():

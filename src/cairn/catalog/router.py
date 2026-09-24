@@ -739,14 +739,16 @@ async def create_binding(
 
 
 def _validate_binding_config(body: CreateBindingRequest) -> None:
-    expected_driver = "local" if body.kind == "object" else "pgvector"
+    expected_driver = "local" if body.kind == "object" else "qdrant"
     if body.driver != expected_driver:
         raise ValidationFailed(
             f"The first-product {body.kind} binding driver must be {expected_driver!r}."
         )
     if body.kind == "vector":
         if body.config:
-            raise ValidationFailed("pgvector uses the configured application database.")
+            raise ValidationFailed(
+                "Qdrant connection details come from the deployment configuration."
+            )
         return
     unknown = set(body.config) - {"path"}
     if unknown:

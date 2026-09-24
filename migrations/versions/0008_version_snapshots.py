@@ -57,9 +57,7 @@ $$;
 def upgrade() -> None:
     op.add_column(
         "knowledge_base",
-        sa.Column(
-            "index_version_high_water", sa.Integer(), nullable=False, server_default="0"
-        ),
+        sa.Column("index_version_high_water", sa.Integer(), nullable=False, server_default="0"),
     )
     op.create_check_constraint(
         "ck_knowledge_base_index_version_high_water_nonnegative",
@@ -173,9 +171,7 @@ def upgrade() -> None:
          WHERE index_version_high_water = 0
         """
     )
-    op.alter_column(
-        "kb_index_version", "snapshot_unavailable", server_default=sa.text("false")
-    )
+    op.alter_column("kb_index_version", "snapshot_unavailable", server_default=sa.text("false"))
     op.execute(_SNAPSHOT_GUARD)
     op.execute(
         "CREATE TRIGGER trg_kb_index_version_snapshot_immutable "
@@ -193,13 +189,9 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.execute("DROP TRIGGER IF EXISTS trg_kb_index_version_high_water ON knowledge_base")
     op.execute("DROP FUNCTION IF EXISTS guard_kb_index_version_high_water()")
-    op.execute(
-        "DROP TRIGGER IF EXISTS trg_kb_index_version_snapshot_immutable ON kb_index_version"
-    )
+    op.execute("DROP TRIGGER IF EXISTS trg_kb_index_version_snapshot_immutable ON kb_index_version")
     op.execute("DROP FUNCTION IF EXISTS guard_kb_index_version_snapshot_immutable()")
-    op.drop_constraint(
-        "ck_kb_index_version_snapshot_coherent", "kb_index_version", type_="check"
-    )
+    op.drop_constraint("ck_kb_index_version_snapshot_coherent", "kb_index_version", type_="check")
     op.drop_column("kb_index_version", "snapshot_unavailable")
     op.drop_column("kb_index_version", "config_snapshot")
     op.execute(

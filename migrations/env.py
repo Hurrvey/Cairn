@@ -72,9 +72,7 @@ def run_migrations_online() -> None:
             with context.begin_transaction():
                 context.run_migrations()
         finally:
-            connection.execute(
-                text("SELECT pg_advisory_unlock(:key)"), {"key": MIGRATION_LOCK_KEY}
-            )
+            connection.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": MIGRATION_LOCK_KEY})
             connection.commit()
 
 

@@ -11,6 +11,7 @@ Zero code duplication, independent scaling, independent blast radius.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 
@@ -65,6 +66,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         if retrieval_runtime is not None:
             await retrieval_runtime.start()
+        if settings.serves_data_plane:
+            # jieba loads its dictionary on first use (~1 s); pay that at
+            # start-up, not inside the first full-text query's timeout.
+            from cairn.embedding.sparse import warm_up
+
+            await asyncio.to_thread(warm_up)
         async with AsyncExitStack() as stack:
             mcp_server = getattr(app.state, "mcp_server", None)
             if mcp_server is not None:

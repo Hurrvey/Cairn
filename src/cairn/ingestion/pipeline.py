@@ -24,6 +24,7 @@ from cairn.core.errors import CairnError
 from cairn.core.logging import get_logger
 from cairn.core.modelref import ModelRef
 from cairn.embedding.service import EmbeddingService
+from cairn.embedding.sparse import encode_document
 from cairn.embedding.tokenizers import Tokenizer
 from cairn.ingestion.artifacts import (
     ChunkManifest,
@@ -588,7 +589,14 @@ def _points(
                 "revision": run.revision,
             }
         )
-        points.append(Point(id=chunk.id, dense=values, payload=payload))
+        points.append(
+            Point(
+                id=chunk.id,
+                dense=values,
+                payload=payload,
+                sparse=encode_document(chunk.content),
+            )
+        )
     return points
 
 
@@ -702,6 +710,7 @@ def _chunk_reembed_point(
         id=target.chunk_id,
         dense=values,
         payload=_chunk_reembed_payload(target, actual_token_count=actual_token_count),
+        sparse=encode_document(target.content),
     )
 
 

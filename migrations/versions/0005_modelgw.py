@@ -61,7 +61,9 @@ def upgrade() -> None:
         sa.Column("family", sa.String(32), nullable=False),
         sa.Column("base_url", sa.Text(), nullable=True),
         sa.Column("secret_ref", postgresql.UUID(as_uuid=True), nullable=True),
-        sa.Column("config", postgresql.JSONB(), nullable=False, server_default=sa.text("'{}'::jsonb")),
+        sa.Column(
+            "config", postgresql.JSONB(), nullable=False, server_default=sa.text("'{}'::jsonb")
+        ),
         sa.Column("is_enabled", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.Column(
             "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()

@@ -63,7 +63,9 @@ def upgrade() -> None:
         sa.Column("priority", sa.SmallInteger(), nullable=False, server_default="100"),
         sa.Column("attempt", sa.SmallInteger(), nullable=False, server_default="0"),
         sa.Column("max_attempts", sa.SmallInteger(), nullable=False, server_default="5"),
-        sa.Column("run_after", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "run_after", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
         sa.Column("lease_until", sa.DateTime(timezone=True), nullable=True),
         sa.Column("worker_id", sa.String(128), nullable=True),
         sa.Column("dedupe_key", sa.String(255), nullable=True),
@@ -71,7 +73,9 @@ def upgrade() -> None:
         sa.Column("error_detail", sa.Text(), nullable=True),
         sa.Column("progress_done", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("progress_total", sa.Integer(), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
         sa.PrimaryKeyConstraint("id", name="pk_task"),

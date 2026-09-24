@@ -216,9 +216,7 @@ def upgrade() -> None:
             f"FOR VALUES FROM ('{start}') TO ('{end}')"
         )
 
-    op.execute(
-        "CREATE INDEX ix_audit_log_actor ON audit_log (workspace_id, actor_id, at DESC)"
-    )
+    op.execute("CREATE INDEX ix_audit_log_actor ON audit_log (workspace_id, actor_id, at DESC)")
     op.execute(
         "CREATE INDEX ix_audit_log_resource "
         "ON audit_log (workspace_id, resource_type, resource_id, at DESC)"

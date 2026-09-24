@@ -16,6 +16,7 @@ from cairn.core.errors import InvalidId, PermissionDenied, UpstreamUnavailable, 
 from cairn.core.ids import InvalidIdError, decode_id, encode_id
 from cairn.core.modelref import ModelRef
 from cairn.core.retrieval_runtime import BindingRefModel, KnowledgeBaseRuntime
+from cairn.embedding.sparse import encode_query
 from cairn.retrieval.dto import (
     DegradationNotice,
     RetrievalHit,
@@ -465,19 +466,23 @@ class RetrievalService:
         if mode in {"fulltext", "hybrid"}:
             if request.query is None:
                 raise ValidationFailed("Full-text retrieval requires query text.")
-            searches.append(
-                (
-                    "sparse",
-                    asyncio.create_task(
-                        self._bounded_search(
-                            store,
-                            namespace,
-                            VectorQuery(top_k=candidate_k, text=request.query, with_payload=True),
-                        )
-                    ),
-                    target_weight,
+            sparse = encode_query(request.query)
+            # A query with no indexable terms ("?!") has nothing to match
+            # lexically; it contributes no hits rather than an error.
+            if sparse is not None:
+                searches.append(
+                    (
+                        "sparse",
+                        asyncio.create_task(
+                            self._bounded_search(
+                                store,
+                                namespace,
+                                VectorQuery(top_k=candidate_k, sparse=sparse, with_payload=True),
+                            )
+                        ),
+                        target_weight,
+                    )
                 )
-            )
         try:
             results = await asyncio.gather(*(task for _stage, task, _weight in searches))
         except BaseException:

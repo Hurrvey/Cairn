@@ -86,9 +86,7 @@ def upgrade() -> None:
         sa.Column("permissions", postgresql.ARRAY(sa.String(32)), nullable=False),
         sa.Column("granted_by", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("reason", sa.Text(), nullable=True),
-        sa.Column(
-            "is_break_glass", sa.Boolean(), nullable=False, server_default=sa.text("false")
-        ),
+        sa.Column("is_break_glass", sa.Boolean(), nullable=False, server_default=sa.text("false")),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(

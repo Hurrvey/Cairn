@@ -57,6 +57,12 @@ def build_worker(queue: str) -> TaskWorker:
 async def _run(queue: str) -> None:
     worker = build_worker(queue)
     worker.install_signal_handlers()
+    if queue in {"embed", "index"}:
+        # These queues write BM25 sparse vectors; load jieba's dictionary
+        # (~1 s) before the first task holds a lease rather than inside it.
+        from cairn.embedding.sparse import warm_up
+
+        await asyncio.to_thread(warm_up)
     scheduler = build_runtime_refresh_scheduler() if queue == "maintain" else None
     scheduler_stop = asyncio.Event()
     scheduler_task = (
