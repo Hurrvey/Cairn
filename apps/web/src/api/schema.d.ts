@@ -951,7 +951,7 @@ export interface paths {
         put?: never;
         /**
          * Retrieve cited chunks from knowledge bases
-         * @description Requires kb:query on every target. Supports bounded pgvector full-text, vector, and hybrid search; unsupported advanced options are rejected or reported degraded.
+         * @description Requires kb:query on every target. Supports bounded full-text (BM25), vector, and hybrid search; unsupported advanced options are rejected or reported degraded.
          */
         post: operations["query_v1_retrieval_query_post"];
         delete?: never;

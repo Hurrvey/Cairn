@@ -480,7 +480,7 @@
       "error": "Error"
     },
     "localHint": "Local files in the persistent directory configured by the deployment.",
-    "pgvectorHint": "pgvector indexes in the platform's PostgreSQL database.",
+    "qdrantHint": "Vectors and full-text terms in the platform's Qdrant.",
     "test": "Test",
     "testOk": "Storage connection is healthy.",
     "testFailed": "Storage connection failed. Check the deployment configuration.",

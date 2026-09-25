@@ -480,7 +480,7 @@
       "error": "错误"
     },
     "localHint": "存放在部署配置的持久化目录中的本地文件。",
-    "pgvectorHint": "平台 PostgreSQL 数据库中的 pgvector 索引。",
+    "qdrantHint": "向量与全文词项存放在平台的 Qdrant 中。",
     "test": "测试",
     "testOk": "存储连接正常。",
     "testFailed": "存储连接失败，请检查部署配置。",

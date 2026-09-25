@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * Storage bindings: where documents are kept and where vectors are indexed.
- * Local objects and pgvector are the drivers this build ships; the page
+ * Local objects and Qdrant are the drivers this build ships; the page
  * says so rather than offering options that would fail.
  */
 import { Database, MoreHorizontal, Plus, RefreshCw } from "lucide-vue-next";
@@ -74,7 +74,7 @@ async function save(): Promise<void> {
     const created = await bindingApi.create({
       name: form.name.trim(),
       kind: form.kind,
-      driver: form.kind === "object" ? "local" : "pgvector",
+      driver: form.kind === "object" ? "local" : "qdrant",
       config: {},
       is_default: false,
     });
@@ -155,7 +155,7 @@ onBeforeUnmount(() => controller.abort());
             <Badge size="sm" tone="neutral" mono>{{ binding.driver }}</Badge>
             <Badge size="sm" :tone="healthTone(binding.health_state)" dot data-test="binding-health">{{ t(`storage.health.${binding.health_state}`, binding.health_state) }}</Badge>
           </p>
-          <p class="text-[12px] text-ink-3">{{ binding.kind === "object" ? t("storage.localHint") : t("storage.pgvectorHint") }}</p>
+          <p class="text-[12px] text-ink-3">{{ binding.kind === "object" ? t("storage.localHint") : t("storage.qdrantHint") }}</p>
           <p v-if="testResults[binding.id]" :class="['mt-1 text-[12px]', testResults[binding.id]!.ok ? 'text-ok' : 'text-bad']" data-test="binding-test-result">
             {{ testResults[binding.id]!.text }}
           </p>
@@ -181,7 +181,7 @@ onBeforeUnmount(() => controller.abort());
             v-model="form.kind"
             :options="[
               { value: 'object', label: t('storage.kinds.object'), description: t('storage.localHint') },
-              { value: 'vector', label: t('storage.kinds.vector'), description: t('storage.pgvectorHint') },
+              { value: 'vector', label: t('storage.kinds.vector'), description: t('storage.qdrantHint') },
             ]"
             test-id="storage-kind"
           />
