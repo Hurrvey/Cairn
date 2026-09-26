@@ -16,6 +16,8 @@ export const providers = {
   list: (signal?: AbortSignal) => api.get<Provider[]>("/v1/model-providers", { signal }),
   create: (body: CreateProviderRequest) => api.post<Provider>("/v1/model-providers", body),
   remove: (id: string) => api.delete<void>(`/v1/model-providers/${encodeURIComponent(id)}`),
+  replaceKey: (id: string, apiKey: string | null) =>
+    api.put<Provider>(`/v1/model-providers/${encodeURIComponent(id)}/credentials`, { api_key: apiKey }),
 };
 
 export const models = {

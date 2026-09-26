@@ -95,6 +95,11 @@ class KnowledgeBase(Base):
         CheckConstraint(
             "index_version_high_water >= 0", name="index_version_high_water_nonnegative"
         ),
+        CheckConstraint(
+            "(sparse_kind = 'bm25' AND sparse_model_id IS NULL) OR "
+            "(sparse_kind = 'model' AND sparse_model_id IS NOT NULL)",
+            name="sparse_source",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=new_uuid)
@@ -119,6 +124,13 @@ class KnowledgeBase(Base):
     )
     embedding_dim: Mapped[int] = mapped_column(Integer, nullable=False)
     metric: Mapped[str] = mapped_column(String(16), nullable=False, default="cosine")
+
+    # The sparse source for the NEXT index version. Each version snapshots its
+    # own (IndexVersionConfig.sparse); changing this takes a rebuild.
+    sparse_kind: Mapped[str] = mapped_column(String(16), nullable=False, default="bm25")
+    sparse_model_id: Mapped[UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("model.id", ondelete="RESTRICT"), nullable=True
+    )
 
     vector_binding_id: Mapped[UUID] = mapped_column(
         PgUUID(as_uuid=True), ForeignKey("storage_binding.id"), nullable=False
@@ -170,6 +182,8 @@ class KnowledgeBase(Base):
             "embedding_model_id": str(self.embedding_model_id),
             "embedding_dim": self.embedding_dim,
             "metric": self.metric,
+            "sparse_kind": self.sparse_kind,
+            "sparse_model_id": str(self.sparse_model_id) if self.sparse_model_id else None,
             "status": self.status,
             "active_index_version": self.active_index_version,
         }

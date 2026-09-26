@@ -12,6 +12,7 @@ export type SetupOptions = components["schemas"]["KnowledgeBaseOptionsResponse"]
 export type RetrievalConfig = components["schemas"]["RetrievalConfig"];
 export type ChunkConfig = components["schemas"]["ChunkConfig"];
 export type CreateKbRequest = components["schemas"]["CreateKbRequest"];
+export type SparseChoice = components["schemas"]["SparseChoiceRequest"];
 export type UpdateKbRequest = components["schemas"]["UpdateKbRequest"];
 export type IndexProgress = components["schemas"]["IndexProgressResponse"];
 export type IndexVersion = components["schemas"]["IndexVersionResponse"];
@@ -110,8 +111,10 @@ export const knowledge = {
     ),
   editChunk: (id: string, chunk: string, content: string) =>
     api.patch<ChunkRecord>(`${base(id)}/chunks/${encodeURIComponent(chunk)}`, { content }),
-  reindexEstimate: (id: string) => api.post<ReindexEstimate>(`${base(id)}/reindex`, { confirm: false }),
-  reindex: (id: string) => api.post<Record<string, unknown>>(`${base(id)}/reindex`, { confirm: true }),
+  reindexEstimate: (id: string, sparse?: SparseChoice) =>
+    api.post<ReindexEstimate>(`${base(id)}/reindex`, { confirm: false, ...(sparse ? { sparse } : {}) }),
+  reindex: (id: string, sparse?: SparseChoice) =>
+    api.post<Record<string, unknown>>(`${base(id)}/reindex`, { confirm: true, ...(sparse ? { sparse } : {}) }),
   breakGlass: (id: string, reason: string, ttlMinutes?: number | null) =>
     api.post<unknown>(`${base(id)}/break-glass`, { reason, ttl_minutes: ttlMinutes ?? null }),
   query: (id: string, query: string, options: QueryOptions, signal?: AbortSignal) =>

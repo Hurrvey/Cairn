@@ -20,6 +20,7 @@ import {
   type IndexProgress,
   type KnowledgeBase,
   type SetupOptions,
+  type SparseChoice,
 } from "@/api/knowledge";
 import Badge from "@/components/ui/Badge.vue";
 import Button from "@/components/ui/Button.vue";
@@ -178,9 +179,9 @@ async function loadMore(): Promise<void> {
   }
 }
 
-async function rebuild(): Promise<void> {
+async function rebuild(sparse?: SparseChoice): Promise<void> {
   try {
-    const estimate = await knowledge.reindexEstimate(id.value);
+    const estimate = await knowledge.reindexEstimate(id.value, sparse);
     const accepted = await confirm({
       title: t("knowledge.rebuild.title"),
       description: t("knowledge.rebuild.description", {
@@ -190,7 +191,7 @@ async function rebuild(): Promise<void> {
       confirmLabel: t("knowledge.rebuild.confirm"),
     });
     if (!accepted) return;
-    await knowledge.reindex(id.value);
+    await knowledge.reindex(id.value, sparse);
     toasts.success(t("knowledge.rebuild.started"));
     await refresh(true);
     schedule();
@@ -299,7 +300,7 @@ watch(id, async () => {
             {{ t("common.refresh") }}
           </DropdownItem>
           <template v-if="permissions.can('kb:manage', id)">
-            <DropdownItem :disabled="building" data-test="rebuild" @select="rebuild">{{ t("knowledge.rebuild.action") }}</DropdownItem>
+            <DropdownItem :disabled="building" data-test="rebuild" @select="rebuild()">{{ t("knowledge.rebuild.action") }}</DropdownItem>
             <DropdownItem kind="separator" />
             <DropdownItem danger data-test="delete-kb" @select="remove">{{ t("knowledge.delete.action") }}</DropdownItem>
           </template>
@@ -364,8 +365,8 @@ watch(id, async () => {
         @load-more="loadMore"
       />
       <SearchPanel v-else-if="tab === 'search'" :kb="kb" :documents="documents" />
-      <VersionsPanel v-else-if="tab === 'versions'" :kb="kb" :progress="progress" :can-manage="permissions.can('kb:manage', id)" @rebuild="rebuild" />
-      <KbSettingsPanel v-else-if="tab === 'settings'" :kb="kb" :options="options" @saved="refresh(true)" @delete="remove" />
+      <VersionsPanel v-else-if="tab === 'versions'" :kb="kb" :progress="progress" :can-manage="permissions.can('kb:manage', id)" @rebuild="rebuild()" />
+      <KbSettingsPanel v-else-if="tab === 'settings'" :kb="kb" :options="options" :building="building" @saved="refresh(true)" @delete="remove" @rebuild="rebuild" />
     </template>
 
     <BreakGlassDialog v-model:open="breakGlassOpen" :kb-id="id" @granted="onGranted" />

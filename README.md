@@ -24,10 +24,10 @@ these modules are implemented, typechecked (`mypy --strict`), and boundary-enfor
 | M06 tasks | Postgres-backed durable queue (`SKIP LOCKED` + per-workspace fairness), worker fleet |
 | M15 platform | Audit log, workspace settings, maintenance |
 | M04/M05 storage | `ObjectStore` and `VectorStore` protocols, local object store + Qdrant (the only vector backend, [ADR-0009](docs/01-architecture/05-adr/ADR-0009-qdrant-only-vector-backend.md)), shared conformance suite |
-| M10 modelgw | Admin TEI/Infinity registry and live probe, safe setup options and dynamic Redis provider projection; general chat invocation remains Phase 3 |
+| M10 modelgw | Provider registry for TEI, Infinity, the bge-m3 sidecar, Alibaba Cloud Model Studio (DashScope), Volcengine Ark and OpenAI-compatible APIs; envelope-encrypted API keys, dimension auto-detection, live probe; general chat invocation remains Phase 3 |
 | M03 catalog | Knowledge bases, real upload/download, chunks, blue/green indexes, automatic runtime refresh and protected document/KB/index cleanup |
 | M07 ingestion | Text + Office parsers, language detection, built-in/semantic/custom chunking, four-stage workers; bounded acceptance only |
-| M08 embedding | Model-bound tokenizers, dense TEI/Infinity adapters, batching/cache/retry; actual TEI pipeline test |
+| M08 embedding | Model-bound tokenizers, dense and learned-sparse adapters (one call when a model provides both), batching/cache/retry; BM25 fallback; bge-m3 sidecar (`apps/bge_m3`, CPU or CUDA) |
 | M09 retrieval | Bounded authenticated `/v1/retrieval/query`: BM25 full-text (jieba sparse vectors on Qdrant)/vector/hybrid, ACTIVE runtime snapshots, RRF, citations, explicit degradation |
 | M13 MCP | Generic read-only `search_knowledge_base` via Streamable HTTP `/mcp`, scoped bearer keys, cited/structured results; broader list/get/resources remain open |
 | M16 web UI | Redesigned workbench (Tailwind v4 + reka-ui): overview with attention list, master-detail knowledge bases with upload/progress/chunk editing/search console, models, storage, API keys, users/grants, audit, settings, MCP service; light/dark, zh-CN/en-US, command palette |
@@ -123,6 +123,11 @@ nginx/data/TEI/pgvector. Agent-side integration remains intentionally deferred.
 September24 QDRANT: vectors moved to Qdrant v1.19.1; pgvector removed and PostgreSQL returns to the
 official `postgres:16-bookworm` image. Full-text is BM25 sparse vectors with jieba segmentation. Full backend
 **1100 passed, 0 failed**, coverage 85%, on PostgreSQL 16, Redis, Qdrant and real TEI.
+
+September27 LEARNED SPARSE + ONLINE PROVIDERS: keyword search per knowledge base uses the best
+available source — the embedding model's own learned sparse vectors, the bundled bge-m3 sidecar, or
+BM25 ([guide](docs/06-ops/08-embedding-providers.md), ADR-0010). Hosted DashScope, Volcengine Ark
+and OpenAI-compatible providers with encrypted keys.
 
 Use `http://127.0.0.1:8080/mcp` with `Authorization: Bearer <Cairn API key>` from a client supporting
 Streamable HTTP and configurable headers. Grant only `kb:query` on the intended knowledge bases.

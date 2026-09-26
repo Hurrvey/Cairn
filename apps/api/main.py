@@ -147,7 +147,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         from cairn.platform.router import router as platform_router
 
         app.state.model_management_service = ModelManagementService(
-            usage=CatalogModelUsage(), probe=EmbeddingModelProbe()
+            usage=CatalogModelUsage(), probe=EmbeddingModelProbe(master_key=cfg.master_key)
         )
         app.include_router(auth_router)
         app.include_router(users_router)
@@ -163,7 +163,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         from cairn.retrieval.runtime import KnowledgeBaseRuntimeLoader, QueryEmbeddingRuntime
         from cairn.retrieval.service import RetrievalService
 
-        app.state.retrieval_runtime = QueryEmbeddingRuntime(cfg.retrieval)
+        app.state.retrieval_runtime = QueryEmbeddingRuntime(
+            cfg.retrieval, master_key=cfg.master_key
+        )
         app.state.retrieval_service = RetrievalService(
             runtime_loader=KnowledgeBaseRuntimeLoader(timeout_s=cfg.retrieval.runtime_timeout_s),
             embeddings=app.state.retrieval_runtime,

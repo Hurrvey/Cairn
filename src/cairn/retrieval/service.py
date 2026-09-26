@@ -34,8 +34,23 @@ from cairn.retrieval.errors import (
 from cairn.retrieval.fusion import FusedHit, rrf_fuse, weighted_fuse
 from cairn.retrieval.rerank import RerankUnavailable, RuntimeReranker
 from cairn.retrieval.runtime import KnowledgeBaseRuntimeLoader
-from cairn.vectorstore.base import Hit, Namespace, VectorQuery
+from cairn.vectorstore.base import Hit, Namespace, SparseVector, VectorQuery
 from cairn.vectorstore.registry import VectorBindingRef, VectorStoreRegistry, get_vector_registry
+
+
+@dataclass(slots=True)
+class _Encodings:
+    """Query encodings per target: dense vectors, sparse vectors and their failures."""
+
+    dense: dict[UUID, Sequence[float]]
+    #: Present for every target whose sparse stage runs; ``None`` means the
+    #: query has no indexable terms, which matches nothing lexically.
+    sparse: dict[UUID, SparseVector | None]
+    tokens: int
+    cached: bool | None
+    failed: list[UUID]
+    notices: list[DegradationNotice]
+
 
 _MAX_PARENT_SNAPSHOT_CHARACTERS = 1_000_000
 _MAX_PARENT_SNAPSHOT_TOKENS = 200_000
@@ -135,12 +150,11 @@ class RetrievalService:
         runtimes = [runtime for runtime, _weight in active]
         degraded = self._validate_supported(request, runtimes)
         rerank_plan = self._resolve_rerank(request, runtimes, degraded)
-        (
-            query_vectors,
-            embedding_tokens,
-            cached_embedding,
-            embedding_failures,
-        ) = await self._query_vectors(request, runtimes)
+        encodings = await self._query_encodings(request, runtimes)
+        embedding_tokens = encodings.tokens
+        cached_embedding = encodings.cached
+        embedding_failures = encodings.failed
+        degraded.extend(encodings.notices)
         if embedding_failures:
             failed_ids = set(embedding_failures)
             failures.extend(
@@ -156,7 +170,14 @@ class RetrievalService:
                 raise UpstreamUnavailable("Retrieval failed for every knowledge base.")
 
         tasks = [
-            self._search_target(runtime, weight, request, query_vectors.get(runtime.id))
+            self._search_target(
+                runtime,
+                weight,
+                request,
+                encodings.dense.get(runtime.id),
+                encodings.sparse.get(runtime.id),
+                sparse_stage=runtime.id in encodings.sparse,
+            )
             for runtime, weight in active
         ]
         outcomes = await asyncio.gather(*tasks, return_exceptions=True)
@@ -356,68 +377,146 @@ class RetrievalService:
             top_n = min(spec.top_n for spec in enabled)
         return _RerankPlan(model_id, timeout_s, top_n, candidate_limit)
 
-    async def _query_vectors(
+    async def _query_encodings(
         self, request: RetrievalRequest, runtimes: Sequence[KnowledgeBaseRuntime]
-    ) -> tuple[dict[UUID, Sequence[float]], int, bool | None, list[UUID]]:
+    ) -> _Encodings:
+        """Encode the query once per model across all targets.
+
+        A model that supplies both a target's dense vector and another's (or the
+        same one's) sparse vector is called once for both. BM25 is computed
+        locally, once. A failed sparse encoding degrades ``hybrid`` to vector
+        search with a notice; for ``fulltext`` the target has nothing to search
+        with, so it fails.
+        """
         modes = {runtime.id: self._mode(request, runtime) for runtime in runtimes}
         dense_runtimes = [
             runtime for runtime in runtimes if modes[runtime.id] in {"vector", "hybrid"}
         ]
-        if not dense_runtimes:
-            return {}, 0, None, []
-        if request.query_vector is not None:
+        sparse_runtimes = [
+            runtime for runtime in runtimes if modes[runtime.id] in {"fulltext", "hybrid"}
+        ]
+        encodings = _Encodings(dense={}, sparse={}, tokens=0, cached=None, failed=[], notices=[])
+
+        supplied = request.query_vector
+        if dense_runtimes and supplied is not None:
             identities = {runtime.embedding_model for runtime in dense_runtimes}
             if len(identities) != 1:
                 raise ValidationFailed(
                     "A supplied query vector requires one embedding identity across all targets."
                 )
             expected = dense_runtimes[0].embedding_model.dimension
-            if expected is None or len(request.query_vector) != expected:
+            if expected is None or len(supplied) != expected:
                 raise ValidationFailed(
                     "The query vector dimension does not match the ACTIVE model dimension "
                     f"{expected}."
                 )
-            return {runtime.id: request.query_vector for runtime in dense_runtimes}, 0, None, []
-        if request.query is None:
+            encodings.dense.update({runtime.id: supplied for runtime in dense_runtimes})
+        elif dense_runtimes and request.query is None:
             raise ValidationFailed("Dense retrieval requires query text or a query vector.")
+        if sparse_runtimes and request.query is None:
+            raise ValidationFailed("Full-text retrieval requires query text.")
 
-        vectors: dict[UUID, Sequence[float]] = {}
-        tokens = 0
-        cache_states: list[bool | None] = []
-        by_model: dict[ModelRef, list[KnowledgeBaseRuntime]] = {}
-        for runtime in dense_runtimes:
-            by_model.setdefault(runtime.embedding_model, []).append(runtime)
-        groups = list(by_model.items())
+        # model -> (targets needing its dense vector, targets needing its sparse vector)
+        plan: dict[ModelRef, tuple[list[KnowledgeBaseRuntime], list[KnowledgeBaseRuntime]]] = {}
+        if supplied is None:
+            for runtime in dense_runtimes:
+                plan.setdefault(runtime.embedding_model, ([], []))[0].append(runtime)
+        bm25_runtimes: list[KnowledgeBaseRuntime] = []
+        for runtime in sparse_runtimes:
+            model = runtime.sparse.model
+            if model is None:
+                bm25_runtimes.append(runtime)
+            else:
+                plan.setdefault(model, ([], []))[1].append(runtime)
+        if bm25_runtimes:
+            assert request.query is not None
+            terms = encode_query(request.query)
+            encodings.sparse.update({runtime.id: terms for runtime in bm25_runtimes})
+        if not plan:
+            return encodings
+
+        assert request.query is not None
+        query = request.query
+        groups = list(plan.items())
         outcomes = await asyncio.gather(
             *(
-                self._embed_query(model_runtimes[0].workspace_id, model, request.query)
-                for model, model_runtimes in groups
+                self._encode_with(
+                    (dense_targets or sparse_targets)[0].workspace_id,
+                    model,
+                    query,
+                    dense=bool(dense_targets),
+                    sparse=bool(sparse_targets),
+                )
+                for model, (dense_targets, sparse_targets) in groups
             ),
             return_exceptions=True,
         )
-        failed: list[UUID] = []
-        for (model, model_runtimes), outcome in zip(groups, outcomes, strict=True):
+        cache_states: list[bool | None] = []
+        failed: set[UUID] = set()
+        sparse_unavailable: set[UUID] = set()
+        for (model, (dense_targets, sparse_targets)), outcome in zip(groups, outcomes, strict=True):
             if isinstance(outcome, RetrievalUnsupported):
                 raise outcome
             if isinstance(outcome, BaseException):
-                failed.extend(runtime.id for runtime in model_runtimes)
+                failed.update(runtime.id for runtime in dense_targets)
+                sparse_unavailable.update(runtime.id for runtime in sparse_targets)
                 continue
-            vector, used_tokens, cached = outcome
-            if len(vector) != model.dimension:
-                failed.extend(runtime.id for runtime in model_runtimes)
-                continue
-            tokens += used_tokens
+            dense_vector, sparse_vector, used_tokens, cached = outcome
+            if dense_targets and (dense_vector is None or len(dense_vector) != model.dimension):
+                failed.update(runtime.id for runtime in dense_targets)
+            elif dense_targets:
+                assert dense_vector is not None
+                encodings.dense.update({runtime.id: dense_vector for runtime in dense_targets})
+            encodings.sparse.update({runtime.id: sparse_vector for runtime in sparse_targets})
+            encodings.tokens += used_tokens
             cache_states.append(cached)
-            for runtime in model_runtimes:
-                vectors[runtime.id] = vector
-        cached_embedding = (
+
+        for runtime in sparse_runtimes:
+            if runtime.id not in sparse_unavailable:
+                continue
+            if modes[runtime.id] == "fulltext":
+                failed.add(runtime.id)
+            elif not any(
+                notice.stage == "sparse" and notice.reason == "unavailable"
+                for notice in encodings.notices
+            ):
+                encodings.notices.append(
+                    DegradationNotice(
+                        stage="sparse",
+                        reason="unavailable",
+                        detail=(
+                            "The sparse query encoder is unavailable; vector search results "
+                            "are returned."
+                        ),
+                    )
+                )
+        encodings.failed = [runtime.id for runtime in runtimes if runtime.id in failed]
+        encodings.cached = (
             True
             if cache_states and all(state is True for state in cache_states)
             else False
             if any(state is False for state in cache_states)
             else None
         )
-        return vectors, tokens, cached_embedding, failed
+        return encodings
+
+    async def _encode_with(
+        self,
+        workspace_id: UUID,
+        model: ModelRef,
+        query: str,
+        *,
+        dense: bool,
+        sparse: bool,
+    ) -> tuple[Sequence[float] | None, SparseVector | None, int, bool | None]:
+        if not sparse:
+            vector, tokens, cached = await self._embed_query(workspace_id, model, query)
+            return vector, None, tokens, cached
+        encode = getattr(self._embeddings, "encode_query_for_workspace", None)
+        if encode is None:
+            raise RetrievalUnsupported("This deployment cannot encode sparse queries.")
+        encoding = await encode(workspace_id, model, query, dense=dense, sparse=True)
+        return encoding.dense, encoding.sparse, encoding.tokens, encoding.cached
 
     async def _embed_query(
         self, workspace_id: UUID, model: ModelRef, query: str
@@ -436,6 +535,9 @@ class RetrievalService:
         target_weight: float,
         request: RetrievalRequest,
         dense: Sequence[float] | None,
+        sparse: SparseVector | None = None,
+        *,
+        sparse_stage: bool = False,
     ) -> list[FusedHit]:
         mode = self._mode(request, runtime)
         candidate_k = request.candidate_k or runtime.retrieval_config.candidate_k
@@ -463,26 +565,22 @@ class RetrievalService:
                     target_weight,
                 )
             )
-        if mode in {"fulltext", "hybrid"}:
-            if request.query is None:
-                raise ValidationFailed("Full-text retrieval requires query text.")
-            sparse = encode_query(request.query)
-            # A query with no indexable terms ("?!") has nothing to match
-            # lexically; it contributes no hits rather than an error.
-            if sparse is not None:
-                searches.append(
-                    (
-                        "sparse",
-                        asyncio.create_task(
-                            self._bounded_search(
-                                store,
-                                namespace,
-                                VectorQuery(top_k=candidate_k, sparse=sparse, with_payload=True),
-                            )
-                        ),
-                        target_weight,
-                    )
+        # A query with no indexable terms ("?!") has nothing to match lexically;
+        # it contributes no hits rather than an error.
+        if mode in {"fulltext", "hybrid"} and sparse_stage and sparse is not None:
+            searches.append(
+                (
+                    "sparse",
+                    asyncio.create_task(
+                        self._bounded_search(
+                            store,
+                            namespace,
+                            VectorQuery(top_k=candidate_k, sparse=sparse, with_payload=True),
+                        )
+                    ),
+                    target_weight,
                 )
+            )
         try:
             results = await asyncio.gather(*(task for _stage, task, _weight in searches))
         except BaseException:

@@ -4,8 +4,8 @@
  * models registered on them. A model is tested against the live endpoint so
  * a wrong dimension surfaces here, not on the first upload.
  */
-import { Blocks, MoreHorizontal, Plus, RefreshCw } from "lucide-vue-next";
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { Blocks, KeyRound, MoreHorizontal, Plus, RefreshCw } from "lucide-vue-next";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 
 import { ApiError } from "@/api/client";
@@ -30,6 +30,7 @@ import { confirm } from "@/shared/composables/useConfirm";
 import { useToasts } from "@/shared/composables/useToasts";
 import { describeError, isAbort } from "@/shared/errors";
 import { healthTone } from "@/shared/pipeline";
+import { FAMILIES, MODEL_PRESETS, type Family } from "@/features/models/families";
 
 const { t } = useI18n();
 const toasts = useToasts();
@@ -43,6 +44,7 @@ const controller = new AbortController();
 
 const providerOpen = ref(false);
 const modelOpen = ref(false);
+const keyOpen = ref(false);
 const submitting = ref(false);
 const formError = ref<string | null>(null);
 const fieldErrors = ref<Record<string, string[]>>({});
@@ -51,23 +53,79 @@ const testResults = ref<Record<string, { ok: boolean; text: string }>>({});
 
 const providerForm = reactive({
   name: "",
-  family: "tei" as "tei" | "infinity",
-  base_url: "http://embedding:80",
+  family: "tei" as Family,
+  base_url: FAMILIES.tei.baseUrl,
+  api_key: "",
   allow_private: true,
   binding_revision: "minilm-1110a243",
+  max_batch_size: FAMILIES.tei.batch,
 });
 const modelForm = reactive({
   provider_id: "",
+  preset: "",
   model_key: "sentence-transformers/all-MiniLM-L6-v2",
   display_name: "MiniLM",
-  dimension: 384,
+  dimension: "384" as string | number,
   max_input_tokens: 256,
   optimal_batch_size: 16,
   tokenizer_id: "minilm",
   normalize: true,
+  query_prefix: "",
+  sparse: false,
+  send_dimension: false,
 });
+const keyForm = reactive({ provider: null as Provider | null, api_key: "" });
 
 const providerName = computed(() => new Map(providers.value.map((provider) => [provider.id, provider.name])));
+const providerFamily = computed(() => new Map(providers.value.map((provider) => [provider.id, provider.family as Family])));
+const family = computed(() => FAMILIES[providerForm.family]);
+const familyKeys = Object.keys(FAMILIES) as Family[];
+const selectedFamily = computed<Family | undefined>(() => providerFamily.value.get(modelForm.provider_id));
+const presets = computed(() => (selectedFamily.value ? MODEL_PRESETS[selectedFamily.value] ?? [] : []));
+const familyCanSparse = computed(() => !!selectedFamily.value && FAMILIES[selectedFamily.value].sparse);
+const familySendsDimension = computed(() => !!selectedFamily.value && FAMILIES[selectedFamily.value].sendsDimension);
+const providerReady = computed(
+  () =>
+    !!providerForm.name.trim() &&
+    !!providerForm.base_url.trim() &&
+    (family.value.key !== "required" || !!providerForm.api_key.trim()),
+);
+
+watch(
+  () => providerForm.family,
+  (next) => {
+    const spec = FAMILIES[next];
+    providerForm.base_url = spec.baseUrl;
+    providerForm.max_batch_size = spec.batch;
+    providerForm.allow_private = spec.local;
+    providerForm.binding_revision = next === "tei" ? "minilm-1110a243" : "v1";
+    if (spec.key === "hidden") providerForm.api_key = "";
+  },
+);
+
+watch(
+  () => modelForm.provider_id,
+  () => {
+    const first = presets.value[0];
+    if (first) applyPreset(first.id);
+  },
+);
+
+function applyPreset(id: string): void {
+  const preset = presets.value.find((candidate) => candidate.id === id);
+  if (!preset) return;
+  modelForm.preset = preset.id;
+  modelForm.model_key = preset.model_key;
+  modelForm.display_name = preset.display_name;
+  modelForm.dimension = preset.dimension ?? "";
+  modelForm.max_input_tokens = preset.max_input_tokens;
+  modelForm.optimal_batch_size = preset.batch;
+  modelForm.tokenizer_id = tokenizers.value.includes(preset.tokenizer_id) || !tokenizers.value.length ? preset.tokenizer_id : tokenizers.value[0]!;
+  modelForm.normalize = true;
+  modelForm.query_prefix = preset.query_prefix ?? "";
+  modelForm.sparse = preset.sparse ?? false;
+  modelForm.send_dimension = preset.send_dimension ?? false;
+}
 
 async function load(): Promise<void> {
   loading.value = true;
@@ -97,6 +155,7 @@ async function load(): Promise<void> {
 function openProvider(): void {
   formError.value = null;
   fieldErrors.value = {};
+  providerForm.api_key = "";
   providerOpen.value = true;
 }
 
@@ -108,6 +167,13 @@ function openModel(): void {
   modelOpen.value = true;
 }
 
+function openKey(provider: Provider): void {
+  formError.value = null;
+  keyForm.provider = provider;
+  keyForm.api_key = "";
+  keyOpen.value = true;
+}
+
 async function saveProvider(): Promise<void> {
   submitting.value = true;
   formError.value = null;
@@ -117,13 +183,15 @@ async function saveProvider(): Promise<void> {
       name: providerForm.name.trim(),
       family: providerForm.family,
       base_url: providerForm.base_url.trim(),
+      api_key: providerForm.api_key.trim() || null,
       config: {
-        allow_private: providerForm.allow_private,
-        binding_revision: providerForm.binding_revision.trim(),
-        max_batch_size: 16,
+        allow_private: family.value.local && providerForm.allow_private,
+        binding_revision: providerForm.binding_revision.trim() || "v1",
+        max_batch_size: Number(providerForm.max_batch_size),
       },
     });
     providerOpen.value = false;
+    providerForm.api_key = "";
     toasts.success(t("models.provider.created"));
     await load();
   } catch (caught) {
@@ -134,21 +202,42 @@ async function saveProvider(): Promise<void> {
   }
 }
 
+async function saveKey(): Promise<void> {
+  if (!keyForm.provider) return;
+  submitting.value = true;
+  formError.value = null;
+  try {
+    await providerApi.replaceKey(keyForm.provider.id, keyForm.api_key.trim() || null);
+    keyOpen.value = false;
+    keyForm.api_key = "";
+    toasts.success(t("models.provider.keyReplaced"));
+    await load();
+  } catch (caught) {
+    formError.value = describeError(caught).message;
+  } finally {
+    submitting.value = false;
+  }
+}
+
 async function saveModel(): Promise<void> {
   submitting.value = true;
   formError.value = null;
   fieldErrors.value = {};
   try {
+    const dimension = String(modelForm.dimension).trim();
     await modelApi.create({
       provider_id: modelForm.provider_id,
       model_key: modelForm.model_key.trim(),
       display_name: modelForm.display_name.trim(),
       capability: "embedding",
-      dimension: Number(modelForm.dimension),
+      dimension: dimension ? Number(dimension) : null,
       max_input_tokens: Number(modelForm.max_input_tokens),
       optimal_batch_size: Number(modelForm.optimal_batch_size),
       tokenizer_id: modelForm.tokenizer_id,
       normalize: modelForm.normalize,
+      query_prefix: modelForm.query_prefix.trim() ? modelForm.query_prefix : null,
+      sparse: familyCanSparse.value && modelForm.sparse,
+      send_dimension: familySendsDimension.value && modelForm.send_dimension && !!dimension,
     });
     modelOpen.value = false;
     toasts.success(t("models.model.created"));
@@ -165,15 +254,12 @@ async function test(model: Model): Promise<void> {
   testing.value = model.id;
   try {
     const result: ModelTestResponse = await modelApi.test(model.id);
-    testResults.value = {
-      ...testResults.value,
-      [model.id]: {
-        ok: result.healthy,
-        text: result.healthy
-          ? t("models.model.testOk", { dims: result.dimensions, tokens: result.tokens })
-          : t("models.model.testFailed"),
-      },
-    };
+    const text = !result.healthy
+      ? t("models.model.testFailed")
+      : result.sparse_terms != null
+        ? t("models.model.testOkSparse", { dims: result.dimensions, tokens: result.tokens, terms: result.sparse_terms })
+        : t("models.model.testOk", { dims: result.dimensions, tokens: result.tokens });
+    testResults.value = { ...testResults.value, [model.id]: { ok: result.healthy, text } };
     await load();
   } catch (caught) {
     testResults.value = { ...testResults.value, [model.id]: { ok: false, text: describeError(caught).message } };
@@ -247,9 +333,10 @@ onBeforeUnmount(() => controller.abort());
       <ul v-else class="divide-y divide-line rounded-md border border-line" data-test="provider-list">
         <li v-for="provider in providers" :key="provider.id" class="flex items-center gap-3 px-3 py-2.5">
           <div class="min-w-0 flex-1">
-            <p class="flex items-center gap-2 text-[13.5px] font-medium text-ink">
+            <p class="flex flex-wrap items-center gap-2 text-[13.5px] font-medium text-ink">
               {{ provider.name }}
-              <Badge size="sm" tone="neutral" mono>{{ provider.family }}</Badge>
+              <Badge size="sm" tone="neutral">{{ t(`models.families.${provider.family}.name`, provider.family) }}</Badge>
+              <Badge v-if="provider.has_credentials" size="sm" tone="ok" data-test="provider-key"><KeyRound aria-hidden="true" class="size-3" />{{ t("models.provider.keySet") }}</Badge>
               <Badge v-if="!provider.is_enabled" size="sm" tone="warn">{{ t("common.disabled") }}</Badge>
             </p>
             <p class="truncate font-mono text-[12px] text-ink-3">{{ provider.base_url }}</p>
@@ -260,6 +347,7 @@ onBeforeUnmount(() => controller.abort());
               <Button variant="ghost" size="icon-sm" :aria-label="t('common.actions')"><MoreHorizontal aria-hidden="true" /></Button>
             </template>
             <DropdownItem @select="modelForm.provider_id = provider.id; openModel()">{{ t("models.model.add") }}</DropdownItem>
+            <DropdownItem data-test="replace-key" @select="openKey(provider)">{{ t("models.provider.replaceKey") }}</DropdownItem>
             <DropdownItem kind="separator" />
             <DropdownItem danger @select="removeProvider(provider)">{{ t("common.delete") }}</DropdownItem>
           </DropdownMenu>
@@ -278,6 +366,7 @@ onBeforeUnmount(() => controller.abort());
             <p class="flex flex-wrap items-center gap-2 text-[13.5px] font-medium text-ink">
               {{ model.display_name }}
               <Badge size="sm" :tone="healthTone(model.health_state)" dot>{{ t(`models.health.${model.health_state}`, model.health_state) }}</Badge>
+              <Badge v-if="model.sparse" size="sm" tone="brand" data-test="model-sparse">{{ t("models.model.sparseBadge") }}</Badge>
               <Badge v-if="!model.is_enabled" size="sm" tone="warn">{{ t("common.disabled") }}</Badge>
             </p>
             <p class="truncate font-mono text-[12px] text-ink-3">{{ model.model_key }}</p>
@@ -300,49 +389,85 @@ onBeforeUnmount(() => controller.abort());
     </Section>
 
     <Sheet v-model:open="providerOpen" :title="t('models.provider.add')" :description="t('models.provider.addHint')" test-id="provider-sheet">
-      <form class="grid gap-3" @submit.prevent="saveProvider">
+      <form class="grid gap-3" autocomplete="off" @submit.prevent="saveProvider">
         <Notice v-if="formError" tone="bad">{{ formError }}</Notice>
         <Field :label="t('common.name')" required :error="fieldErrors.name" v-slot="{ id }">
           <Input :id="id" v-model="providerForm.name" data-test="provider-name" autofocus />
         </Field>
-        <Field :label="t('models.provider.dialect')" v-slot="{ id }">
-          <NativeSelect :id="id" v-model="providerForm.family">
-            <option value="tei">TEI</option>
-            <option value="infinity">Infinity</option>
+        <Field :label="t('models.provider.family')" :hint="t(`models.families.${providerForm.family}.hint`)" v-slot="{ id }">
+          <NativeSelect :id="id" v-model="providerForm.family" data-test="provider-family">
+            <option v-for="key in familyKeys" :key="key" :value="key">{{ t(`models.families.${key}.name`) }}</option>
           </NativeSelect>
         </Field>
-        <Field :label="t('models.provider.endpoint')" required :hint="t('models.provider.endpointHint')" :error="fieldErrors.base_url" v-slot="{ id }">
+        <Field :label="t('models.provider.endpoint')" required :hint="family.local ? t('models.provider.endpointHint') : t('models.provider.endpointHostedHint')" :error="fieldErrors.base_url" v-slot="{ id }">
           <Input :id="id" v-model="providerForm.base_url" data-test="provider-url" />
         </Field>
-        <Field :label="t('models.provider.revision')" :hint="t('models.provider.revisionHint')" v-slot="{ id }">
-          <Input :id="id" v-model="providerForm.binding_revision" />
+        <Field
+          v-if="family.key !== 'hidden'"
+          :label="t('models.provider.apiKey')"
+          :required="family.key === 'required'"
+          :hint="t('models.provider.apiKeyHint')"
+          :error="fieldErrors.api_key"
+          v-slot="{ id }"
+        >
+          <Input :id="id" v-model="providerForm.api_key" type="password" autocomplete="new-password" spellcheck="false" data-test="provider-key-input" />
         </Field>
-        <Checkbox v-model="providerForm.allow_private">{{ t("models.provider.allowPrivate") }}</Checkbox>
+        <div class="grid gap-3 sm:grid-cols-2">
+          <Field :label="t('models.provider.revision')" :hint="t('models.provider.revisionHint')" v-slot="{ id }">
+            <Input :id="id" v-model="providerForm.binding_revision" />
+          </Field>
+          <Field :label="t('models.provider.batch')" :hint="t('models.provider.batchHint')" v-slot="{ id }">
+            <Input :id="id" v-model="providerForm.max_batch_size" type="number" min="1" max="1024" />
+          </Field>
+        </div>
+        <Checkbox v-if="family.local" v-model="providerForm.allow_private">{{ t("models.provider.allowPrivate") }}</Checkbox>
         <button type="submit" class="hidden" aria-hidden="true" tabindex="-1" />
       </form>
       <template #footer>
         <Button variant="ghost" @click="providerOpen = false">{{ t("common.cancel") }}</Button>
-        <Button variant="primary" :loading="submitting" :disabled="!providerForm.name.trim() || !providerForm.base_url.trim()" data-test="provider-submit" @click="saveProvider">{{ t("common.save") }}</Button>
+        <Button variant="primary" :loading="submitting" :disabled="!providerReady" data-test="provider-submit" @click="saveProvider">{{ t("common.save") }}</Button>
+      </template>
+    </Sheet>
+
+    <Sheet v-model:open="keyOpen" :title="t('models.provider.replaceKey')" :description="t('models.provider.replaceKeyHint', { name: keyForm.provider?.name ?? '' })" test-id="key-sheet">
+      <form class="grid gap-3" autocomplete="off" @submit.prevent="saveKey">
+        <Notice v-if="formError" tone="bad">{{ formError }}</Notice>
+        <Field :label="t('models.provider.apiKey')" :hint="t('models.provider.apiKeyHint')" v-slot="{ id }">
+          <Input :id="id" v-model="keyForm.api_key" type="password" autocomplete="new-password" spellcheck="false" autofocus data-test="replace-key-input" />
+        </Field>
+        <button type="submit" class="hidden" aria-hidden="true" tabindex="-1" />
+      </form>
+      <template #footer>
+        <Button variant="ghost" @click="keyOpen = false">{{ t("common.cancel") }}</Button>
+        <Button variant="primary" :loading="submitting" :disabled="!keyForm.api_key.trim()" data-test="replace-key-submit" @click="saveKey">{{ t("common.save") }}</Button>
       </template>
     </Sheet>
 
     <Sheet v-model:open="modelOpen" :title="t('models.model.add')" :description="t('models.model.addHint')" test-id="model-sheet">
       <form class="grid gap-3" @submit.prevent="saveModel">
         <Notice v-if="formError" tone="bad">{{ formError }}</Notice>
-        <Field :label="t('models.provider.one')" required v-slot="{ id }">
-          <NativeSelect :id="id" v-model="modelForm.provider_id" data-test="model-provider">
-            <option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.name }}</option>
-          </NativeSelect>
-        </Field>
+        <div class="grid gap-3 sm:grid-cols-2">
+          <Field :label="t('models.provider.one')" required v-slot="{ id }">
+            <NativeSelect :id="id" v-model="modelForm.provider_id" data-test="model-provider">
+              <option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.name }}</option>
+            </NativeSelect>
+          </Field>
+          <Field :label="t('models.model.preset')" :hint="t('models.model.presetHint')" v-slot="{ id }">
+            <NativeSelect :id="id" :model-value="modelForm.preset" data-test="model-preset" :disabled="!presets.length" @update:model-value="applyPreset(String($event))">
+              <option v-if="!presets.length" value="">{{ t("models.model.presetNone") }}</option>
+              <option v-for="preset in presets" :key="preset.id" :value="preset.id">{{ preset.label }}</option>
+            </NativeSelect>
+          </Field>
+        </div>
         <div class="grid gap-3 sm:grid-cols-2">
           <Field :label="t('models.model.displayName')" required :error="fieldErrors.display_name" v-slot="{ id }">
             <Input :id="id" v-model="modelForm.display_name" />
           </Field>
-          <Field :label="t('models.model.key')" required :error="fieldErrors.model_key" v-slot="{ id }">
-            <Input :id="id" v-model="modelForm.model_key" />
+          <Field :label="t('models.model.key')" required :hint="selectedFamily === 'volcengine' ? t('models.model.keyHintArk') : undefined" :error="fieldErrors.model_key" v-slot="{ id }">
+            <Input :id="id" v-model="modelForm.model_key" data-test="model-key" />
           </Field>
-          <Field :label="t('models.model.dimension')" required :error="fieldErrors.dimension" v-slot="{ id }">
-            <Input :id="id" v-model="modelForm.dimension" type="number" min="1" max="65536" />
+          <Field :label="t('models.model.dimension')" :hint="t('models.model.dimensionHint')" :error="fieldErrors.dimension" v-slot="{ id }">
+            <Input :id="id" v-model="modelForm.dimension" type="number" min="1" max="65536" :placeholder="t('models.model.dimensionAuto')" data-test="model-dimension" />
           </Field>
           <Field :label="t('models.model.maxTokens')" required :error="fieldErrors.max_input_tokens" v-slot="{ id }">
             <Input :id="id" v-model="modelForm.max_input_tokens" type="number" min="1" max="32768" />
@@ -357,7 +482,12 @@ onBeforeUnmount(() => controller.abort());
             <Input :id="id" v-model="modelForm.optimal_batch_size" type="number" min="1" max="1024" />
           </Field>
         </div>
+        <Field :label="t('models.model.queryPrefix')" :hint="t('models.model.queryPrefixHint')" v-slot="{ id }">
+          <Input :id="id" v-model="modelForm.query_prefix" maxlength="1000" />
+        </Field>
         <Checkbox v-model="modelForm.normalize">{{ t("models.model.normalize") }}</Checkbox>
+        <Checkbox v-if="familyCanSparse" v-model="modelForm.sparse" data-test="model-sparse-toggle">{{ t("models.model.sparse") }}</Checkbox>
+        <Checkbox v-if="familySendsDimension" v-model="modelForm.send_dimension">{{ t("models.model.sendDimension") }}</Checkbox>
         <button type="submit" class="hidden" aria-hidden="true" tabindex="-1" />
       </form>
       <template #footer>

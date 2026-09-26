@@ -105,7 +105,7 @@ async def run() -> None:
     configure_logging(level=settings.log_level, fmt=settings.log_format)
     store = MCPManagement()
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=1000)
-    embeddings = QueryEmbeddingRuntime(settings.retrieval)
+    embeddings = QueryEmbeddingRuntime(settings.retrieval, master_key=settings.master_key)
     await embeddings.start()
     retrieval = RetrievalService(embeddings=embeddings)
 

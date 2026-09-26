@@ -1,4 +1,4 @@
-"""Immutable float32 vectors and the provider invocation contract."""
+"""Immutable float32 vectors and the provider invocation contracts."""
 
 from __future__ import annotations
 
@@ -6,10 +6,11 @@ import math
 import struct
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import Literal, Protocol, runtime_checkable
 
 from cairn.core.modelref import ModelRef
 from cairn.embedding.errors import EmbeddingDimensionMismatch, EmbeddingInvalidVector
+from cairn.vectorstore.base import SparseVector
 
 Purpose = Literal["query", "document"]
 
@@ -66,3 +67,31 @@ class EmbeddingProvider(Protocol):
     async def embed(
         self, model: ModelRef, texts: Sequence[str], *, purpose: Purpose
     ) -> Sequence[Sequence[float]]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class HybridOutput:
+    """One provider call's dense and/or learned sparse output, in input order."""
+
+    dense: list[list[float]] | None
+    sparse: list[SparseVector | None] | None
+
+
+@runtime_checkable
+class HybridEmbeddingProvider(EmbeddingProvider, Protocol):
+    """A provider whose models can also return learned sparse (lexical) weights.
+
+    One call returns whichever outputs are requested, so a knowledge base whose
+    dense and sparse vectors come from the same model pays for one forward pass
+    (or one billed request), not two.
+    """
+
+    async def embed_hybrid(
+        self,
+        model: ModelRef,
+        texts: Sequence[str],
+        *,
+        purpose: Purpose,
+        dense: bool,
+        sparse: bool,
+    ) -> HybridOutput: ...

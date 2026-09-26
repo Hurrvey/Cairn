@@ -13,8 +13,9 @@ x-app: &app
     CAIRN_QDRANT__URL: http://qdrant:6333
     CAIRN_QDRANT__API_KEY: ${QDRANT_API_KEY:?set QDRANT_API_KEY in .env}
     CAIRN_OBJECTSTORE__LOCAL_PATH: /var/lib/cairn/objects
-    CAIRN_INGESTION__TOKENIZERS_JSON: '{"minilm":"hf:/models/tokenizer.json"}'
-    CAIRN_RETRIEVAL__TOKENIZER_FILES: '{"minilm":"/models/tokenizer.json"}'
+    # bge-m3's tokenizer also budgets hosted models whose tokenizers are unpublished.
+    CAIRN_INGESTION__TOKENIZERS_JSON: '{"minilm":"hf:/models/minilm/tokenizer.json","bge-m3":"hf:/models/bge-m3/tokenizer.json"}'
+    CAIRN_RETRIEVAL__TOKENIZER_FILES: '{"minilm":"/models/minilm/tokenizer.json","bge-m3":"/models/bge-m3/tokenizer.json"}'
     CAIRN_MCP__MANAGED: "true"
     CAIRN_MCP__PORT_MIN: ${CAIRN_MCP_PORT_MIN:-8081}
     CAIRN_MCP__PORT_MAX: ${CAIRN_MCP_PORT_MAX:-8090}
@@ -26,7 +27,7 @@ x-app: &app
   volumes:
     - objects:/var/lib/cairn/objects
     - type: bind
-      source: ${CAIRN_MODEL_DIR:-./data/models/minilm}
+      source: ${CAIRN_MODELS_ROOT:-./data/models}
       target: /models
       read_only: true
   security_opt: ["no-new-privileges:true"]
@@ -96,6 +97,36 @@ services:
     pids_limit: 256
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
+
+  # Learned sparse vectors (and dense bge-m3 embeddings) for keyword search.
+  # Prepare weights first: uv run python scripts/prepare_embedding_model.py --model bge-m3
+  bge-m3:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.bge-m3
+    image: cairn-bge-m3:local
+    profiles: [bge-m3]
+    restart: unless-stopped
+    environment:
+      BGE_M3_API_KEY: ${BGE_M3_API_KEY:-}
+      BGE_M3_DEVICE: ${BGE_M3_DEVICE:-auto}
+    volumes:
+      - type: bind
+        source: ${CAIRN_BGE_M3_DIR:-./data/models/bge-m3}
+        target: /model
+        read_only: true
+    read_only: true
+    tmpfs: ["/tmp"]
+    mem_limit: 6g
+    pids_limit: 256
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys, urllib.request; sys.exit(urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).status != 200)"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 180s
 
   migrate:
     <<: *app

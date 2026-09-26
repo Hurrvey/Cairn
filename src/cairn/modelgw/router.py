@@ -14,6 +14,7 @@ from cairn.modelgw.schemas import (
     CreateProviderRequest,
     ModelResponse,
     ModelTestResponse,
+    ProviderCredentialsRequest,
     ProviderResponse,
 )
 from cairn.modelgw.service import ModelManagementService
@@ -70,6 +71,24 @@ async def delete_provider(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.put(
+    "/model-providers/{provider_id}/credentials",
+    response_model=ProviderResponse,
+    responses=PROBLEM,
+    summary="Replace a provider's API key",
+    description="Write-only: the key is stored encrypted and never returned.",
+)
+async def replace_provider_credentials(
+    provider_id: str,
+    actor: Annotated[Principal, Depends(require_permission("platform:models"))],
+    body: ProviderCredentialsRequest,
+    service: Annotated[ModelManagementService, Depends(_service)],
+) -> ProviderResponse:
+    return ProviderResponse.from_dto(
+        await service.replace_credentials(actor.workspace_id, decode_id("prov", provider_id), body)
+    )
+
+
 @router.post(
     "/models",
     response_model=ModelResponse,
@@ -113,4 +132,5 @@ async def test_model(
         healthy=result.healthy,
         dimensions=result.dimensions,
         tokens=result.tokens,
+        sparse_terms=result.sparse_terms,
     )

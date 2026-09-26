@@ -888,6 +888,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/model-providers/{provider_id}/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Replace a provider's API key
+         * @description Write-only: the key is stored encrypted and never returned.
+         */
+        put: operations["replace_provider_credentials_v1_model_providers__provider_id__credentials_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/models": {
         parameters: {
             query?: never;
@@ -1214,6 +1234,7 @@ export interface components {
             metadata?: {
                 [key: string]: unknown;
             };
+            sparse?: components["schemas"]["SparseChoiceRequest"] | null;
         };
         /** CreateModelRequest */
         CreateModelRequest: {
@@ -1230,7 +1251,7 @@ export interface components {
              */
             capability: "embedding";
             /** Dimension */
-            dimension: number;
+            dimension?: number | null;
             /** Max Input Tokens */
             max_input_tokens: number;
             /**
@@ -1247,6 +1268,16 @@ export interface components {
             optimal_batch_size: number;
             /** Tokenizer Id */
             tokenizer_id: string;
+            /**
+             * Sparse
+             * @default false
+             */
+            sparse: boolean;
+            /**
+             * Send Dimension
+             * @default false
+             */
+            send_dimension: boolean;
         };
         /** CreateProviderRequest */
         CreateProviderRequest: {
@@ -1256,10 +1287,12 @@ export interface components {
              * Family
              * @enum {string}
              */
-            family: "tei" | "infinity";
+            family: "tei" | "infinity" | "bge_m3" | "dashscope" | "volcengine" | "openai_compatible";
             /** Base Url */
-            base_url: string;
-            config: components["schemas"]["ProviderConfigRequest"];
+            base_url?: string | null;
+            /** Api Key */
+            api_key?: string | null;
+            config?: components["schemas"]["ProviderConfigRequest"];
         };
         /** CreateUserRequest */
         CreateUserRequest: {
@@ -1598,6 +1631,13 @@ export interface components {
              */
             created_at: string;
             /**
+             * Sparse Kind
+             * @default bm25
+             */
+            sparse_kind: string;
+            /** Sparse Model Id */
+            sparse_model_id?: string | null;
+            /**
              * Reindex Required
              * @default false
              */
@@ -1771,6 +1811,16 @@ export interface components {
             max_input_tokens: number | null;
             /** Tokenizer Id */
             tokenizer_id: string | null;
+            /**
+             * Provider Family
+             * @default
+             */
+            provider_family: string;
+            /**
+             * Sparse
+             * @default false
+             */
+            sparse: boolean;
         };
         /** ModelResponse */
         ModelResponse: {
@@ -1802,6 +1852,21 @@ export interface components {
             health_state: string;
             /** Checked At */
             checked_at: string | null;
+            /**
+             * Provider Family
+             * @default
+             */
+            provider_family: string;
+            /**
+             * Sparse
+             * @default false
+             */
+            sparse: boolean;
+            /**
+             * Send Dimension
+             * @default false
+             */
+            send_dimension: boolean;
         };
         /** ModelTestResponse */
         ModelTestResponse: {
@@ -1811,6 +1876,8 @@ export interface components {
             dimensions: number;
             /** Tokens */
             tokens: number;
+            /** Sparse Terms */
+            sparse_terms?: number | null;
         };
         /** PasswordPolicySettings */
         PasswordPolicySettings: {
@@ -1842,7 +1909,10 @@ export interface components {
         };
         /** ProviderConfigRequest */
         ProviderConfigRequest: {
-            /** Binding Revision */
+            /**
+             * Binding Revision
+             * @default v1
+             */
             binding_revision: string;
             /**
              * Allow Private
@@ -1854,6 +1924,11 @@ export interface components {
              * @default 16
              */
             max_batch_size: number;
+        };
+        /** ProviderCredentialsRequest */
+        ProviderCredentialsRequest: {
+            /** Api Key */
+            api_key: string | null;
         };
         /** ProviderResponse */
         ProviderResponse: {
@@ -1869,6 +1944,11 @@ export interface components {
             is_enabled: boolean;
             /** Model Count */
             model_count: number;
+            /**
+             * Has Credentials
+             * @default false
+             */
+            has_credentials: boolean;
         };
         /**
          * RegisterUploadRequest
@@ -1945,6 +2025,7 @@ export interface components {
              */
             embedding_model_id?: string | null;
             chunk_config?: components["schemas"]["ChunkConfig"] | null;
+            sparse?: components["schemas"]["SparseChoiceRequest"] | null;
             /**
              * Confirm
              * @default false
@@ -2207,6 +2288,23 @@ export interface components {
             type?: string | null;
             /** Updated At */
             updated_at?: string | null;
+        };
+        /**
+         * SparseChoiceRequest
+         * @description How keyword (sparse) vectors are produced for the next index version.
+         */
+        SparseChoiceRequest: {
+            /**
+             * Kind
+             * @default auto
+             * @enum {string}
+             */
+            kind: "auto" | "bm25" | "model";
+            /**
+             * Model Id
+             * @description Prefixed model id when kind=model.
+             */
+            model_id?: string | null;
         };
         /** TargetFailure */
         TargetFailure: {
@@ -5160,6 +5258,68 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replace_provider_credentials_v1_model_providers__provider_id__credentials_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderCredentialsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderResponse"];
+                };
             };
             /** @description Forbidden */
             403: {

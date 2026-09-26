@@ -3474,6 +3474,77 @@
         }
       }
     },
+    "/v1/model-providers/{provider_id}/credentials": {
+      "put": {
+        "tags": [
+          "models"
+        ],
+        "summary": "Replace a provider's API key",
+        "description": "Write-only: the key is stored encrypted and never returned.",
+        "operationId": "replace_provider_credentials_v1_model_providers__provider_id__credentials_put",
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderCredentialsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/models": {
       "get": {
         "tags": [
@@ -4476,6 +4547,16 @@
             "additionalProperties": true,
             "type": "object",
             "title": "Metadata"
+          },
+          "sparse": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SparseChoiceRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -4513,9 +4594,16 @@
             "default": "embedding"
           },
           "dimension": {
-            "type": "integer",
-            "maximum": 65536.0,
-            "minimum": 1.0,
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 65536.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Dimension"
           },
           "max_input_tokens": {
@@ -4553,6 +4641,16 @@
             "maxLength": 255,
             "minLength": 1,
             "title": "Tokenizer Id"
+          },
+          "sparse": {
+            "type": "boolean",
+            "title": "Sparse",
+            "default": false
+          },
+          "send_dimension": {
+            "type": "boolean",
+            "title": "Send Dimension",
+            "default": false
           }
         },
         "additionalProperties": false,
@@ -4561,7 +4659,6 @@
           "provider_id",
           "model_key",
           "display_name",
-          "dimension",
           "max_input_tokens",
           "tokenizer_id"
         ],
@@ -4579,15 +4676,39 @@
             "type": "string",
             "enum": [
               "tei",
-              "infinity"
+              "infinity",
+              "bge_m3",
+              "dashscope",
+              "volcengine",
+              "openai_compatible"
             ],
             "title": "Family"
           },
           "base_url": {
-            "type": "string",
-            "maxLength": 2048,
-            "minLength": 1,
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Base Url"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "password",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
           },
           "config": {
             "$ref": "#/components/schemas/ProviderConfigRequest"
@@ -4597,9 +4718,7 @@
         "type": "object",
         "required": [
           "name",
-          "family",
-          "base_url",
-          "config"
+          "family"
         ],
         "title": "CreateProviderRequest"
       },
@@ -5597,6 +5716,22 @@
             "format": "date-time",
             "title": "Created At"
           },
+          "sparse_kind": {
+            "type": "string",
+            "title": "Sparse Kind",
+            "default": "bm25"
+          },
+          "sparse_model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sparse Model Id"
+          },
           "reindex_required": {
             "type": "boolean",
             "title": "Reindex Required",
@@ -6098,6 +6233,16 @@
               }
             ],
             "title": "Tokenizer Id"
+          },
+          "provider_family": {
+            "type": "string",
+            "title": "Provider Family",
+            "default": ""
+          },
+          "sparse": {
+            "type": "boolean",
+            "title": "Sparse",
+            "default": false
           }
         },
         "type": "object",
@@ -6205,6 +6350,21 @@
               }
             ],
             "title": "Checked At"
+          },
+          "provider_family": {
+            "type": "string",
+            "title": "Provider Family",
+            "default": ""
+          },
+          "sparse": {
+            "type": "boolean",
+            "title": "Sparse",
+            "default": false
+          },
+          "send_dimension": {
+            "type": "boolean",
+            "title": "Send Dimension",
+            "default": false
           }
         },
         "type": "object",
@@ -6239,6 +6399,17 @@
           "tokens": {
             "type": "integer",
             "title": "Tokens"
+          },
+          "sparse_terms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sparse Terms"
           }
         },
         "type": "object",
@@ -6316,7 +6487,8 @@
             "type": "string",
             "maxLength": 255,
             "minLength": 1,
-            "title": "Binding Revision"
+            "title": "Binding Revision",
+            "default": "v1"
           },
           "allow_private": {
             "type": "boolean",
@@ -6333,10 +6505,30 @@
         },
         "additionalProperties": false,
         "type": "object",
-        "required": [
-          "binding_revision"
-        ],
         "title": "ProviderConfigRequest"
+      },
+      "ProviderCredentialsRequest": {
+        "properties": {
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "password",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "api_key"
+        ],
+        "title": "ProviderCredentialsRequest"
       },
       "ProviderResponse": {
         "properties": {
@@ -6370,6 +6562,11 @@
           "model_count": {
             "type": "integer",
             "title": "Model Count"
+          },
+          "has_credentials": {
+            "type": "boolean",
+            "title": "Has Credentials",
+            "default": false
           }
         },
         "type": "object",
@@ -6551,6 +6748,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/ChunkConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sparse": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SparseChoiceRequest"
               },
               {
                 "type": "null"
@@ -7252,6 +7459,36 @@
         "additionalProperties": false,
         "type": "object",
         "title": "SourceInfo"
+      },
+      "SparseChoiceRequest": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "bm25",
+              "model"
+            ],
+            "title": "Kind",
+            "default": "auto"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id",
+            "description": "Prefixed model id when kind=model."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "SparseChoiceRequest",
+        "description": "How keyword (sparse) vectors are produced for the next index version."
       },
       "TargetFailure": {
         "properties": {

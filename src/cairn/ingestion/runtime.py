@@ -15,8 +15,10 @@ from cairn.catalog.ingestion import CatalogIngestionFacade
 from cairn.core.cache import get_cache
 from cairn.core.config import get_settings
 from cairn.core.errors import ValidationFailed
+from cairn.core.logging import get_logger
 from cairn.core.modelref import ModelRef
-from cairn.embedding.providers import InfinityProvider, TeiProvider
+from cairn.core.secrets import SecretUnreadable
+from cairn.embedding.providers import HttpEmbeddingProvider, build_provider
 from cairn.embedding.service import EmbeddingService
 from cairn.embedding.tokenizers import (
     HuggingFaceTokenizer,
@@ -39,6 +41,8 @@ from cairn.objectstore.registry import ObjectBindingRef, get_object_registry
 from cairn.vectorstore.base import VectorStore
 from cairn.vectorstore.registry import VectorBindingRef, get_vector_registry
 
+log = get_logger(__name__)
+
 
 class PipelineRuntime:
     def __init__(
@@ -49,8 +53,8 @@ class PipelineRuntime:
     ) -> None:
         self._models = models or get_model_catalog()
         self._tokenizers = _load_tokenizers()
-        self._providers: dict[UUID, TeiProvider | InfinityProvider] = {}
-        self._retired_providers: list[TeiProvider | InfinityProvider] = []
+        self._providers: dict[UUID, HttpEmbeddingProvider] = {}
+        self._retired_providers: list[HttpEmbeddingProvider] = []
         self._embeddings: dict[UUID, tuple[str, PreparedEmbedding]] = {}
         self._resolution_lock = asyncio.Lock()
         self._closed = False
@@ -90,10 +94,6 @@ class PipelineRuntime:
             raise ValidationFailed(
                 "The registered embedding model no longer matches the index version snapshot."
             )
-        if runtime.has_credentials:
-            raise ValidationFailed(
-                "Credential-backed embedding providers require the model gateway invoker."
-            )
         if runtime.base_url is None:
             raise ValidationFailed("The embedding provider has no configured endpoint.")
         revision = runtime.config.get("binding_revision")
@@ -105,28 +105,35 @@ class PipelineRuntime:
             raise ValidationFailed("The embedding provider runtime configuration is invalid.")
         tokenizer = self._tokenizers.for_model(runtime.model)
         fingerprint = _binding_fingerprint(runtime, tokenizer)
+        # The client also depends on WHICH key it holds; a rotated key must
+        # replace the client without changing the embedding identity above.
+        client_key = fingerprint + (
+            f":{runtime.credential.secret_id}" if runtime.credential is not None else ""
+        )
         cached = self._embeddings.get(model.id)
-        if cached is not None and cached[0] == fingerprint:
+        if cached is not None and cached[0] == client_key:
             return cached[1]
-        provider: TeiProvider | InfinityProvider
-        if runtime.provider_family == "tei":
-            provider = TeiProvider(
+        api_key = None
+        if runtime.credential is not None:
+            if runtime.workspace_id is None:
+                raise ValidationFailed("The embedding provider credential has no workspace.")
+            try:
+                api_key = runtime.credential.open(get_settings().master_key, runtime.workspace_id)
+            except SecretUnreadable as exc:
+                raise ValidationFailed("The embedding provider credential cannot be read.") from exc
+        try:
+            provider = build_provider(
+                runtime.provider_family,
                 base_url=runtime.base_url,
                 namespace=revision,
+                api_key=api_key,
                 allow_private=allow_private,
                 max_batch_size=max_batch_size,
             )
-        elif runtime.provider_family == "infinity":
-            provider = InfinityProvider(
-                base_url=runtime.base_url,
-                namespace=revision,
-                allow_private=allow_private,
-                max_batch_size=max_batch_size,
-            )
-        else:
+        except Exception as exc:
             raise ValidationFailed(
                 f"Embedding provider family {runtime.provider_family!r} has no worker adapter."
-            )
+            ) from exc
         try:
             await provider.__aenter__()
             prepared = PreparedEmbedding(
@@ -146,7 +153,7 @@ class PipelineRuntime:
             raise
         previous = self._providers.get(model.id)
         self._providers[model.id] = provider
-        self._embeddings[model.id] = (fingerprint, prepared)
+        self._embeddings[model.id] = (client_key, prepared)
         if previous is not None:
             self._retired_providers.append(previous)
         return prepared
@@ -198,7 +205,13 @@ def _load_tokenizers() -> TokenizerRegistry:
         if kind == "tiktoken":
             tokenizer = TiktokenTokenizer.from_encoding(value)
         elif kind == "hf":
-            tokenizer = HuggingFaceTokenizer.from_file(Path(value))
+            path = Path(value)
+            if not path.is_file():
+                # An optional model's tokenizer that was never prepared; models
+                # that need it fail with TokenizerUnavailable when used.
+                log.warning("ingestion.tokenizer_missing", tokenizer=name)
+                continue
+            tokenizer = HuggingFaceTokenizer.from_file(path)
         else:
             raise ValidationFailed(f"Tokenizer binding {name!r} uses an unknown loader.")
         registry.register(name, tokenizer)

@@ -16,6 +16,7 @@ import NativeSelect from "@/components/ui/NativeSelect.vue";
 import Notice from "@/components/ui/Notice.vue";
 import Sheet from "@/components/ui/Sheet.vue";
 import Textarea from "@/components/ui/Textarea.vue";
+import { autoSparseModel, parseSparseValue } from "@/features/knowledge/sparse";
 import { describeError } from "@/shared/errors";
 
 const open = defineModel<boolean>("open", { default: false });
@@ -36,6 +37,13 @@ const form = reactive({
   vector_binding_id: "",
   search_mode: "hybrid" as "hybrid" | "vector" | "fulltext",
   strategy: "parent_child" as "parent_child" | "recursive" | "markdown" | "fixed" | "semantic",
+  sparse: "auto",
+});
+
+const sparseModels = computed(() => options.value?.models.filter((model) => model.sparse) ?? []);
+const autoSparseLabel = computed(() => {
+  const model = autoSparseModel(form.embedding_model_id, options.value?.models ?? []);
+  return model ? t("knowledge.create.keywordModel", { name: model.display_name }) : t("knowledge.create.keywordBm25");
 });
 
 const objectBindings = computed(() => options.value?.bindings.filter((binding) => binding.kind === "object") ?? []);
@@ -62,6 +70,7 @@ watch(open, async (value) => {
     vector_binding_id: "",
     search_mode: "hybrid",
     strategy: "parent_child",
+    sparse: "auto",
   });
   error.value = null;
   fieldErrors.value = {};
@@ -93,6 +102,7 @@ async function submit(): Promise<void> {
       object_binding_id: form.object_binding_id,
       vector_binding_id: form.vector_binding_id,
       metric: "cosine",
+      sparse: parseSparseValue(form.sparse),
       chunk_config: {
         strategy: form.strategy,
         child_tokens: 512,
@@ -145,6 +155,16 @@ async function submit(): Promise<void> {
           <option value="" disabled>{{ t("common.select") }}</option>
           <option v-for="model in options?.models ?? []" :key="model.id" :value="model.id">
             {{ model.display_name }} · {{ model.dimension }}d
+          </option>
+        </NativeSelect>
+      </Field>
+
+      <Field :label="t('knowledge.create.keyword')" :hint="t('knowledge.create.keywordHint')" v-slot="{ id }">
+        <NativeSelect :id="id" v-model="form.sparse" data-test="kb-sparse" :disabled="loadingOptions">
+          <option value="auto">{{ t("knowledge.create.keywordAuto", { choice: autoSparseLabel }) }}</option>
+          <option value="bm25">{{ t("knowledge.create.keywordBm25") }}</option>
+          <option v-for="model in sparseModels" :key="model.id" :value="`model:${model.id}`">
+            {{ t("knowledge.create.keywordModel", { name: model.display_name }) }}
           </option>
         </NativeSelect>
       </Field>

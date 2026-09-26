@@ -1,4 +1,4 @@
-"""Redis-only ACTIVE runtime loading and environment-bound query embedding."""
+"""Redis-only ACTIVE runtime loading and query encoding (dense and learned sparse)."""
 
 from __future__ import annotations
 
@@ -6,14 +6,17 @@ import asyncio
 import unicodedata
 from collections.abc import Sequence
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 
 from cairn.core.cache import BulkCache, Cache, get_cache
 from cairn.core.config import RetrievalSettings
 from cairn.core.errors import PermissionDenied
+from cairn.core.logging import get_logger
 from cairn.core.modelref import ModelRef
 from cairn.core.provider_runtime import (
     ProviderRuntimeProjection,
@@ -21,10 +24,52 @@ from cairn.core.provider_runtime import (
     provider_runtime_tombstone_key,
 )
 from cairn.core.retrieval_runtime import KnowledgeBaseRuntime
-from cairn.embedding.providers import InfinityProvider, TeiProvider
+from cairn.core.secrets import SecretUnreadable
+from cairn.embedding.providers import (
+    HttpEmbeddingProvider,
+    InfinityProvider,
+    TeiProvider,
+    build_provider,
+)
 from cairn.embedding.service import EmbeddingService
 from cairn.embedding.tokenizers import HuggingFaceTokenizer, Tokenizer, TokenizerRegistry
 from cairn.retrieval.errors import KbRuntimeCorrupt, KbRuntimeUnavailable, RetrievalUnsupported
+from cairn.vectorstore.base import SparseVector
+
+log = get_logger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class QueryEncoding:
+    dense: Sequence[float] | None
+    sparse: SparseVector | None
+    tokens: int
+    cached: bool | None = None
+
+
+def _open_provider(family: str, **kwargs: Any) -> HttpEmbeddingProvider:
+    # TEI and Infinity resolve through this module's names so tests can swap them.
+    if family == "tei":
+        return TeiProvider(**kwargs)
+    if family == "infinity":
+        return InfinityProvider(**kwargs)
+    return build_provider(family, **kwargs)
+
+
+def _load_tokenizer_files(files: dict[str, str]) -> dict[str, Tokenizer]:
+    """Load configured tokenizer files, skipping any that were never prepared.
+
+    Startup-only and synchronous: a few files, read once. A model that needs a
+    missing tokenizer fails with a clear error when a query uses it.
+    """
+    loaded: dict[str, Tokenizer] = {}
+    for name, filename in files.items():
+        path = Path(filename)
+        if not path.is_file():
+            log.warning("retrieval.tokenizer_missing", tokenizer=name)
+            continue
+        loaded[name] = HuggingFaceTokenizer.from_file(path)
+    return loaded
 
 
 class KnowledgeBaseRuntimeLoader:
@@ -89,15 +134,17 @@ class QueryEmbeddingRuntime:
         *,
         cache: Cache | None = None,
         tokenizers: dict[str, Tokenizer] | None = None,
+        master_key: SecretStr | None = None,
     ) -> None:
         self._settings = settings
+        self._master_key = master_key
         self._cache = cache or get_cache()
         self._tokenizers = TokenizerRegistry()
         self._tokenizers_supplied = tokenizers is not None
         for name, tokenizer in (tokenizers or {}).items():
             self._tokenizers.register(name, tokenizer)
-        self._providers: dict[UUID, TeiProvider | InfinityProvider] = {}
-        self._retired_providers: list[TeiProvider | InfinityProvider] = []
+        self._providers: dict[UUID, Any] = {}
+        self._retired_providers: list[Any] = []
         self._services: dict[UUID, EmbeddingService] = {}
         self._fingerprints: dict[UUID, str] = {}
         self._resolution_lock = asyncio.Lock()
@@ -106,11 +153,13 @@ class QueryEmbeddingRuntime:
     async def start(self) -> None:
         if self._started:
             return
-        opened: list[TeiProvider | InfinityProvider] = []
+        opened: list[Any] = []
         try:
             if not self._tokenizers_supplied:
-                for name, filename in self._settings.tokenizer_files.items():
-                    self._tokenizers.register(name, HuggingFaceTokenizer.from_file(Path(filename)))
+                for name, tokenizer in _load_tokenizer_files(
+                    self._settings.tokenizer_files
+                ).items():
+                    self._tokenizers.register(name, tokenizer)
             for provider_id, endpoint in self._settings.embedding_endpoints.items():
                 provider_type = TeiProvider if endpoint.dialect == "tei" else InfinityProvider
                 provider = provider_type(
@@ -147,6 +196,22 @@ class QueryEmbeddingRuntime:
     async def embed_query(
         self, model: ModelRef, query: str, *, workspace_id: UUID | None = None
     ) -> tuple[Sequence[float], int, bool | None]:
+        encoding = await self.encode_query(
+            model, query, workspace_id=workspace_id, dense=True, sparse=False
+        )
+        assert encoding.dense is not None
+        return encoding.dense, encoding.tokens, encoding.cached
+
+    async def encode_query(
+        self,
+        model: ModelRef,
+        query: str,
+        *,
+        workspace_id: UUID | None = None,
+        dense: bool = True,
+        sparse: bool = False,
+    ) -> QueryEncoding:
+        """Encode one query; dense and learned sparse together cost one provider call."""
         if not self._started:
             raise RetrievalUnsupported("Query embedding runtime is not started.")
         if model.provider_id is None:
@@ -177,13 +242,37 @@ class QueryEmbeddingRuntime:
             raise RetrievalUnsupported(
                 "Query text exceeds the ACTIVE model token budget; it was not truncated."
             )
-        vector = await service.embed_query(model, query)
-        return vector.values, token_count, None
+        if not sparse:
+            vector = await service.embed_query(model, query)
+            return QueryEncoding(dense=vector.values, sparse=None, tokens=token_count)
+        if not model.sparse or not service.supports_sparse:
+            raise RetrievalUnsupported("The ACTIVE sparse model cannot encode sparse queries.")
+        dense_vector, sparse_vector = await service.embed_query_hybrid(
+            model, query, dense=dense, sparse=True
+        )
+        return QueryEncoding(
+            dense=dense_vector.values if dense_vector is not None else None,
+            sparse=sparse_vector,
+            tokens=token_count,
+        )
 
     async def embed_query_for_workspace(
         self, workspace_id: UUID, model: ModelRef, query: str
     ) -> tuple[Sequence[float], int, bool | None]:
         return await self.embed_query(model, query, workspace_id=workspace_id)
+
+    async def encode_query_for_workspace(
+        self,
+        workspace_id: UUID,
+        model: ModelRef,
+        query: str,
+        *,
+        dense: bool,
+        sparse: bool,
+    ) -> QueryEncoding:
+        return await self.encode_query(
+            model, query, workspace_id=workspace_id, dense=dense, sparse=sparse
+        )
 
     async def _service_for(
         self, provider_id: UUID, workspace_id: UUID | None, *, dynamic: bool
@@ -245,13 +334,26 @@ class QueryEmbeddingRuntime:
         return projection
 
     async def _replace_provider(self, projection: ProviderRuntimeProjection) -> None:
-        provider_type = TeiProvider if projection.family == "tei" else InfinityProvider
-        provider = provider_type(
-            base_url=projection.base_url,
-            namespace=f"{projection.id}:{projection.binding_revision}",
-            allow_private=projection.allow_private,
-            max_batch_size=projection.max_batch_size,
-        )
+        api_key: SecretStr | None = None
+        if projection.credential is not None:
+            if self._master_key is None:
+                raise RetrievalUnsupported("This process cannot open provider credentials.")
+            try:
+                api_key = projection.credential.open(self._master_key, projection.workspace_id)
+            except SecretUnreadable as exc:
+                raise RetrievalUnsupported("The provider credential cannot be read.") from exc
+        kwargs: dict[str, Any] = {
+            "base_url": projection.base_url,
+            "namespace": f"{projection.id}:{projection.binding_revision}",
+            "allow_private": projection.allow_private,
+            "max_batch_size": projection.max_batch_size,
+        }
+        if api_key is not None:
+            kwargs["api_key"] = api_key
+        try:
+            provider = _open_provider(projection.family, **kwargs)
+        except Exception as exc:
+            raise RetrievalUnsupported("The published provider cannot be configured.") from exc
         try:
             await provider.__aenter__()
             service = EmbeddingService(

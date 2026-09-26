@@ -5,13 +5,14 @@ from __future__ import annotations
 import base64
 import binascii
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from hashlib import sha256
 from typing import Any
 from uuid import UUID
 
 from cairn.catalog.dto import ChunkSpec
 from cairn.ingestion.base import Asset, Block, ParsedDocument
+from cairn.vectorstore.base import SparseVector
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +34,10 @@ class EmbeddingManifest:
     dimension: int
     normalized: bool
     vectors: dict[str, tuple[float, ...]]
+    #: Identity of the sparse source these vectors came from; reuse never crosses it.
+    sparse_encoder: str = ""
+    #: Per content hash; ``None`` records a chunk with no indexable terms.
+    sparse: dict[str, SparseVector | None] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,6 +210,13 @@ def encode_embedding_manifest(manifest: EmbeddingManifest) -> bytes:
             "source_content_hash": manifest.source_content_hash,
             "type": "embedding",
             "vectors": {key: list(values) for key, values in manifest.vectors.items()},
+            "sparse_encoder": manifest.sparse_encoder,
+            "sparse": {
+                key: None
+                if vector is None
+                else {"indices": list(vector.indices), "values": list(vector.values)}
+                for key, vector in manifest.sparse.items()
+            },
         }
     )
 
@@ -224,5 +236,15 @@ def decode_embedding_manifest(raw: bytes) -> EmbeddingManifest:
         vectors={
             str(key): tuple(float(value) for value in values)
             for key, values in payload["vectors"].items()
+        },
+        sparse_encoder=str(payload.get("sparse_encoder", "")),
+        sparse={
+            str(key): None
+            if entry is None
+            else SparseVector(
+                indices=tuple(int(index) for index in entry["indices"]),
+                values=tuple(float(value) for value in entry["values"]),
+            )
+            for key, entry in (payload.get("sparse") or {}).items()
         },
     )

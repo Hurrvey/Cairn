@@ -109,6 +109,10 @@ class Model(Base):
     query_prefix: Mapped[str | None] = mapped_column(Text, nullable=True)
     optimal_batch_size: Mapped[int] = mapped_column(Integer, nullable=False, default=64)
     tokenizer_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    #: Learned sparse output (bge-m3, DashScope v3/v4): usable as a sparse source.
+    sparse: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    #: Send the registered dimension to the provider instead of taking its default.
+    send_dimension: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     cost_per_1k_input: Mapped[Decimal | None] = mapped_column(Numeric(12, 6), nullable=True)
     cost_per_1k_output: Mapped[Decimal | None] = mapped_column(Numeric(12, 6), nullable=True)

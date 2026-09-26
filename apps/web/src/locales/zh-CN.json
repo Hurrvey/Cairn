@@ -189,7 +189,12 @@
       "objectStorage": "文档存储",
       "vectorStorage": "向量存储",
       "strategyHint": "父子分块在保留小块可检索的同时提供更宽的上下文。",
-      "setupMissing": "请管理员先注册向量模型，并添加文档存储和向量存储。"
+      "setupMissing": "请管理员先注册向量模型，并添加文档存储和向量存储。",
+      "keyword": "关键词检索",
+      "keywordHint": "决定如何匹配精确词语和编号，之后更改需要重建索引。",
+      "keywordAuto": "自动（{choice}）",
+      "keywordBm25": "BM25（内置）",
+      "keywordModel": "{name} 关键词权重"
     },
     "delete": {
       "action": "删除知识库",
@@ -398,6 +403,13 @@
       "danger": {
         "title": "危险操作",
         "description": "删除会移除所有文档、分块和向量，且无法恢复。"
+      },
+      "keyword": {
+        "title": "关键词检索",
+        "description": "全文检索和混合检索所用关键词向量的来源。更改会构建新的索引版本。",
+        "current": "当前",
+        "next": "重建时使用",
+        "rebuild": "用此来源重建"
       }
     }
   },
@@ -414,10 +426,10 @@
     },
     "provider": {
       "title": "服务商",
-      "description": "本部署允许调用的 TEI 和 Infinity 服务端点。",
+      "description": "本部署可调用的向量服务：本地服务和在线厂商。",
       "one": "服务商",
       "add": "添加服务商",
-      "addHint": "本地 Compose 服务地址为 http://embedding:80，请只添加可信地址。",
+      "addHint": "选择服务类型；在线厂商需要 API 密钥。请只添加可信地址。",
       "emptyTitle": "还没有服务商",
       "emptyBody": "先添加本地向量服务。",
       "dialect": "接口类型",
@@ -430,13 +442,23 @@
       "created": "服务商已添加。",
       "deleteTitle": "删除服务商 {name}？",
       "deleteBody": "仍有已注册模型的服务商无法删除。",
-      "deleted": "服务商已删除。"
+      "deleted": "服务商已删除。",
+      "family": "服务类型",
+      "endpointHostedHint": "厂商的公网地址，仅在使用其他地域时修改。",
+      "apiKey": "API 密钥",
+      "apiKeyHint": "加密保存，之后不会再显示。",
+      "batch": "单次请求文本数",
+      "batchHint": "厂商有上限，阿里云百炼为 10。",
+      "keySet": "已保存密钥",
+      "replaceKey": "更换 API 密钥",
+      "replaceKeyHint": "新密钥会立即替换 {name} 当前的密钥。",
+      "keyReplaced": "API 密钥已更换。"
     },
     "model": {
       "title": "模型",
       "description": "向量维度和 token 上限必须与实际部署的模型一致。",
       "add": "注册模型",
-      "addHint": "默认值对应内置的 MiniLM 模型。",
+      "addHint": "先选择预设，再按实际部署的模型调整。",
       "emptyTitle": "还没有注册模型",
       "emptyBody": "注册服务商提供的模型，然后测试连通性。",
       "emptyNeedsProvider": "请先添加服务商。",
@@ -456,7 +478,45 @@
       "created": "模型已注册。",
       "deleteTitle": "删除模型 {name}？",
       "deleteBody": "被知识库使用的模型无法删除。",
-      "deleted": "模型已删除。"
+      "deleted": "模型已删除。",
+      "preset": "预设",
+      "presetHint": "自动填入常用模型的参数。",
+      "presetNone": "该类型没有预设",
+      "keyHintArk": "方舟控制台中的模型名称或接入点 ID（ep-…）。",
+      "dimensionHint": "留空则向服务商探测。",
+      "dimensionAuto": "自动探测",
+      "queryPrefix": "查询指令",
+      "queryPrefixHint": "只加在检索查询前面，适用于训练时使用了指令的模型。",
+      "sparse": "输出关键词权重（稀疏向量）",
+      "sendDimension": "向服务商请求指定维度",
+      "sparseBadge": "关键词权重",
+      "testOkSparse": "正常 · {dims} 维 · {tokens} tokens · {terms} 个关键词"
+    },
+    "families": {
+      "tei": {
+        "name": "TEI（本地）",
+        "hint": "Hugging Face TEI 向量服务，例如内置的 MiniLM。"
+      },
+      "infinity": {
+        "name": "Infinity（本地）",
+        "hint": "Infinity 向量服务。"
+      },
+      "bge_m3": {
+        "name": "bge-m3（本地）",
+        "hint": "内置 bge-m3 服务：一次推理同时生成稠密向量和学习型关键词权重。"
+      },
+      "dashscope": {
+        "name": "阿里云百炼",
+        "hint": "通过 DashScope 调用通义 text-embedding-v3/v4，可同时生成关键词权重。"
+      },
+      "volcengine": {
+        "name": "火山方舟",
+        "hint": "豆包向量模型；填写方舟控制台中的模型名称或接入点 ID。"
+      },
+      "openai_compatible": {
+        "name": "OpenAI 兼容",
+        "hint": "OpenAI、智谱、硅基流动、vLLM、Ollama 等 /embeddings 接口。"
+      }
     }
   },
   "storage": {

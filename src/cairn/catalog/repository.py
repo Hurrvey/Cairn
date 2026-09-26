@@ -112,7 +112,10 @@ class CatalogRepository:
             select(
                 exists().where(
                     KnowledgeBase.workspace_id == workspace_id,
-                    KnowledgeBase.embedding_model_id == model_id,
+                    or_(
+                        KnowledgeBase.embedding_model_id == model_id,
+                        KnowledgeBase.sparse_model_id == model_id,
+                    ),
                 )
             )
         )
@@ -126,8 +129,17 @@ class CatalogRepository:
         )
         return any(
             isinstance(snapshot, dict)
-            and isinstance(snapshot.get("embedding_model"), dict)
-            and snapshot["embedding_model"].get("id") == str(model_id)
+            and (
+                (
+                    isinstance(snapshot.get("embedding_model"), dict)
+                    and snapshot["embedding_model"].get("id") == str(model_id)
+                )
+                or (
+                    isinstance(snapshot.get("sparse"), dict)
+                    and isinstance(snapshot["sparse"].get("model"), dict)
+                    and snapshot["sparse"]["model"].get("id") == str(model_id)
+                )
+            )
             for snapshot in snapshots
         )
 

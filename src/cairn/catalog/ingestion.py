@@ -28,6 +28,7 @@ from cairn.catalog.repository import CatalogRepository
 from cairn.core.db import session_scope, transaction
 from cairn.core.errors import CairnError, NotFound, ValidationFailed
 from cairn.core.modelref import ModelRef
+from cairn.core.sparse import SparseSpec
 from cairn.core.time import utcnow
 from cairn.tasks.dto import TaskContext, TaskSpec
 from cairn.tasks.service import TaskLeaseLostError, TaskService, get_task_service
@@ -90,6 +91,10 @@ class IngestionRun:
         return self.version_config.metric
 
     @property
+    def sparse(self) -> SparseSpec:
+        return self.version_config.sparse
+
+    @property
     def artifact_prefix(self) -> str:
         return (
             f"{self.workspace_id}/{self.kb_id}/i/{_compact_uuid(self.document_id)}/"
@@ -112,6 +117,7 @@ class DeletedBuildTarget:
     vector_binding: BindingRef
     embedding_dim: int
     metric: str
+    sparse_modifier: Literal["idf", "none"] = "idf"
 
 
 _T = TypeVar("_T")
@@ -742,6 +748,7 @@ class CatalogIngestionFacade:
                 vector_binding=_binding_ref(binding),
                 embedding_dim=embedding_dim,
                 metric=version_config.metric,
+                sparse_modifier=version_config.sparse.modifier,
             )
 
             async def before_external() -> float:
@@ -1017,6 +1024,7 @@ def _chunk_reembed_target(
         embedding_model=version_config.embedding_model,
         metric=version_config.metric,
         vector_binding=vector_binding,
+        sparse=version_config.sparse,
     )
 
 

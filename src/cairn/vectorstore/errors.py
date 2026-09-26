@@ -7,6 +7,7 @@ from cairn.core.errors import NotFound, UpstreamUnavailable, ValidationFailed
 __all__ = [
     "DimensionMismatch",
     "NamespaceNotFound",
+    "NamespaceSpecMismatch",
     "UnsupportedCapability",
     "UnsupportedFilter",
     "VectorStoreUnavailable",
@@ -29,6 +30,13 @@ class DimensionMismatch(ValidationFailed):
 class NamespaceNotFound(NotFound):
     code = "VECTOR_NAMESPACE_NOT_FOUND"
     title = "Vector namespace not found"
+
+
+class NamespaceSpecMismatch(ValidationFailed):
+    """An existing namespace was built with a different dimension, metric or sparse source."""
+
+    code = "VECTOR_NAMESPACE_MISMATCH"
+    title = "Vector namespace configuration mismatch"
 
 
 class VectorStoreUnavailable(UpstreamUnavailable):

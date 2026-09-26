@@ -38,6 +38,7 @@ from cairn.catalog.dto import (
     KnowledgeBaseView,
     ReindexEstimate,
     ReindexSpec,
+    SparseChoice,
     UpdateKbSpec,
     UploadSpec,
 )
@@ -64,6 +65,7 @@ from cairn.core.db import session_scope, transaction
 from cairn.core.errors import Conflict, NotFound, ValidationFailed
 from cairn.core.logging import get_logger
 from cairn.core.modelref import ModelRef
+from cairn.core.sparse import SparseSpec
 from cairn.core.time import utcnow
 from cairn.modelgw.catalog import ModelCatalog, get_model_catalog
 from cairn.objectstore.base import ObjectStore, Uploadable
@@ -133,6 +135,7 @@ class CatalogService:
         chunk_config = spec.chunk_config or ChunkConfig()
         retrieval_config = spec.retrieval_config or RetrievalConfig()
         slug = spec.slug or slugify(spec.name)
+        sparse = await self._resolve_sparse(actor.workspace_id, model, spec.sparse)
 
         async with transaction() as session:
             vector = await self._require_binding(session, actor, spec.vector_binding_id, "vector")
@@ -155,6 +158,8 @@ class CatalogService:
                     # would corrupt every vector written.
                     embedding_dim=model.dimension,
                     metric=spec.metric,
+                    sparse_kind=sparse.kind,
+                    sparse_model_id=sparse.model.id if sparse.model is not None else None,
                     vector_binding_id=vector.id,
                     object_binding_id=objects.id,
                     chunk_config=chunk_config.model_dump(mode="json"),
@@ -194,6 +199,51 @@ class CatalogService:
         await self.publish_runtime(kb.id)
         log.info("catalog.kb_created", kb_id=str(kb.id), embedding_dim=model.dimension)
         return view
+
+    async def _resolve_sparse(
+        self, workspace_id: UUID, embedding_model: ModelRef, choice: SparseChoice | None
+    ) -> SparseSpec:
+        """Turn a requested sparse source into a validated, snapshot-ready spec."""
+        choice = choice or SparseChoice()
+        if choice.kind == "bm25":
+            return SparseSpec()
+        if choice.kind == "model":
+            if choice.model_id is None:
+                raise ValidationFailed("Choose the model that produces the sparse vectors.")
+            return await self._sparse_model(workspace_id, choice.model_id)
+        if embedding_model.sparse:
+            return SparseSpec(kind="model", model=embedding_model)
+        candidates = [
+            model
+            for model in await self._models.list_models(workspace_id, "embedding")
+            if model.sparse
+            and model.is_enabled
+            and model.health_state != "unavailable"
+            and model.dimension
+            and model.tokenizer_id
+        ]
+        # Local first: the bge-m3 sidecar costs nothing per call; hosted vendors do.
+        candidates.sort(key=lambda model: (model.provider_family != "bge_m3", model.display_name))
+        for candidate in candidates:
+            try:
+                return await self._sparse_model(workspace_id, candidate.id)
+            except ValidationFailed:
+                continue
+        return SparseSpec()
+
+    async def _sparse_model(self, workspace_id: UUID, model_id: UUID) -> SparseSpec:
+        model = await self._models.require_embedding_model(workspace_id, model_id)
+        if not model.sparse:
+            raise ValidationFailed(
+                f"{model.model_key!r} does not produce sparse vectors; choose BM25 or a "
+                "sparse-capable model such as bge-m3."
+            )
+        return SparseSpec(kind="model", model=model)
+
+    async def _kb_sparse(self, kb: KnowledgeBase) -> SparseSpec:
+        if kb.sparse_kind != "model" or kb.sparse_model_id is None:
+            return SparseSpec()
+        return await self._sparse_model(kb.workspace_id, kb.sparse_model_id)
 
     async def get_kb(self, kb_id: UUID) -> KnowledgeBaseView:
         async with session_scope() as session:
@@ -381,6 +431,7 @@ class CatalogService:
                 parent_snapshots_safe=not await self._repo.has_edited_chunks(
                     session, kb.id, kb.active_index_version
                 ),
+                sparse=config.sparse,
             )
 
             async with asyncio.timeout(RUNTIME_CACHE_TIMEOUT_S):
@@ -462,6 +513,15 @@ class CatalogService:
             kb.embedding_dim = model.dimension
             if spec.chunk_config is not None:
                 kb.chunk_config = spec.chunk_config.model_dump(mode="json")
+            # Re-resolved even when unchanged, like the embedding model, so the
+            # version owns current registry metadata for its sparse model too.
+            sparse = (
+                await self._resolve_sparse(actor.workspace_id, model, spec.sparse)
+                if spec.sparse is not None
+                else await self._kb_sparse(kb)
+            )
+            kb.sparse_kind = sparse.kind
+            kb.sparse_model_id = sparse.model.id if sparse.model is not None else None
 
             new_version = _allocate_index_version(kb)
             kb.building_index_version = new_version
@@ -476,7 +536,7 @@ class CatalogService:
                     workspace_id=kb.workspace_id,
                     state="building",
                     physical_ref=Namespace(kb_id, new_version).key(),
-                    config_snapshot=_capture_version_config(kb, model),
+                    config_snapshot=_capture_version_config(kb, model, sparse),
                     enrollment_state=(
                         "scanning" if kb.active_index_version is not None else "complete"
                     ),
@@ -813,6 +873,7 @@ class CatalogService:
             model = await self._models.require_embedding_model(
                 kb.workspace_id, kb.embedding_model_id
             )
+            sparse = await self._kb_sparse(kb)
             index_version = _allocate_index_version(kb)
             kb.building_index_version = index_version
             kb.status = "indexing"
@@ -824,7 +885,7 @@ class CatalogService:
                     workspace_id=kb.workspace_id,
                     state="building",
                     physical_ref=Namespace(kb.id, index_version).key(),
-                    config_snapshot=_capture_version_config(kb, model),
+                    config_snapshot=_capture_version_config(kb, model, sparse),
                 ),
             )
 
@@ -1546,6 +1607,8 @@ def _kb_view(kb: KnowledgeBase) -> KnowledgeBaseView:
         object_binding_id=kb.object_binding_id,
         chunk_config=ChunkConfig.model_validate(kb.chunk_config or {}),
         retrieval_config=RetrievalConfig.model_validate(kb.retrieval_config or {}),
+        sparse_kind=kb.sparse_kind,
+        sparse_model_id=kb.sparse_model_id,
         active_index_version=kb.active_index_version,
         building_index_version=kb.building_index_version,
         config_version=kb.config_version,
@@ -1629,11 +1692,14 @@ def _index_version_view(row: KbIndexVersion) -> IndexVersionView:
     )
 
 
-def _capture_version_config(kb: KnowledgeBase, model: ModelRef) -> dict[str, object]:
+def _capture_version_config(
+    kb: KnowledgeBase, model: ModelRef, sparse: SparseSpec
+) -> dict[str, object]:
     config = IndexVersionConfig(
         embedding_model=model,
         metric=kb.metric,
         chunk_config=ChunkConfig.model_validate(kb.chunk_config or {}),
+        sparse=sparse,
     )
     return config.model_dump(mode="json")
 

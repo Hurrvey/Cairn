@@ -39,6 +39,7 @@ _SAFE_IDENTIFIER = re.compile(r"[a-z_][a-z0-9_]{0,62}")
 Metric = Literal["cosine", "dot", "l2"]
 Quantization = Literal["none", "scalar_int8", "binary"]
 Layout = Literal["auto", "shared", "dedicated"]
+SparseModifier = Literal["idf", "none"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +91,9 @@ class NamespaceSpec:
     sparse: bool = True
     quantization: Quantization = "none"
     layout_hint: Layout = "auto"
+    #: ``idf`` when sparse weights are term frequencies (BM25) and the index must
+    #: supply inverse document frequency; ``none`` for learned weights.
+    sparse_modifier: SparseModifier = "idf"
     #: Escape hatch for backend-specific tuning (HNSW m/ef_construction, text
     #: search configuration). Typed per driver, ignored by drivers that do not
     #: recognise a key.

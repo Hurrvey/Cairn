@@ -46,6 +46,7 @@ dependencies = [
     "pillow==12.3.0",
     "qdrant-client>=1.19.1",
     "jieba>=0.42.1",
+    "cryptography>=45",
 ]
 
 [project.optional-dependencies]
@@ -155,7 +156,7 @@ files = ["src/cairn", "apps"]
 [[tool.mypy.overrides]]
 # The `otel` extra is optional at runtime (telemetry.py guards the import), so
 # its stubs are not guaranteed to be installed.
-module = ["testcontainers.*", "argon2.*", "opentelemetry.*", "asyncpg.*", "jieba.*"]
+module = ["testcontainers.*", "argon2.*", "opentelemetry.*", "asyncpg.*", "jieba.*", "FlagEmbedding.*", "torch.*"]
 ignore_missing_imports = true
 
 # ---------------------------------------------------------------------------

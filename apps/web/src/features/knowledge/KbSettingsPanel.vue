@@ -17,11 +17,12 @@ import Notice from "@/components/ui/Notice.vue";
 import Switch from "@/components/ui/Switch.vue";
 import Textarea from "@/components/ui/Textarea.vue";
 import Section from "@/shared/components/Section.vue";
+import { autoSparseModel, parseSparseValue, type SparseChoice } from "@/features/knowledge/sparse";
 import { useToasts } from "@/shared/composables/useToasts";
 import { describeError } from "@/shared/errors";
 
-const props = defineProps<{ kb: KnowledgeBase; options: SetupOptions | undefined }>();
-const emit = defineEmits<{ saved: []; delete: [] }>();
+const props = defineProps<{ kb: KnowledgeBase; options: SetupOptions | undefined; building?: boolean }>();
+const emit = defineEmits<{ saved: []; delete: []; rebuild: [sparse: SparseChoice] }>();
 const { t } = useI18n();
 const toasts = useToasts();
 
@@ -52,6 +53,19 @@ const chunking = reactive({
 const saving = ref<"general" | "retrieval" | "chunking" | null>(null);
 const errors = reactive<{ general: string | null; retrieval: string | null; chunking: string | null }>({ general: null, retrieval: null, chunking: null });
 const fieldErrors = ref<Record<string, string[]>>({});
+
+const keywordNext = ref(props.kb.sparse_kind === "model" && props.kb.sparse_model_id ? `model:${props.kb.sparse_model_id}` : "bm25");
+const sparseModels = computed(() => props.options?.models.filter((model) => model.sparse) ?? []);
+function sparseName(kind: string, modelId: string | null | undefined): string {
+  if (kind !== "model") return t("knowledge.create.keywordBm25");
+  const model = props.options?.models.find((item) => item.id === modelId);
+  return t("knowledge.create.keywordModel", { name: model?.display_name ?? modelId ?? "" });
+}
+const keywordCurrent = computed(() => sparseName(props.kb.sparse_kind ?? "bm25", props.kb.sparse_model_id));
+const keywordAuto = computed(() => {
+  const model = autoSparseModel(props.kb.embedding_model_id, props.options?.models ?? []);
+  return model ? t("knowledge.create.keywordModel", { name: model.display_name }) : t("knowledge.create.keywordBm25");
+});
 
 const modelLabel = computed(() => {
   const model = props.options?.models.find((item) => item.id === props.kb.embedding_model_id);
@@ -177,6 +191,28 @@ async function save(section: "general" | "retrieval" | "chunking"): Promise<void
         </div>
         <div><Button type="submit" variant="primary" :loading="saving === 'retrieval'" data-test="save-retrieval">{{ t("common.save") }}</Button></div>
       </form>
+    </Section>
+
+    <Section :title="t('knowledge.settings.keyword.title')" :description="t('knowledge.settings.keyword.description')" id="kb-keyword">
+      <div class="grid gap-3">
+        <p class="text-[13px] text-ink-2" data-test="keyword-current">
+          {{ t("knowledge.settings.keyword.current") }} · <span class="font-medium text-ink">{{ keywordCurrent }}</span>
+        </p>
+        <div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+          <Field :label="t('knowledge.settings.keyword.next')" v-slot="{ id }">
+            <NativeSelect :id="id" v-model="keywordNext" data-test="keyword-next">
+              <option value="auto">{{ t("knowledge.create.keywordAuto", { choice: keywordAuto }) }}</option>
+              <option value="bm25">{{ t("knowledge.create.keywordBm25") }}</option>
+              <option v-for="model in sparseModels" :key="model.id" :value="`model:${model.id}`">
+                {{ t("knowledge.create.keywordModel", { name: model.display_name }) }}
+              </option>
+            </NativeSelect>
+          </Field>
+          <Button variant="secondary" :disabled="building" data-test="keyword-rebuild" @click="emit('rebuild', parseSparseValue(keywordNext))">
+            {{ t("knowledge.settings.keyword.rebuild") }}
+          </Button>
+        </div>
+      </div>
     </Section>
 
     <Section :title="t('knowledge.settings.chunking.title')" :description="t('knowledge.settings.chunking.description')" id="kb-chunking">

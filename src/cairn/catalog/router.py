@@ -28,6 +28,7 @@ from cairn.catalog.dto import (
     CreateKbSpec,
     ReindexEstimate,
     ReindexSpec,
+    SparseChoice,
     UpdateKbSpec,
     UploadSpec,
 )
@@ -49,6 +50,7 @@ from cairn.catalog.schemas import (
     ReindexEstimateResponse,
     ReindexRequest,
     SafeBindingResponse,
+    SparseChoiceRequest,
     UpdateKbRequest,
 )
 from cairn.catalog.service import CatalogService, get_catalog_service
@@ -194,9 +196,19 @@ async def create_knowledge_base(
             chunk_config=body.chunk_config,
             retrieval_config=body.retrieval_config,
             metadata=body.metadata,
+            sparse=_sparse_choice(body.sparse),
         ),
     )
     return KnowledgeBaseResponse.from_dto(view)
+
+
+def _sparse_choice(body: SparseChoiceRequest | None) -> SparseChoice | None:
+    if body is None:
+        return None
+    return SparseChoice(
+        kind=body.kind,
+        model_id=decode_id("mdl", body.model_id) if body.model_id is not None else None,
+    )
 
 
 @router.get(
@@ -323,6 +335,7 @@ async def start_reindex(
                 decode_id("mdl", body.embedding_model_id) if body.embedding_model_id else None
             ),
             chunk_config=body.chunk_config,
+            sparse=_sparse_choice(body.sparse),
             confirm=body.confirm,
             reason=body.reason,
         ),

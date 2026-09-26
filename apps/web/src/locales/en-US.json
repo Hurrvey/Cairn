@@ -189,7 +189,12 @@
       "objectStorage": "Document storage",
       "vectorStorage": "Vector storage",
       "strategyHint": "Parent–child keeps small searchable chunks with wider context.",
-      "setupMissing": "An administrator must register an embedding model and add document and vector storage first."
+      "setupMissing": "An administrator must register an embedding model and add document and vector storage first.",
+      "keyword": "Keyword search",
+      "keywordHint": "How exact words and codes are matched. Changing it later requires a rebuild.",
+      "keywordAuto": "Automatic ({choice})",
+      "keywordBm25": "BM25 (built in)",
+      "keywordModel": "{name} keyword weights"
     },
     "delete": {
       "action": "Delete knowledge base",
@@ -398,6 +403,13 @@
       "danger": {
         "title": "Danger zone",
         "description": "Deleting removes every document, chunk and vector. This cannot be undone."
+      },
+      "keyword": {
+        "title": "Keyword search",
+        "description": "Where the keyword vectors used by full-text and hybrid search come from. A change builds a new index version.",
+        "current": "Current",
+        "next": "Rebuild with",
+        "rebuild": "Rebuild with this source"
       }
     }
   },
@@ -414,10 +426,10 @@
     },
     "provider": {
       "title": "Providers",
-      "description": "TEI and Infinity endpoints this deployment may call.",
+      "description": "Embedding services this deployment may call: local services and hosted vendors.",
       "one": "Provider",
       "add": "Add provider",
-      "addHint": "The local Compose service is http://embedding:80. Only add addresses you trust.",
+      "addHint": "Choose a type; hosted vendors need an API key. Only add addresses you trust.",
       "emptyTitle": "No provider yet",
       "emptyBody": "Add the local embedding service to begin.",
       "dialect": "Dialect",
@@ -430,13 +442,23 @@
       "created": "Provider added.",
       "deleteTitle": "Delete provider {name}?",
       "deleteBody": "Providers with registered models cannot be deleted.",
-      "deleted": "Provider deleted."
+      "deleted": "Provider deleted.",
+      "family": "Type",
+      "endpointHostedHint": "The vendor's public endpoint. Change it only for another region.",
+      "apiKey": "API key",
+      "apiKeyHint": "Stored encrypted and never shown again.",
+      "batch": "Texts per request",
+      "batchHint": "Vendors cap this; Alibaba Cloud accepts 10.",
+      "keySet": "Key saved",
+      "replaceKey": "Replace API key",
+      "replaceKeyHint": "The new key replaces {name}'s current key immediately.",
+      "keyReplaced": "API key replaced."
     },
     "model": {
       "title": "Models",
       "description": "Dimensions and the token limit must match the deployed model.",
       "add": "Register model",
-      "addHint": "Defaults match the bundled MiniLM model.",
+      "addHint": "Pick a preset, then adjust it to match the deployed model.",
       "emptyTitle": "No model registered",
       "emptyBody": "Register the model served by your provider, then test it.",
       "emptyNeedsProvider": "Add a provider first.",
@@ -456,7 +478,45 @@
       "created": "Model registered.",
       "deleteTitle": "Delete model {name}?",
       "deleteBody": "Models used by a knowledge base cannot be deleted.",
-      "deleted": "Model deleted."
+      "deleted": "Model deleted.",
+      "preset": "Preset",
+      "presetHint": "Fills in the known settings for a model.",
+      "presetNone": "No presets for this type",
+      "keyHintArk": "The model name or endpoint ID (ep-…) from the Ark console.",
+      "dimensionHint": "Leave empty to detect it from the provider.",
+      "dimensionAuto": "Detect automatically",
+      "queryPrefix": "Query instruction",
+      "queryPrefixHint": "Added before search queries only, for models trained with one.",
+      "sparse": "Returns keyword weights (sparse vectors)",
+      "sendDimension": "Request exactly this dimension from the provider",
+      "sparseBadge": "Keyword weights",
+      "testOkSparse": "Healthy · {dims} dimensions · {tokens} tokens · {terms} keyword terms"
+    },
+    "families": {
+      "tei": {
+        "name": "TEI (local)",
+        "hint": "Hugging Face Text Embeddings Inference, such as the bundled MiniLM."
+      },
+      "infinity": {
+        "name": "Infinity (local)",
+        "hint": "An Infinity embedding server."
+      },
+      "bge_m3": {
+        "name": "bge-m3 (local)",
+        "hint": "The bundled bge-m3 service: dense vectors and learned keyword weights in one pass."
+      },
+      "dashscope": {
+        "name": "Alibaba Cloud Model Studio",
+        "hint": "Qwen text-embedding-v3/v4 through DashScope, with keyword weights."
+      },
+      "volcengine": {
+        "name": "Volcengine Ark",
+        "hint": "Doubao embedding models; use the model or endpoint ID from the Ark console."
+      },
+      "openai_compatible": {
+        "name": "OpenAI-compatible",
+        "hint": "OpenAI, Zhipu, SiliconFlow, vLLM, Ollama and other /embeddings APIs."
+      }
     }
   },
   "storage": {

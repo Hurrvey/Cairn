@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict
 
 from cairn.catalog.config import ChunkConfig, RetrievalConfig
 from cairn.core.retrieval_runtime import BindingRefModel, KnowledgeBaseRuntime
+from cairn.core.sparse import SparseSpec
 from cairn.modelgw.dto import ModelRef
 
 __all__ = [
@@ -98,6 +99,8 @@ class KnowledgeBaseView:
     bytes_used: int
     last_indexed_at: datetime | None
     created_at: datetime
+    sparse_kind: str = "bm25"
+    sparse_model_id: UUID | None = None
     #: True when a config change needs a rebuild before it takes effect. Set on
     #: an update response so the UI can prompt rather than leaving the user to
     #: wonder why nothing changed.
@@ -112,6 +115,9 @@ class IndexVersionConfig(BaseModel):
     embedding_model: ModelRef
     metric: Literal["cosine", "dot", "l2"]
     chunk_config: ChunkConfig
+    #: Where this version's sparse vectors come from. Snapshots written before
+    #: learned sparse vectors existed were built with BM25, the default.
+    sparse: SparseSpec = SparseSpec()
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,9 +137,23 @@ class ChunkReembedTarget:
     embedding_model: ModelRef
     metric: Literal["cosine", "dot", "l2"]
     vector_binding: BindingRef
+    sparse: SparseSpec = field(default_factory=SparseSpec)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "metadata", deepcopy(self.metadata))
+
+
+@dataclass(frozen=True, slots=True)
+class SparseChoice:
+    """How a knowledge base's sparse (keyword) vectors should be produced.
+
+    ``auto`` picks the best available: the embedding model's own sparse output,
+    else an enabled sparse model in the workspace (local bge-m3 before paid
+    vendors), else BM25.
+    """
+
+    kind: Literal["auto", "bm25", "model"] = "auto"
+    model_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,6 +168,7 @@ class CreateKbSpec:
     chunk_config: ChunkConfig | None = None
     retrieval_config: RetrievalConfig | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    sparse: SparseChoice | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,6 +204,8 @@ class ReindexSpec:
     #: The only way to change a knowledge base's embedding model.
     embedding_model_id: UUID | None = None
     chunk_config: ChunkConfig | None = None
+    #: The only way to change a knowledge base's sparse source.
+    sparse: SparseChoice | None = None
     confirm: bool = False
     reason: str | None = None
 

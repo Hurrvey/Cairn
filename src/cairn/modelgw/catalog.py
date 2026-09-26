@@ -10,19 +10,27 @@ from __future__ import annotations
 import asyncio
 from uuid import UUID
 
+from pydantic import SecretStr
 from sqlalchemy import exists, func, select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from cairn.core.cache import Cache, get_cache
+from cairn.core.config import get_settings
 from cairn.core.db import session_scope, transaction
 from cairn.core.errors import Conflict, NotFound, ValidationFailed
+from cairn.core.ids import new_uuid
 from cairn.core.logging import get_logger
 from cairn.core.provider_runtime import (
+    HOSTED_FAMILIES,
+    PROVIDER_FAMILIES,
     PROVIDER_RUNTIME_TTL,
+    SPARSE_FAMILIES,
     ProviderRuntimeProjection,
     provider_runtime_key,
     provider_runtime_tombstone_key,
 )
+from cairn.core.secrets import SealedCredential, SealedSecret, seal, unseal
 from cairn.modelgw.dto import (
     Capability,
     EmbeddingRuntimeRef,
@@ -31,12 +39,14 @@ from cairn.modelgw.dto import (
     ProviderView,
     RegisterModelSpec,
 )
-from cairn.modelgw.models import Model, ModelProvider
+from cairn.modelgw.models import Model, ModelProvider, Secret
 
 __all__ = ["SUPPORTED_FAMILIES", "ModelCatalog", "get_model_catalog"]
 
 log = get_logger(__name__)
 _RUNTIME_CACHE_TIMEOUT_S = 2.0
+#: ``secret.purpose`` for provider API keys; part of the ciphertext's associated data.
+PROVIDER_SECRET_PURPOSE = "model_provider"  # noqa: S105 - a label, not a credential
 
 #: Provider families the gateway will support. Registration accepts any of them
 #: now; the adapters that actually call them arrive with M10.
@@ -55,7 +65,7 @@ SUPPORTED_FAMILIES: frozenset[str] = frozenset(
         "jina",
         "openai_compatible",
     }
-)
+) | frozenset(PROVIDER_FAMILIES)
 
 
 class ModelCatalog:
@@ -76,12 +86,15 @@ class ModelCatalog:
         family: str,
         base_url: str | None = None,
         config: dict[str, object] | None = None,
+        api_key: SecretStr | None = None,
     ) -> ProviderView:
         if family not in SUPPORTED_FAMILIES:
             raise ValidationFailed(
                 f"Unknown provider family {family!r}. "
                 f"Supported: {', '.join(sorted(SUPPORTED_FAMILIES))}."
             )
+        if family in HOSTED_FAMILIES and api_key is None:
+            raise ValidationFailed(f"The {family} provider requires an API key.")
         async with transaction() as session:
             existing = await session.scalar(
                 select(ModelProvider).where(
@@ -98,9 +111,59 @@ class ModelCatalog:
                 base_url=base_url,
                 config=dict(config or {}),
             )
+            if api_key is not None:
+                provider.secret_ref = await _store_secret(session, workspace_id, api_key)
             session.add(provider)
             await session.flush()
             return _provider_view(provider, model_count=0)
+
+    async def set_provider_credentials(
+        self, workspace_id: UUID, provider_id: UUID, api_key: SecretStr | None
+    ) -> ProviderView:
+        """Replace (or, where allowed, remove) a provider's API key."""
+        async with transaction() as session:
+            provider = await session.get(ModelProvider, provider_id, with_for_update=True)
+            if provider is None or provider.workspace_id != workspace_id:
+                raise NotFound("Provider not found.")
+            if api_key is None and provider.family in HOSTED_FAMILIES:
+                raise ValidationFailed(f"The {provider.family} provider requires an API key.")
+            previous = provider.secret_ref
+            provider.secret_ref = (
+                await _store_secret(session, workspace_id, api_key) if api_key is not None else None
+            )
+            await session.flush()
+            if previous is not None:
+                old = await session.get(Secret, previous)
+                if old is not None:
+                    await session.delete(old)
+            count = int(
+                await session.scalar(
+                    select(func.count(Model.id)).where(Model.provider_id == provider.id)
+                )
+                or 0
+            )
+            view = _provider_view(provider, model_count=count)
+        log.info("modelgw.provider_credentials_replaced", provider_id=str(provider_id))
+        return view
+
+    async def provider_api_key(self, provider_id: UUID) -> SecretStr | None:
+        """Decrypt a provider's key for a worker. Never logged, never returned by the API."""
+        async with session_scope() as session:
+            provider = await session.get(ModelProvider, provider_id)
+            if provider is None:
+                raise NotFound("Provider not found.")
+            if provider.secret_ref is None:
+                return None
+            secret = await session.get(Secret, provider.secret_ref)
+            if secret is None:
+                raise NotFound("Provider credential not found.")
+        return unseal(
+            _sealed(secret),
+            master_key=get_settings().master_key,
+            workspace_id=secret.workspace_id,
+            purpose=secret.purpose,
+            secret_id=secret.id,
+        )
 
     async def list_providers(self, workspace_id: UUID) -> list[ProviderView]:
         async with session_scope() as session:
@@ -143,7 +206,13 @@ class ModelCatalog:
                         b"deleted",
                         PROVIDER_RUNTIME_TTL,
                     )
+                secret_ref = provider.secret_ref
                 await session.delete(provider)
+                if secret_ref is not None:
+                    await session.flush()
+                    secret = await session.get(Secret, secret_ref)
+                    if secret is not None:
+                        await session.delete(secret)
         except IntegrityError as exc:
             raise Conflict("The provider is still referenced by a model.") from exc
 
@@ -151,7 +220,7 @@ class ModelCatalog:
         async with session_scope() as session:
             stmt = select(ModelProvider.id).where(
                 ModelProvider.is_enabled.is_(True),
-                ModelProvider.family.in_(("tei", "infinity")),
+                ModelProvider.family.in_(PROVIDER_FAMILIES),
             )
             if after is not None:
                 stmt = stmt.where(ModelProvider.id > after)
@@ -169,7 +238,12 @@ class ModelCatalog:
                         PROVIDER_RUNTIME_TTL,
                     )
                 return False
-            projection = _provider_runtime_projection(provider)
+            secret = (
+                await session.get(Secret, provider.secret_ref)
+                if provider.secret_ref is not None
+                else None
+            )
+            projection = _provider_runtime_projection(provider, secret)
             async with asyncio.timeout(_RUNTIME_CACHE_TIMEOUT_S):
                 await self.cache.set(
                     provider_runtime_key(provider_id),
@@ -203,6 +277,11 @@ class ModelCatalog:
             if provider is None or provider.workspace_id != workspace_id:
                 raise NotFound("Provider not found.")
 
+            if spec.sparse and provider.family not in SPARSE_FAMILIES:
+                raise ValidationFailed(
+                    f"{provider.family} models do not return sparse vectors; only "
+                    f"{', '.join(sorted(SPARSE_FAMILIES))} providers can."
+                )
             existing = await session.scalar(
                 select(Model).where(
                     Model.provider_id == spec.provider_id, Model.model_key == spec.model_key
@@ -225,6 +304,8 @@ class ModelCatalog:
                 query_prefix=spec.query_prefix,
                 optimal_batch_size=spec.optimal_batch_size,
                 tokenizer_id=spec.tokenizer_id,
+                sparse=spec.sparse,
+                send_dimension=spec.send_dimension,
             )
             session.add(model)
             await session.flush()
@@ -287,6 +368,8 @@ class ModelCatalog:
             tokenizer_id=model.tokenizer_id,
             provider_id=provider.id,
             dynamic_provider=True,
+            sparse=model.sparse,
+            send_dimension=model.send_dimension,
         )
 
     async def require_embedding_model(self, workspace_id: UUID, model_id: UUID) -> ModelRef:
@@ -327,6 +410,11 @@ class ModelCatalog:
             provider = await session.get(ModelProvider, model.provider_id)
             if provider is None or not provider.is_enabled:
                 raise NotFound("Embedding provider not found.")
+            secret = (
+                await session.get(Secret, provider.secret_ref)
+                if provider.secret_ref is not None
+                else None
+            )
         return EmbeddingRuntimeRef(
             model=await self.get_ref(model_id),
             provider_id=provider.id,
@@ -334,7 +422,37 @@ class ModelCatalog:
             base_url=provider.base_url,
             config=dict(provider.config or {}),
             has_credentials=provider.secret_ref is not None,
+            credential=(
+                SealedCredential.from_sealed(
+                    _sealed(secret), secret_id=secret.id, purpose=secret.purpose
+                )
+                if secret is not None
+                else None
+            ),
+            workspace_id=provider.workspace_id,
         )
+
+    async def provider_runtime(
+        self, workspace_id: UUID, provider_id: UUID
+    ) -> ProviderRuntimeProjection:
+        """The same projection the data plane receives, for probing a provider."""
+        async with session_scope() as session:
+            provider = await session.get(ModelProvider, provider_id)
+            if provider is None or provider.workspace_id != workspace_id:
+                raise NotFound("Provider not found.")
+            secret = (
+                await session.get(Secret, provider.secret_ref)
+                if provider.secret_ref is not None
+                else None
+            )
+            return _provider_runtime_projection(provider, secret)
+
+    async def provider_family(self, workspace_id: UUID, provider_id: UUID) -> str:
+        async with session_scope() as session:
+            provider = await session.get(ModelProvider, provider_id)
+            if provider is None or provider.workspace_id != workspace_id:
+                raise NotFound("Provider not found.")
+            return provider.family
 
     async def set_model_health(self, workspace_id: UUID, model_id: UUID, healthy: bool) -> None:
         from cairn.core.time import utcnow
@@ -378,11 +496,15 @@ def _model_view(model: Model, provider: ModelProvider) -> ModelView:
         is_enabled=model.is_enabled,
         health_state=model.health_state,
         checked_at=model.checked_at,
+        sparse=model.sparse,
+        send_dimension=model.send_dimension,
     )
 
 
-def _provider_runtime_projection(provider: ModelProvider) -> ProviderRuntimeProjection:
-    if provider.family not in {"tei", "infinity"} or provider.base_url is None:
+def _provider_runtime_projection(
+    provider: ModelProvider, secret: Secret | None = None
+) -> ProviderRuntimeProjection:
+    if provider.family not in PROVIDER_FAMILIES or provider.base_url is None:
         raise ValidationFailed("The provider does not have a supported runtime endpoint.")
     config = dict(provider.config or {})
     revision = config.get("binding_revision")
@@ -403,6 +525,49 @@ def _provider_runtime_projection(provider: ModelProvider) -> ProviderRuntimeProj
         allow_private=allow_private,
         binding_revision=revision,
         max_batch_size=max_batch_size,
+        credential=(
+            SealedCredential.from_sealed(
+                _sealed(secret), secret_id=secret.id, purpose=secret.purpose
+            )
+            if secret is not None
+            else None
+        ),
+    )
+
+
+async def _store_secret(session: AsyncSession, workspace_id: UUID, api_key: SecretStr) -> UUID:
+    value = api_key.get_secret_value().strip()
+    if not value:
+        raise ValidationFailed("The API key must not be empty.")
+    secret_id = new_uuid()
+    sealed = seal(
+        value,
+        master_key=get_settings().master_key,
+        workspace_id=workspace_id,
+        purpose=PROVIDER_SECRET_PURPOSE,
+        secret_id=secret_id,
+    )
+    session.add(
+        Secret(
+            id=secret_id,
+            workspace_id=workspace_id,
+            purpose=PROVIDER_SECRET_PURPOSE,
+            ciphertext=sealed.ciphertext,
+            nonce=sealed.nonce,
+            wrapped_dek=sealed.wrapped_dek,
+            key_version=sealed.key_version,
+        )
+    )
+    await session.flush()
+    return secret_id
+
+
+def _sealed(secret: Secret) -> SealedSecret:
+    return SealedSecret(
+        ciphertext=secret.ciphertext,
+        nonce=secret.nonce,
+        wrapped_dek=secret.wrapped_dek,
+        key_version=secret.key_version,
     )
 
 

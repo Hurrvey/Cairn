@@ -1,0 +1,21 @@
+# NVIDIA GPU for the bge-m3 sidecar (fp16, CUDA torch):
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile bge-m3 up -d --build
+#
+# Needs the NVIDIA container runtime (Docker Desktop with WSL 2 on Windows, or
+# nvidia-container-toolkit on Linux). The CUDA image is several gigabytes.
+services:
+  bge-m3:
+    build:
+      args:
+        TORCH_INDEX_URL: https://download.pytorch.org/whl/cu126
+    image: cairn-bge-m3:cuda
+    environment:
+      BGE_M3_DEVICE: cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

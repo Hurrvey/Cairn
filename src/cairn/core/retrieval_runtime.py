@@ -8,6 +8,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from cairn.core.modelref import ModelRef
+from cairn.core.sparse import SparseSpec
 
 __all__ = [
     "BindingRefModel",
@@ -104,3 +105,5 @@ class KnowledgeBaseRuntime(BaseModel):
     status: KbStatus
     # Legacy projections fail closed. Manual chunk corrections invalidate parent context.
     parent_snapshots_safe: bool = False
+    #: Where the ACTIVE version's sparse vectors came from; queries must match it.
+    sparse: SparseSpec = SparseSpec()

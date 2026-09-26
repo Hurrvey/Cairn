@@ -48,6 +48,7 @@ from cairn.vectorstore.base import (
 from cairn.vectorstore.errors import (
     DimensionMismatch,
     NamespaceNotFound,
+    NamespaceSpecMismatch,
     UnsupportedCapability,
     UnsupportedFilter,
     VectorStoreUnavailable,
@@ -68,6 +69,7 @@ _DISTANCE: dict[str, models.Distance] = {
     "dot": models.Distance.DOT,
     "l2": models.Distance.EUCLID,
 }
+_MODIFIER = {"idf": models.Modifier.IDF, "none": models.Modifier.NONE}
 _METRIC: dict[models.Distance, Metric] = {
     models.Distance.COSINE: "cosine",
     models.Distance.DOT: "dot",
@@ -114,7 +116,20 @@ class QdrantVectorStore:
         name = ns.key()
         options = dict(spec.driver_options)
         async with _backend(name):
-            if not await self._client.collection_exists(name):
+            if await self._client.collection_exists(name):
+                existing = await self._spec_for(ns)
+                if (existing.dim, existing.metric, existing.sparse, existing.sparse_modifier) != (
+                    spec.dim,
+                    spec.metric,
+                    spec.sparse,
+                    spec.sparse_modifier,
+                ):
+                    # Writing into a collection built for another model or
+                    # sparse source would mix incompatible spaces silently.
+                    raise NamespaceSpecMismatch(
+                        f"Vector namespace {name} exists with a different configuration."
+                    )
+            else:
                 try:
                     await self._client.create_collection(
                         name,
@@ -129,7 +144,11 @@ class QdrantVectorStore:
                             )
                         },
                         sparse_vectors_config=(
-                            {SPARSE: models.SparseVectorParams(modifier=models.Modifier.IDF)}
+                            {
+                                SPARSE: models.SparseVectorParams(
+                                    modifier=_MODIFIER[spec.sparse_modifier]
+                                )
+                            }
                             if spec.sparse
                             else None
                         ),
@@ -189,10 +208,13 @@ class QdrantVectorStore:
         dense = vectors.get(DENSE) if isinstance(vectors, Mapping) else None
         if dense is None:
             raise NamespaceNotFound(f"Vector namespace {name} has no dense vector.")
+        sparse_params = (info.config.params.sparse_vectors or {}).get(SPARSE)
+        learned = sparse_params is not None and sparse_params.modifier != models.Modifier.IDF
         spec = NamespaceSpec(
             dim=dense.size,
             metric=_METRIC[dense.distance],
-            sparse=bool(info.config.params.sparse_vectors),
+            sparse=sparse_params is not None,
+            sparse_modifier="none" if learned else "idf",
         )
         self._specs[name] = spec
         return spec

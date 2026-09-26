@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from cairn.catalog.config import ChunkConfig, RetrievalConfig
 from cairn.catalog.dto import (
@@ -59,6 +59,23 @@ _HASH_PATTERN = r"^[a-f0-9]{64}$"
 # --------------------------------------------------------------- requests
 
 
+class SparseChoiceRequest(BaseModel):
+    """How keyword (sparse) vectors are produced for the next index version."""
+
+    model_config = _Strict
+
+    #: ``auto`` picks the embedding model's own sparse output, else an enabled
+    #: sparse model (local bge-m3 first), else BM25.
+    kind: Literal["auto", "bm25", "model"] = "auto"
+    model_id: str | None = Field(default=None, description="Prefixed model id when kind=model.")
+
+    @model_validator(mode="after")
+    def _model_only_for_model(self) -> SparseChoiceRequest:
+        if (self.kind == "model") != (self.model_id is not None):
+            raise ValueError("model_id is required exactly when kind is 'model'")
+        return self
+
+
 class CreateKbRequest(BaseModel):
     model_config = _Strict
 
@@ -74,6 +91,7 @@ class CreateKbRequest(BaseModel):
     chunk_config: ChunkConfig | None = None
     retrieval_config: RetrievalConfig | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    sparse: SparseChoiceRequest | None = None
 
 
 class UpdateKbRequest(BaseModel):
@@ -102,6 +120,8 @@ class ReindexRequest(BaseModel):
         default=None, description="The only supported way to change the embedding model."
     )
     chunk_config: ChunkConfig | None = None
+    #: The only supported way to change where keyword vectors come from.
+    sparse: SparseChoiceRequest | None = None
     #: Without this the request is costed and nothing is started. See
     #: `ReindexEstimateResponse`.
     confirm: bool = False
@@ -152,6 +172,8 @@ class ModelChoiceResponse(BaseModel):
     dimension: int | None
     max_input_tokens: int | None
     tokenizer_id: str | None
+    provider_family: str = ""
+    sparse: bool = False
 
     @classmethod
     def from_dto(cls, model: ModelView) -> ModelChoiceResponse:
@@ -163,6 +185,8 @@ class ModelChoiceResponse(BaseModel):
             dimension=model.dimension,
             max_input_tokens=model.max_input_tokens,
             tokenizer_id=model.tokenizer_id,
+            provider_family=model.provider_family,
+            sparse=model.sparse,
         )
 
 
@@ -216,6 +240,8 @@ class KnowledgeBaseResponse(BaseModel):
     bytes_used: int
     last_indexed_at: datetime | None
     created_at: datetime
+    sparse_kind: str = "bm25"
+    sparse_model_id: str | None = None
     #: True when a config change needs a rebuild before it takes effect, so the
     #: UI can prompt instead of leaving the user wondering why nothing changed.
     reindex_required: bool = False
@@ -229,6 +255,10 @@ class KnowledgeBaseResponse(BaseModel):
             description=kb.description,
             icon_url=kb.icon_url,
             embedding_model_id=encode_id("mdl", kb.embedding_model_id),
+            sparse_kind=kb.sparse_kind,
+            sparse_model_id=(
+                encode_id("mdl", kb.sparse_model_id) if kb.sparse_model_id is not None else None
+            ),
             embedding_dim=kb.embedding_dim,
             metric=kb.metric,
             vector_binding_id=encode_id("bind", kb.vector_binding_id),

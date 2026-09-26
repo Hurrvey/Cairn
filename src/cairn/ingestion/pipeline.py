@@ -23,8 +23,9 @@ from cairn.catalog.ingestion import (
 from cairn.core.errors import CairnError
 from cairn.core.logging import get_logger
 from cairn.core.modelref import ModelRef
+from cairn.core.sparse import SparseSpec
 from cairn.embedding.service import EmbeddingService
-from cairn.embedding.sparse import encode_document
+from cairn.embedding.sparse import ENCODER_ID, encode_document
 from cairn.embedding.tokenizers import Tokenizer
 from cairn.ingestion.artifacts import (
     ChunkManifest,
@@ -47,7 +48,15 @@ from cairn.objectstore.errors import ObjectNotFound, ObjectTooLarge
 from cairn.tasks.dto import TaskContext, TaskResult
 from cairn.tasks.service import TaskLeaseLostError
 from cairn.tasks.worker import TaskWorker
-from cairn.vectorstore.base import Hit, Metric, Namespace, NamespaceSpec, Point, VectorStore
+from cairn.vectorstore.base import (
+    Hit,
+    Metric,
+    Namespace,
+    NamespaceSpec,
+    Point,
+    SparseVector,
+    VectorStore,
+)
 from cairn.vectorstore.filters import Compare
 
 log = get_logger(__name__)
@@ -246,6 +255,7 @@ class IngestionPipeline:
             )
             _verify_manifest_identity(run, chunks)
             prepared = await self._prepared_embedding(run)
+            sparse_prepared = await self._prepared_sparse(run.sparse, prepared)
             previous = await self._previous_embeddings(run, store)
             manifest = await create_embedding_manifest(
                 document_id=run.document_id,
@@ -257,6 +267,8 @@ class IngestionPipeline:
                 binding_fingerprint=prepared.binding_fingerprint,
                 service=prepared.service,
                 previous=previous,
+                sparse=run.sparse,
+                sparse_prepared=sparse_prepared,
             )
             await context.heartbeat()
             key = _stage_artifact_key(run, context, "embeddings")
@@ -299,15 +311,25 @@ class IngestionPipeline:
             )
             existing = await vector_store.fetch(namespace, [target.chunk_id])
             vector: Sequence[float] | None = None
+            sparse: SparseVector | None = None
             if not _chunk_reembed_hit_matches(existing, target, expected_payload):
-                embedded = await prepared.service.embed_documents(
-                    prepared.model, [target.content], batch_size=1
-                )
-                vector = embedded[0].values
+                sparse_prepared = await self._prepared_sparse(target.sparse, prepared)
+                if sparse_prepared is prepared:
+                    dense_vectors, sparse_vectors = await prepared.service.embed_documents_hybrid(
+                        prepared.model, [target.content], batch_size=1
+                    )
+                    assert dense_vectors is not None and sparse_vectors is not None
+                    vector, sparse = dense_vectors[0].values, sparse_vectors[0]
+                else:
+                    embedded = await prepared.service.embed_documents(
+                        prepared.model, [target.content], batch_size=1
+                    )
+                    vector = embedded[0].values
+                    sparse = await _encode_sparse(target.sparse, sparse_prepared, target.content)
             async with self._catalog.chunk_reembed_mutation(context, target) as mutation:
                 if vector is not None:
                     point = _chunk_reembed_point(
-                        target, vector, actual_token_count=response_token_count
+                        target, vector, actual_token_count=response_token_count, sparse=sparse
                     )
                     await mutation.apply(lambda: vector_store.upsert(namespace, [point]))
                 fetched = await mutation.apply(
@@ -365,13 +387,20 @@ class IngestionPipeline:
                 or embeddings.normalized != prepared.model.normalize
             ):
                 raise PipelineArtifactError("The embedding binding changed before indexing.")
+            sparse_prepared = await self._prepared_sparse(run.sparse, prepared)
+            if embeddings.sparse_encoder != _sparse_identity(run.sparse, sparse_prepared):
+                raise PipelineArtifactError("The sparse encoder changed before indexing.")
             points = _points(run, chunks, embeddings)
             namespace = Namespace(run.kb_id, run.index_version)
             async with self._catalog.index_mutation(context) as mutation:
                 await mutation.apply(
                     lambda: vector_store.ensure_namespace(
                         namespace,
-                        NamespaceSpec(dim=run.embedding_dim, metric=cast("Metric", run.metric)),
+                        NamespaceSpec(
+                            dim=run.embedding_dim,
+                            metric=cast("Metric", run.metric),
+                            sparse_modifier=run.sparse.modifier,
+                        ),
                     )
                 )
                 await mutation.apply(lambda: vector_store.upsert(namespace, points))
@@ -419,6 +448,7 @@ class IngestionPipeline:
                         NamespaceSpec(
                             dim=target.embedding_dim,
                             metric=cast("Metric", target.metric),
+                            sparse_modifier=target.sparse_modifier,
                         ),
                     )
                 )
@@ -456,6 +486,21 @@ class IngestionPipeline:
         if prepared.model != run.embedding_model:
             raise PipelineArtifactError(
                 "The registered embedding model no longer matches the index version snapshot."
+            )
+        return prepared
+
+    async def _prepared_sparse(
+        self, spec: SparseSpec, dense: PreparedEmbedding
+    ) -> PreparedEmbedding | None:
+        """The service that produces this version's learned sparse vectors, if any."""
+        if spec.model is None:
+            return None
+        if spec.model == dense.model:
+            return dense
+        prepared = await self._resources.embedding_for(spec.model)
+        if prepared.model != spec.model:
+            raise PipelineArtifactError(
+                "The registered sparse model no longer matches the index version snapshot."
             )
         return prepared
 
@@ -589,14 +634,14 @@ def _points(
                 "revision": run.revision,
             }
         )
-        points.append(
-            Point(
-                id=chunk.id,
-                dense=values,
-                payload=payload,
-                sparse=encode_document(chunk.content),
-            )
-        )
+        if chunk.content_hash in embeddings.sparse:
+            sparse = embeddings.sparse[chunk.content_hash]
+        elif run.sparse.kind == "bm25":
+            # Deterministic, so recomputing is equivalent to having stored it.
+            sparse = encode_document(chunk.content)
+        else:
+            raise PipelineArtifactError("An expected chunk sparse vector is missing.")
+        points.append(Point(id=chunk.id, dense=values, payload=payload, sparse=sparse))
     return points
 
 
@@ -705,13 +750,35 @@ def _chunk_reembed_point(
     values: Sequence[float],
     *,
     actual_token_count: int | None = None,
+    sparse: SparseVector | None = None,
 ) -> Point:
     return Point(
         id=target.chunk_id,
         dense=values,
         payload=_chunk_reembed_payload(target, actual_token_count=actual_token_count),
-        sparse=encode_document(target.content),
+        sparse=sparse,
     )
+
+
+def _sparse_identity(spec: SparseSpec, prepared: PreparedEmbedding | None) -> str:
+    """What stored sparse vectors are keyed by: the encoder and its exact binding."""
+    if spec.model is None:
+        return ENCODER_ID
+    assert prepared is not None
+    return f"{spec.encoder_id}:{prepared.binding_fingerprint}"
+
+
+async def _encode_sparse(
+    spec: SparseSpec, prepared: PreparedEmbedding | None, content: str
+) -> SparseVector | None:
+    if spec.model is None:
+        return encode_document(content)
+    assert prepared is not None
+    _dense, sparse = await prepared.service.embed_documents_hybrid(
+        prepared.model, [content], dense=False, sparse=True, batch_size=1
+    )
+    assert sparse is not None
+    return sparse[0]
 
 
 def _chunk_reembed_hit_matches(
@@ -757,8 +824,13 @@ async def create_embedding_manifest(
     binding_fingerprint: str,
     service: EmbeddingService,
     previous: EmbeddingManifest | None = None,
+    sparse: SparseSpec | None = None,
+    sparse_prepared: PreparedEmbedding | None = None,
 ) -> EmbeddingManifest:
+    sparse = sparse or SparseSpec()
+    sparse_identity = _sparse_identity(sparse, sparse_prepared)
     reusable: dict[str, tuple[float, ...]] = {}
+    reusable_sparse: dict[str, SparseVector | None] = {}
     if (
         previous is not None
         and previous.binding_fingerprint == binding_fingerprint
@@ -766,6 +838,8 @@ async def create_embedding_manifest(
         and previous.normalized == model.normalize
     ):
         reusable.update(previous.vectors)
+    if previous is not None and previous.sparse_encoder == sparse_identity:
+        reusable_sparse.update(previous.sparse)
 
     searchable = [chunk for chunk in chunks if chunk.metadata.get("embed", True) is not False]
     max_tokens = model.max_input_tokens
@@ -776,15 +850,39 @@ async def create_embedding_manifest(
         if chunk.token_count > max_tokens or service.count_tokens(model, normalized) > max_tokens:
             raise EmbeddingInputTooLarge()
 
-    missing: dict[str, str] = {}
-    for chunk in searchable:
-        if chunk.content_hash not in reusable:
-            missing.setdefault(chunk.content_hash, chunk.content)
-    if missing:
-        hashes = list(missing)
-        vectors = await service.embed_documents(model, [missing[key] for key in hashes])
-        for content_hash, vector in zip(hashes, vectors, strict=True):
-            reusable[content_hash] = vector.values
+    contents = {chunk.content_hash: chunk.content for chunk in searchable}
+    missing_dense = [key for key in contents if key not in reusable]
+    missing_sparse = [key for key in contents if key not in reusable_sparse]
+    if sparse.model is not None and sparse_prepared is not None and sparse.model == model:
+        # One model, one call per batch: dense and learned sparse together.
+        wanted = [key for key in contents if key in set(missing_dense) | set(missing_sparse)]
+        if wanted:
+            vectors, weights = await service.embed_documents_hybrid(
+                model, [contents[key] for key in wanted]
+            )
+            assert vectors is not None and weights is not None
+            for key, vector, weight in zip(wanted, vectors, weights, strict=True):
+                reusable[key] = vector.values
+                reusable_sparse[key] = weight
+    else:
+        if missing_dense:
+            vectors = await service.embed_documents(model, [contents[key] for key in missing_dense])
+            for key, vector in zip(missing_dense, vectors, strict=True):
+                reusable[key] = vector.values
+        if missing_sparse and sparse.model is None:
+            for key in missing_sparse:
+                reusable_sparse[key] = encode_document(contents[key])
+        elif missing_sparse:
+            assert sparse_prepared is not None
+            _dense, weights = await sparse_prepared.service.embed_documents_hybrid(
+                sparse_prepared.model,
+                [contents[key] for key in missing_sparse],
+                dense=False,
+                sparse=True,
+            )
+            assert weights is not None
+            for key, weight in zip(missing_sparse, weights, strict=True):
+                reusable_sparse[key] = weight
 
     return EmbeddingManifest(
         document_id=document_id,
@@ -795,4 +893,6 @@ async def create_embedding_manifest(
         dimension=model.dimension or 0,
         normalized=model.normalize,
         vectors={chunk.content_hash: reusable[chunk.content_hash] for chunk in searchable},
+        sparse_encoder=sparse_identity,
+        sparse={chunk.content_hash: reusable_sparse[chunk.content_hash] for chunk in searchable},
     )

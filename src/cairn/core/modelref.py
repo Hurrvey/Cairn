@@ -21,3 +21,9 @@ class ModelRef:
     tokenizer_id: str | None = None
     provider_id: UUID | None = None
     dynamic_provider: bool = field(default=False, compare=False)
+    #: The provider returns learned sparse weights for this model (bge-m3,
+    #: DashScope v3/v4), so it can serve as a knowledge base's sparse source.
+    sparse: bool = False
+    #: Ask the provider for exactly ``dimension`` components (DashScope
+    #: ``dimension``, OpenAI-compatible ``dimensions``) instead of its default.
+    send_dimension: bool = False

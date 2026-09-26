@@ -15,7 +15,11 @@ from cairn.core.provider_runtime import ProviderRuntimeProjection
 from cairn.core.tokenizer_config import configured_tokenizer_ids
 from cairn.modelgw.catalog import ModelCatalog, get_model_catalog
 from cairn.modelgw.dto import ModelView, ProviderView, RegisterModelSpec
-from cairn.modelgw.schemas import CreateModelRequest, CreateProviderRequest
+from cairn.modelgw.schemas import (
+    CreateModelRequest,
+    CreateProviderRequest,
+    ProviderCredentialsRequest,
+)
 
 __all__ = ["ModelManagementService", "ModelProbe", "ModelTestResult", "ModelUsage"]
 
@@ -26,13 +30,26 @@ class ModelUsage(Protocol):
     async def model_is_referenced(self, workspace_id: UUID, model_id: UUID) -> bool: ...
 
 
+class ProbeOutcome(Protocol):
+    @property
+    def dimensions(self) -> int: ...
+    @property
+    def tokens(self) -> int: ...
+    @property
+    def sparse_terms(self) -> int | None: ...
+
+
 class ModelProbe(Protocol):
     async def probe(
         self,
         model: ModelRef,
         provider_runtime: ProviderRuntimeProjection,
         tokenizer_path: Path,
-    ) -> tuple[int, int]: ...
+    ) -> ProbeOutcome: ...
+
+    async def detect_dimension(
+        self, model: ModelRef, provider_runtime: ProviderRuntimeProjection
+    ) -> int: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +57,7 @@ class ModelTestResult:
     healthy: bool
     dimensions: int
     tokens: int
+    sparse_terms: int | None = None
 
 
 class ModelManagementService:
@@ -65,7 +83,18 @@ class ModelManagementService:
             family=request.family,
             base_url=request.base_url,
             config=request.config.model_dump(),
+            api_key=request.api_key,
         )
+        await self._publish_safely(provider.id)
+        return provider
+
+    async def replace_credentials(
+        self, workspace_id: UUID, provider_id: UUID, request: ProviderCredentialsRequest
+    ) -> ProviderView:
+        provider = await self._catalog.set_provider_credentials(
+            workspace_id, provider_id, request.api_key
+        )
+        # A new projection fingerprint makes every data process replace its client.
         await self._publish_safely(provider.id)
         return provider
 
@@ -81,23 +110,54 @@ class ModelManagementService:
             raise ValidationFailed("The selected tokenizer is not configured in this deployment.")
         from cairn.core.ids import decode_id
 
+        provider_id = decode_id("prov", request.provider_id)
+        dimension = request.dimension
+        if dimension is None:
+            dimension = await self._detect_dimension(workspace_id, provider_id, request)
         model = await self._catalog.register_model(
             workspace_id,
             RegisterModelSpec(
-                provider_id=decode_id("prov", request.provider_id),
+                provider_id=provider_id,
                 model_key=request.model_key,
                 display_name=request.display_name,
                 capability=request.capability,
-                dimension=request.dimension,
+                dimension=dimension,
                 max_input_tokens=request.max_input_tokens,
                 normalize=request.normalize,
                 query_prefix=request.query_prefix,
                 optimal_batch_size=request.optimal_batch_size,
                 tokenizer_id=request.tokenizer_id,
+                sparse=request.sparse,
+                send_dimension=request.send_dimension,
             ),
         )
         await self._publish_safely(model.provider_id)
         return model
+
+    async def _detect_dimension(
+        self, workspace_id: UUID, provider_id: UUID, request: CreateModelRequest
+    ) -> int:
+        if self._probe is None:
+            raise ValidationFailed("Enter the model's dimension; automatic detection is off.")
+        runtime = await self._catalog.provider_runtime(workspace_id, provider_id)
+        stub = ModelRef(
+            id=provider_id,
+            provider_family=runtime.family,
+            model_key=request.model_key,
+            capability="embedding",
+        )
+        try:
+            return await self._probe.detect_dimension(stub, runtime)
+        except Exception as exc:
+            log.warning(
+                "modelgw.dimension_detection_failed",
+                provider_id=str(provider_id),
+                error=type(exc).__name__,
+            )
+            raise ValidationFailed(
+                "The provider did not return an embedding for this model. Check the model name "
+                "and API key, or enter the dimension yourself."
+            ) from exc
 
     async def _publish_safely(self, provider_id: UUID) -> None:
         try:
@@ -124,7 +184,6 @@ class ModelManagementService:
         model = runtime.model
         if (
             self._probe is None
-            or runtime.has_credentials
             or runtime.base_url is None
             or model.capability != "embedding"
             or model.dimension is None
@@ -144,11 +203,17 @@ class ModelManagementService:
             allow_private=config.get("allow_private", False),
             binding_revision=config.get("binding_revision", ""),
             max_batch_size=config.get("max_batch_size", 16),
+            credential=runtime.credential,
         )
         try:
-            dimensions, tokens = await self._probe.probe(model, projection, Path(tokenizer_path))
+            outcome = await self._probe.probe(model, projection, Path(tokenizer_path))
         except Exception:
             await self._catalog.set_model_health(workspace_id, model_id, healthy=False)
             raise
         await self._catalog.set_model_health(workspace_id, model_id, healthy=True)
-        return ModelTestResult(healthy=True, dimensions=dimensions, tokens=tokens)
+        return ModelTestResult(
+            healthy=True,
+            dimensions=outcome.dimensions,
+            tokens=outcome.tokens,
+            sparse_terms=outcome.sparse_terms,
+        )
