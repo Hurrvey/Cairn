@@ -121,7 +121,7 @@ MCP module coverage93%. Generic search is verified with the official SDK and thr
 nginx/data/TEI/pgvector. Agent-side integration remains intentionally deferred.
 
 September24 QDRANT: vectors moved to Qdrant v1.19.1; pgvector removed and PostgreSQL returns to the
-official `postgres:16` image. Full-text is BM25 sparse vectors with jieba segmentation. Full backend
+official `postgres:16-bookworm` image. Full-text is BM25 sparse vectors with jieba segmentation. Full backend
 **1100 passed, 0 failed**, coverage 85%, on PostgreSQL 16, Redis, Qdrant and real TEI.
 
 Use `http://127.0.0.1:8080/mcp` with `Authorization: Bearer <Cairn API key>` from a client supporting
