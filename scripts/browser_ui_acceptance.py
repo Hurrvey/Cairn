@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import time
@@ -18,7 +19,9 @@ from pathlib import Path
 
 from playwright.sync_api import Page, expect, sync_playwright
 
-ADMIN_INITIAL = "Initial-Admin-Password-2026"
+# The local-process stack pins this; Compose generates one at first start, so
+# pass that through the environment rather than the command line.
+ADMIN_INITIAL = os.environ.get("CAIRN_ACCEPTANCE_INITIAL_PASSWORD", "Initial-Admin-Password-2026")
 ADMIN_NEW = "Correct-Horse-Battery-Staple-9"
 TEI_URL = "http://127.0.0.1:39223"
 
@@ -39,7 +42,7 @@ def login(page: Page, base: str, password: str) -> None:
     page.locator('[data-test="submit"]').click()
 
 
-def run(base: str, output: Path) -> None:
+def run(base: str, output: Path, tei_url: str) -> None:
     output.mkdir(parents=True, exist_ok=True)
     console_errors: list[str] = []
     with sync_playwright() as playwright:
@@ -99,7 +102,7 @@ def run(base: str, output: Path) -> None:
         sheet = page.locator('[data-test="provider-sheet"]')
         expect(sheet).to_be_visible()
         sheet.locator('[data-test="provider-name"]').fill("Local TEI")
-        sheet.locator('[data-test="provider-url"]').fill(TEI_URL)
+        sheet.locator('[data-test="provider-url"]').fill(tei_url)
         shot(page, output, "03-provider-sheet")
         sheet.locator('[data-test="provider-submit"]').click()
         expect(page.locator('[data-test="provider-list"]')).to_contain_text(
@@ -161,7 +164,12 @@ def run(base: str, output: Path) -> None:
                     "buffer": (
                         b"# Saturn\n\nSaturn is the sixth planet and has prominent rings "
                         b"made of ice and rock.\n\n## Moons\n\nTitan is its largest moon "
-                        b"and has a thick atmosphere.\n"
+                        b"and has a thick atmosphere.\n\n## Probe\n\nThe XR-2200 probe "
+                        b"mapped the rings. "
+                        + (
+                            "\u571f\u661f\u73af\u4e3b\u8981\u7531"
+                            "\u51b0\u548c\u5ca9\u77f3\u7ec4\u6210\u3002\n"
+                        ).encode()
                     ),
                 },
                 {
@@ -289,6 +297,31 @@ def run(base: str, output: Path) -> None:
         assert any("Mars" in hit["content"] for hit in response.json()["results"]), response.text()
         check("agent-style bearer query through the public retrieval API")
 
+        # Lexical retrieval on Qdrant: BM25 sparse vectors with Chinese
+        # segmentation and product codes, then hybrid fusion over the same index.
+        kb_public_id = kb_url.rsplit("/", 1)[-1].split("?")[0]
+        for mode, text in (
+            ("fulltext", "\u571f\u661f\u73af"),
+            ("fulltext", "XR-2200"),
+            ("hybrid", "\u54ea\u9897\u884c\u661f\u6709\u5149\u73af XR-2200"),
+        ):
+            lexical = page.request.post(
+                f"{base}/v1/retrieval/query",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                data=json.dumps(
+                    {
+                        "targets": [{"knowledge_base_id": kb_public_id}],
+                        "query": text,
+                        "search_mode": mode,
+                        "top_k": 3,
+                    }
+                ),
+            )
+            assert lexical.ok, lexical.text()
+            hits = lexical.json()["results"]
+            assert hits and "XR-2200" in hits[0]["content"], (mode, text, lexical.text())
+        check("BM25 full-text finds Chinese terms and product codes; hybrid fuses both")
+
         # --- users + grants -------------------------------------------------------------
         page.locator('[data-test="nav-users"]').click()
         page.locator('[data-test="new-user"]').click()
@@ -327,8 +360,11 @@ def run(base: str, output: Path) -> None:
         expect(page.locator('[data-test="queues-table"]')).to_be_visible()
         shot(page, output, "24-settings", full=True)
         page.locator('[data-test="nav-mcp-service"]').click()
-        expect(page.locator('[data-test="unmanaged-notice"]')).to_be_visible(timeout=15000)
-        expect(page.locator('[data-test="action-start"]')).to_be_disabled()
+        # A local-process stack shows the unmanaged notice; Compose runs the
+        # supervised MCP service, whose live state is shown instead.
+        expect(
+            page.locator('[data-test="unmanaged-notice"], [data-test="actual-state"]').first
+        ).to_be_visible(timeout=15000)
         shot(page, output, "25-mcp")
         check("audit, settings and MCP pages render live data")
 
@@ -427,7 +463,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1:5173")
     parser.add_argument("--output", default="data/ui-20260922/shots")
+    parser.add_argument("--tei-url", default=TEI_URL)
     args = parser.parse_args()
     started = time.monotonic()
-    run(args.base_url, Path(args.output))
+    run(args.base_url, Path(args.output), args.tei_url)
     print(f"done in {time.monotonic() - started:.0f}s")
