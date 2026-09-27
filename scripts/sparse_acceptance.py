@@ -25,6 +25,7 @@ import argparse
 import os
 import sys
 import time
+import uuid
 
 import httpx
 
@@ -71,6 +72,7 @@ def wait_indexed(api: httpx.Client, kb_id: str, count: int, timeout_s: float = 6
 
 
 def run(base: str, password: str, sidecar_url: str) -> None:
+    run_id = uuid.uuid4().hex[:6]  # unique names, so the script can run again on one stack
     with httpx.Client(base_url=base, timeout=120) as api:
         login = checked(
             api.post("/v1/auth/login", json={"username": "admin", "password": password})
@@ -85,7 +87,7 @@ def run(base: str, password: str, sidecar_url: str) -> None:
             api.post(
                 "/v1/model-providers",
                 json={
-                    "name": "bge-m3 sidecar",
+                    "name": f"bge-m3 sidecar {run_id}",
                     "family": "bge_m3",
                     "base_url": sidecar_url,
                     "config": {
@@ -102,7 +104,7 @@ def run(base: str, password: str, sidecar_url: str) -> None:
                 json={
                     "provider_id": provider["id"],
                     "model_key": "BAAI/bge-m3",
-                    "display_name": "bge-m3",
+                    "display_name": f"bge-m3 {run_id}",
                     "max_input_tokens": 8192,
                     "optimal_batch_size": 16,
                     "tokenizer_id": "bge-m3",
@@ -121,7 +123,9 @@ def run(base: str, password: str, sidecar_url: str) -> None:
         bindings = checked(api.get("/v1/storage-bindings"))
         objects = next(item for item in bindings if item["kind"] == "object")
         vectors = next(item for item in bindings if item["kind"] == "vector")
-        minilm = next(item for item in checked(api.get("/v1/models")) if item["id"] != model["id"])
+        minilm = next(
+            item for item in checked(api.get("/v1/models")) if item["provider_family"] == "tei"
+        )
 
         created = {}
         for label, embedding_id in (
@@ -132,7 +136,7 @@ def run(base: str, password: str, sidecar_url: str) -> None:
                 api.post(
                     "/v1/knowledge-bases",
                     json={
-                        "name": f"Sparse acceptance · {label}",
+                        "name": f"Sparse acceptance {run_id} · {label}",
                         "embedding_model_id": embedding_id,
                         "object_binding_id": objects["id"],
                         "vector_binding_id": vectors["id"],
@@ -164,7 +168,7 @@ def run(base: str, password: str, sidecar_url: str) -> None:
             api.post(
                 "/v1/api-keys",
                 json={
-                    "name": "sparse-acceptance",
+                    "name": f"sparse-acceptance-{run_id}",
                     "scopes": ["kb:query"],
                     "knowledge_base_ids": [kb["id"] for kb in created.values()],
                 },

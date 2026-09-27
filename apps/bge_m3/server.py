@@ -90,6 +90,12 @@ class FlagEncoder:
         self._model = BGEM3FlagModel(
             settings.model_path, normalize_embeddings=True, use_fp16=fp16, devices=[device]
         )
+        if not device.startswith("cuda"):
+            # Weights load memory-mapped. From a bind mount (a Windows drive under
+            # Docker Desktop, network storage) every forward pass would then read
+            # them through that filesystem again — measured 25x slower per query.
+            # One copy into process memory at startup; CUDA copies them anyway.
+            _materialize(self._model.model)
 
     def encode(
         self, texts: list[str], *, dense: bool, sparse: bool
@@ -117,6 +123,17 @@ class FlagEncoder:
                 {int(token): float(weight) for token, weight in row.items()} for row in weights
             ]
         return dense_rows, sparse_rows
+
+
+def _materialize(module: Any) -> None:
+    """Replace memory-mapped parameters and buffers with in-memory copies."""
+    import itertools
+
+    import torch
+
+    with torch.no_grad():
+        for tensor in itertools.chain(module.parameters(), module.buffers()):
+            tensor.data = tensor.data.clone()
 
 
 class EncodeRequest(BaseModel):
