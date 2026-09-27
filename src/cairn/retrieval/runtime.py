@@ -14,7 +14,7 @@ from uuid import UUID
 from pydantic import SecretStr, ValidationError
 
 from cairn.core.cache import BulkCache, Cache, get_cache
-from cairn.core.config import RetrievalSettings
+from cairn.core.config import EmbeddingSettings, RetrievalSettings
 from cairn.core.errors import PermissionDenied
 from cairn.core.logging import get_logger
 from cairn.core.modelref import ModelRef
@@ -135,9 +135,13 @@ class QueryEmbeddingRuntime:
         cache: Cache | None = None,
         tokenizers: dict[str, Tokenizer] | None = None,
         master_key: SecretStr | None = None,
+        embedding: EmbeddingSettings | None = None,
     ) -> None:
         self._settings = settings
         self._master_key = master_key
+        # The deployment's embedding deadlines, retries and circuit; a CPU-hosted
+        # model may need a longer query deadline than the default two seconds.
+        self._embedding_settings = embedding or EmbeddingSettings()
         self._cache = cache or get_cache()
         self._tokenizers = TokenizerRegistry()
         self._tokenizers_supplied = tokenizers is not None
@@ -181,6 +185,7 @@ class QueryEmbeddingRuntime:
                     provider=provider,
                     cache=self._cache,
                     tokenizers=self._tokenizers,
+                    settings=self._embedding_settings,
                 )
                 self._fingerprints[provider_id] = "env:" + endpoint.model_dump_json()
         except BaseException:
@@ -360,6 +365,7 @@ class QueryEmbeddingRuntime:
                 provider=provider,
                 cache=self._cache,
                 tokenizers=self._tokenizers,
+                settings=self._embedding_settings,
             )
         except BaseException:
             with suppress(Exception):

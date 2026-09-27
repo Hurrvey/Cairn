@@ -164,7 +164,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         from cairn.retrieval.service import RetrievalService
 
         app.state.retrieval_runtime = QueryEmbeddingRuntime(
-            cfg.retrieval, master_key=cfg.master_key
+            cfg.retrieval, master_key=cfg.master_key, embedding=cfg.embedding
         )
         app.state.retrieval_service = RetrievalService(
             runtime_loader=KnowledgeBaseRuntimeLoader(timeout_s=cfg.retrieval.runtime_timeout_s),
