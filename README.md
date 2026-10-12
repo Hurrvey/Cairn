@@ -4,8 +4,8 @@
 > management, indexing, and retrieval. Agents and applications are **clients**; Cairn is
 > the **server** that produces, stores, indexes, and serves knowledge.
 
-**Status:** Supported-format local product, PDF/OCR baseline and advanced retrieval accepted; full backend suite green (1066 passed). The genuine annotated30-PDF quality gate remains open.
-**Documentation baseline date:** 2026-08-28 · **Code status date:** 2026-09-22
+**Status:** Qdrant knowledge product with advanced retrieval, MCP directory/document tools, Dify compatibility and S3-compatible object storage. September 29 continuation validation is in progress; historical test counts below are not the current acceptance result. The genuine annotated30-PDF quality gate remains open. PDF parsing runs Docling by default since 2026-10-12, with a persistent model worker (see docs/06-ops/11-pdf-parsing.md).
+**Documentation baseline date:** 2026-08-28 · **Code status date:** 2026-09-29
 
 ---
 
@@ -23,17 +23,17 @@ these modules are implemented, typechecked (`mypy --strict`), and boundary-enfor
 | M02 authz | Grants, API keys, the key ∩ owner intersection (FR-B-08), rate limits, break-glass |
 | M06 tasks | Postgres-backed durable queue (`SKIP LOCKED` + per-workspace fairness), worker fleet |
 | M15 platform | Audit log, workspace settings, maintenance |
-| M04/M05 storage | `ObjectStore` and `VectorStore` protocols, local object store + Qdrant (the only vector backend, [ADR-0009](docs/01-architecture/05-adr/ADR-0009-qdrant-only-vector-backend.md)), shared conformance suite |
-| M10 modelgw | Provider registry for TEI, Infinity, the bge-m3 sidecar, Alibaba Cloud Model Studio (DashScope), Volcengine Ark and OpenAI-compatible APIs; envelope-encrypted API keys, dimension auto-detection, live probe; general chat invocation remains Phase 3 |
+| M04/M05 storage | `ObjectStore` and `VectorStore` protocols, local/S3-compatible object drivers and Qdrant vector storage, with shared conformance suites |
+| M10 modelgw | Admin local/hosted provider registry, sealed credentials and live probe, safe setup options and dynamic Redis provider projection; general chat invocation remains Phase 3 |
 | M03 catalog | Knowledge bases, real upload/download, chunks, blue/green indexes, automatic runtime refresh and protected document/KB/index cleanup |
 | M07 ingestion | Text + Office parsers, language detection, built-in/semantic/custom chunking, four-stage workers; bounded acceptance only |
-| M08 embedding | Model-bound tokenizers, dense and learned-sparse adapters (one call when a model provides both), batching/cache/retry; BM25 fallback; bge-m3 sidecar (`apps/bge_m3`, CPU or CUDA) |
-| M09 retrieval | Bounded authenticated `/v1/retrieval/query`: BM25 full-text (jieba sparse vectors on Qdrant)/vector/hybrid, ACTIVE runtime snapshots, RRF, citations, explicit degradation |
-| M13 MCP | Generic read-only `search_knowledge_base` via Streamable HTTP `/mcp`, scoped bearer keys, cited/structured results; broader list/get/resources remain open |
+| M08 embedding | Model-bound tokenizers, TEI/Infinity, hosted embedding providers and optional bge-m3 dense/sparse adapters, batching/cache/retry |
+| M09 retrieval | Bounded authenticated `/v1/retrieval/query`: Qdrant full-text/vector/hybrid, ACTIVE runtime snapshots, fusion/rerank/MMR, metadata/date filters, highlights/explain, batches and citations; Dify `/retrieval` adapter |
+| M13 MCP | Streamable HTTP `/mcp` with scoped search, knowledge-base directory, ordered document passages and resources; `kb:read` required for document reading |
 | M16 web UI | Redesigned workbench (Tailwind v4 + reka-ui): overview with attention list, master-detail knowledge bases with upload/progress/chunk editing/search console, models, storage, API keys, users/grants, audit, settings, MCP service; light/dark, zh-CN/en-US, command palette |
 
 Not yet started: M11 pipelines,
-M12 functions, M14 evaluation. M13 currently covers the read-only search increment only.
+M12 functions, M14 evaluation. General model gateway invocation, web crawling, SDK distribution and production-scale gates also remain planned.
 
 **Historical verification checkpoint (2026-09-07):** the previously unexecuted integration suite ran against
 real PostgreSQL 16 + pgvector and Redis. The full storage contract suite also runs on
@@ -68,8 +68,8 @@ See also the
 
 ### Bounded retrieval startup
 
-`POST /v1/retrieval/query` is mounted when `CAIRN_ROLE` is `data` or `all`. Full-text
-queries and requests supplying `query_vector` require no model endpoint. To embed query
+`POST /v1/retrieval/query` is mounted when `CAIRN_ROLE` is `data` or `all`. BM25 full-text queries and requests supplying `query_vector` require no dense-model endpoint;
+learned sparse search requires its configured provider. To embed query
 text for vector or hybrid search, configure the endpoint by the immutable provider ID in
 the KB's published ACTIVE runtime and configure its tokenizer by `tokenizer_id`:
 
@@ -83,9 +83,9 @@ CAIRN_RETRIEVAL__SEARCH_TIMEOUT_S=2
 
 The endpoint implements RRF and weighted fusion, parent expansion from indexed parent snapshots and
 optional reranking through operator-configured cross-encoder endpoints (see
-[PDF/OCR and extended retrieval](docs/06-ops/07-pdf-and-retrieval.md)). MMR, filters, highlights and
-explain mode are not implemented; explicit requests for those options fail clearly;
-unsupported KB defaults are reported in `degraded`. The maintain worker now refreshes ACTIVE KB
+[PDF/OCR and extended retrieval](docs/06-ops/07-pdf-and-retrieval.md)). MMR, document/date/metadata filters, highlights, explain and batch queries are available. Older
+indexes require rebuilding for metadata/date filters and ordered MCP document reading.
+See [S3 and external clients](docs/06-ops/09-s3-and-external-clients.md). The maintain worker now refreshes ACTIVE KB
 and provider projections periodically (default60 seconds) and repairs Redis cache loss. Dynamic
 providers fail closed while their projection is absent; retrieval never hydrates catalog ORM.
 
@@ -119,15 +119,6 @@ September17 acceptance:954 full-backend tests passed,2 unchanged deferred PDF/OC
 no assertion failures/skips,86.29% overall coverage; final MCP/network/live-model matrix43 passed and
 MCP module coverage93%. Generic search is verified with the official SDK and through actual Compose
 nginx/data/TEI/pgvector. Agent-side integration remains intentionally deferred.
-
-September24 QDRANT: vectors moved to Qdrant v1.19.1; pgvector removed and PostgreSQL returns to the
-official `postgres:16-bookworm` image. Full-text is BM25 sparse vectors with jieba segmentation. Full backend
-**1100 passed, 0 failed**, coverage 85%, on PostgreSQL 16, Redis, Qdrant and real TEI.
-
-September27 LEARNED SPARSE + ONLINE PROVIDERS: keyword search per knowledge base uses the best
-available source — the embedding model's own learned sparse vectors, the bundled bge-m3 sidecar, or
-BM25 ([guide](docs/06-ops/08-embedding-providers.md), ADR-0010). Hosted DashScope, Volcengine Ark
-and OpenAI-compatible providers with encrypted keys.
 
 Use `http://127.0.0.1:8080/mcp` with `Authorization: Bearer <Cairn API key>` from a client supporting
 Streamable HTTP and configurable headers. Grant only `kb:query` on the intended knowledge bases.
