@@ -50,7 +50,7 @@ def locate(item: dict[str, Any], corpus_root: Path) -> Path:
     recorded = item.get("path")
     if isinstance(recorded, str) and Path(recorded).is_file():
         return Path(recorded)
-    return corpus_root / item["local_pdf"]
+    return corpus_root / str(item["local_pdf"])
 
 
 def main() -> None:
