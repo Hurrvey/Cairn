@@ -24,6 +24,9 @@ across documents, de-duplicates overlapping table-cell text and keeps multipage 
 instead of rejecting the document. Measured on the 36-document corpus with the warm
 worker: 36/36 success, 6.85 s/page on 2 CPUs, 96 tables and 40 pictures. The quality gate
 (independent human gold) remains OPEN.
+Annotation kit for closing it: `scripts/prepare_pdf_annotations.py` generates an empty gold skeleton
+and per-page templates; rules in `05-quality/05-pdf-annotation-guide.md`. Scans with an embedded
+text layer now bypass Docling OCR (`pdf_routing.py`, rule `scan-text-layer/1`).
 | Area | Current verified or implemented scope | Remaining work |
 | --- | --- | --- |
 | Core/identity/authz/tasks | Existing runnable product foundation, permissions, durable task queue, normal request limits | Complete quota-blocked task lifecycle and its fencing/dedup changes; later SSO remains stretch |
