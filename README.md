@@ -4,8 +4,8 @@
 > management, indexing, and retrieval. Agents and applications are **clients**; Cairn is
 > the **server** that produces, stores, indexes, and serves knowledge.
 
-**Status:** Qdrant knowledge product with advanced retrieval, MCP directory/document tools, Dify compatibility and S3-compatible object storage. September 29 continuation validation is in progress; historical test counts below are not the current acceptance result. The genuine annotated30-PDF quality gate remains open. PDF parsing runs Docling by default since 2026-10-12, with a persistent model worker (see docs/06-ops/11-pdf-parsing.md).
-**Documentation baseline date:** 2026-08-28 · **Code status date:** 2026-09-29
+**Status:** Qdrant knowledge product with advanced retrieval, MCP directory/document tools, Dify compatibility, S3-compatible object storage, a session-authorised model gateway with usage accounting, and Python/TypeScript client SDKs. PDF parsing runs **Docling 2.135.0 by default** with a persistent model worker; scans that already carry a text layer are read by the pypdfium2 baseline instead of being OCR'd again ([PDF parsing](docs/06-ops/11-pdf-parsing.md)). The independent-human PDF quality gate remains **open**; the annotation kit is ready ([guide](docs/05-quality/05-pdf-annotation-guide.md)).
+**Documentation baseline date:** 2026-08-28 · **Code status date:** 2026-10-12
 
 ---
 
@@ -24,45 +24,37 @@ these modules are implemented, typechecked (`mypy --strict`), and boundary-enfor
 | M06 tasks | Postgres-backed durable queue (`SKIP LOCKED` + per-workspace fairness), worker fleet |
 | M15 platform | Audit log, workspace settings, maintenance |
 | M04/M05 storage | `ObjectStore` and `VectorStore` protocols, local/S3-compatible object drivers and Qdrant vector storage, with shared conformance suites |
-| M10 modelgw | Admin local/hosted provider registry, sealed credentials and live probe, safe setup options and dynamic Redis provider projection; general chat invocation remains Phase 3 |
+| M10 modelgw | Admin local/hosted provider registry, sealed credentials and live probe, dynamic Redis provider projection; session-authorised chat and rerank invocation with streaming, cancellation, retry and circuit breaker; usage accounting; admin and user model console |
 | M03 catalog | Knowledge bases, real upload/download, chunks, blue/green indexes, automatic runtime refresh and protected document/KB/index cleanup |
-| M07 ingestion | Text + Office parsers, language detection, built-in/semantic/custom chunking, four-stage workers; bounded acceptance only |
+| M07 ingestion | Text, Markdown, JSON, HTML, Office (DOCX/PPTX/XLSX/CSV) and image-OCR parsers; PDF through Docling by default (immutable document IR, persistent model worker, tables and pictures) with the pypdfium2 baseline for scans that carry a text layer; language detection; built-in/semantic/custom chunking; four-stage workers |
 | M08 embedding | Model-bound tokenizers, TEI/Infinity, hosted embedding providers and optional bge-m3 dense/sparse adapters, batching/cache/retry |
 | M09 retrieval | Bounded authenticated `/v1/retrieval/query`: Qdrant full-text/vector/hybrid, ACTIVE runtime snapshots, fusion/rerank/MMR, metadata/date filters, highlights/explain, batches and citations; Dify `/retrieval` adapter |
 | M13 MCP | Streamable HTTP `/mcp` with scoped search, knowledge-base directory, ordered document passages and resources; `kb:read` required for document reading |
-| M16 web UI | Redesigned workbench (Tailwind v4 + reka-ui): overview with attention list, master-detail knowledge bases with upload/progress/chunk editing/search console, models, storage, API keys, users/grants, audit, settings, MCP service; light/dark, zh-CN/en-US, command palette |
+| M16 web UI | Redesigned workbench (Tailwind v4 + reka-ui): overview with attention list, master-detail knowledge bases with upload/progress/chunk editing/search console, models, storage, API keys, users/grants, audit, settings, MCP service; parse preview with citation overlay, retrieval explain panel, model chat console; light/dark, zh-CN/en-US, command palette |
+| SDK | Python and TypeScript clients ([`sdk/`](sdk/)) with optional LangChain and LlamaIndex adapters; local packages, not published to a registry |
 
-Not yet started: M11 pipelines,
-M12 functions, M14 evaluation. General model gateway invocation, web crawling, SDK distribution and production-scale gates also remain planned.
+Not yet started: M11 pipelines, M12 functions, M14 evaluation. Quotas, web crawling and archive
+import, SDK registry publication and production-scale gates (Helm/HPA, backup drills, scale
+evidence) also remain planned. See the [completion map](docs/04-plan/37-current-completion-map.md).
 
-**Historical verification checkpoint (2026-09-07):** the previously unexecuted integration suite ran against
-real PostgreSQL 16 + pgvector and Redis. The full storage contract suite also runs on
-the real pgvector driver rather than skipping it. This uncovered and fixed the missing
-migration driver, task-claim SQL/ordering/fairness defects and stale test setup.
-That checkpoint passed **400 tests**, with **81.47%** combined statement/branch coverage,
-above the unchanged **80%** gate. Frontend: **27 tests**, typecheck and production build pass.
-These historical checks are not the status of the expanded current worktree. Current pipeline and
-advanced-chunking packages have independent acceptance, including real TEI, PostgreSQL/pgvector and
-Redis. The September15 five-part supported-product increment passed independent review:
-the expanded backend has **893 passing tests**, no assertion failures or skips,
-**2 deferred PDF/OCR collection errors**, and **85.82%** coverage. Frontend: **36 tests**, typecheck,
-API drift and production build pass. Real Chromium configuration/upload/query, actual model inference,
-incremental/rebuild/edit/retry, Redis repair, persistence and protected cleanup are verified.
-September22: PDF/OCR adapters and advanced retrieval landed; the full backend command now exits zero
-(**1066 passed, 0 failures, 0 collection errors, 84.62% coverage**). See
-[PDF/OCR continuation](docs/04-plan/34-pdf-ocr-continuation.md). September23: the web UI was rebuilt as a
-workbench; frontend **60 tests**, typecheck, i18n check, build, web image and a **24-step live browser
-acceptance** pass. See [web workbench redesign](docs/04-plan/35-web-workbench-redesign.md).
+**Verification (2026-10-12):** the full unit suite passes; the PDF, Office, pipeline and
+stage-recovery integration tests pass against real PostgreSQL 16, Redis and Qdrant; Ruff,
+mypy `--strict` and the import contracts are clean. Docling converted all 36 corpus PDFs
+(241 pages) at 6.85 s per page on 2 CPUs with the model loaded once, extracting 96 tables
+and 40 pictures, and a live product run uploaded, parsed (`engine: docling`), indexed and
+retrieved real PDFs end to end. Earlier checkpoints and their counts are recorded in the
+[execution ledger](docs/04-plan/15-execution-ledger.md) and the acceptance documents under
+`docs/04-plan/`.
 
-**Still open:** the genuine annotated 30-document PDF quality gate
-([report](docs/05-quality/04-pdf-ocr-evaluation.md)) and the production M12 custom-function sandbox. Bounded fan-out, failed-stage recovery, manual reembedding and building-version cleanup are
-accepted alongside general purge and retired-index cleanup. This does not close the original
-PDF/OCR-inclusive E2E scope. The default custom worker
-fails closed unless an explicit scoped executor is injected. The overall knowledge-base E2E gate is
-not complete. The current restart point is the [execution ledger](docs/04-plan/15-execution-ledger.md).
-See also the
-[parser checkpoint](docs/04-plan/05-parser-spike.md) and
-[continuation verification record](docs/04-plan/06-continuation-verification.md).
+**Still open:** the PDF quality gate needs independent human annotation of the 30-document
+corpus; `scripts/prepare_pdf_annotations.py` generates the empty gold skeleton and page
+templates and the [annotation guide](docs/05-quality/05-pdf-annotation-guide.md) fixes the
+format and rules. Formula recognition is not implemented (formula text is kept verbatim),
+Docling occasionally merges two values into one table cell, and the production M12
+custom-function sandbox is not built; the default custom worker fails closed unless an
+explicit scoped executor is injected. `docs/` and `tests/` were git-ignored between
+2026-09-23 and 2026-10-12 and are tracked again. The current restart point is the
+[completion map](docs/04-plan/37-current-completion-map.md).
 
 **Start here → [`docs/README.md`](docs/README.md)** (documentation map and reading order)
 
@@ -94,6 +86,9 @@ providers fail closed while their projection is absent; retrieval never hydrates
 ```text
 uv run python scripts/init_env.py
 uv run python scripts/prepare_embedding_model.py
+docker build -f deploy/pdf-worker/Dockerfile -t cairn-pdf-worker:2.135.0 .
+# Prepare the Docling model assets and manifest once (docs/06-ops/11-pdf-parsing.md), then set
+# CAIRN_PDF_MODELS_DIR and CAIRN_PDF_MANIFEST in .env; Compose fails fast while they are unset.
 docker compose --profile local-model up -d --build
 docker compose logs migrate
 ```
@@ -103,6 +98,11 @@ setup steps (model, storage, knowledge base); then upload documents, watch them 
 pipeline, and search from the knowledge base's **Search** section. Press Ctrl+K to jump anywhere.
 The initializer does not overwrite existing secrets. Named volumes preserve PostgreSQL, Redis and
 document files; never remove deployment volumes unless their data is intentionally disposable.
+
+The parse worker runs Docling with a 6 GB memory limit and keeps the models loaded between
+documents. `CAIRN_PDF_ENGINE=pdfium` switches it to the lighter pypdfium2 baseline (no pictures,
+heuristic tables); the two model-path variables must still point at existing paths because the
+Compose file declares them required.
 
 See [local product quickstart](docs/06-ops/04-local-product-quickstart.md) for exact model fields,
 supported formats and limitations, and [coordinator acceptance](docs/04-plan/29-main-product-acceptance.md)
@@ -115,10 +115,9 @@ start/stop/restart, inspect actual heartbeat/state and filter/download safe oper
 Compose runs a dedicated supervisor on one selected port8081..8090; the existing8080/mcp endpoint
 obeys the same state. See [MCP service management](docs/06-ops/06-mcp-service-management.md).
 
-September17 acceptance:954 full-backend tests passed,2 unchanged deferred PDF/OCR collection errors,
-no assertion failures/skips,86.29% overall coverage; final MCP/network/live-model matrix43 passed and
-MCP module coverage93%. Generic search is verified with the official SDK and through actual Compose
-nginx/data/TEI/pgvector. Agent-side integration remains intentionally deferred.
+Generic search is verified with the official MCP SDK and through the actual Compose nginx/data/TEI
+path; acceptance counts live in the [execution ledger](docs/04-plan/15-execution-ledger.md).
+Agent-side integration remains intentionally deferred.
 
 Use `http://127.0.0.1:8080/mcp` with `Authorization: Bearer <Cairn API key>` from a client supporting
 Streamable HTTP and configurable headers. Grant only `kb:query` on the intended knowledge bases.
@@ -159,7 +158,8 @@ own knowledge bases within granted scopes.
 | API | [`docs/03-api/`](docs/03-api/) | Conventions, data-plane API, control-plane API, compatibility surfaces |
 | Plan | [`docs/04-plan/`](docs/04-plan/) | Phased development plan, work breakdown, team workflow, risk register |
 | Quality | [`docs/05-quality/`](docs/05-quality/) | Test strategy, performance SLOs, security baseline |
-| Operations | [`docs/06-ops/`](docs/06-ops/) | Deployment topologies, observability, runbooks |
+| Operations | [`docs/06-ops/`](docs/06-ops/) | Deployment topologies, observability, runbooks, PDF parsing and model worker |
+| Clients | [`sdk/`](sdk/) | Python and TypeScript SDKs with optional LangChain/LlamaIndex adapters |
 
 ---
 
