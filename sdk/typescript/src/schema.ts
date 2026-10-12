@@ -1,0 +1,7186 @@
+// OpenAPI SHA256: 56f4e9d5626301b8fbfef093348bba99bc5473758b89ac499ea5839ccbf16a92
+export interface paths {
+    "/v1/meta": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Public capability discovery
+         * @description Unauthenticated. Lets a client discover what this deployment supports
+         *     rather than finding out via a 404.
+         */
+        get: operations["meta_v1_meta_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Authenticate with a username and password
+         * @description Returns `status: "ok"` and sets a session cookie on success.
+         *
+         *     When the account must change its credentials first, returns `status: "password_change_required"` with a short-lived, scope-limited `change_token` and **no session cookie**. That token is accepted only by `POST /v1/auth/complete-initial-setup`; every other endpoint responds `403 PASSWORD_CHANGE_REQUIRED` until the change is completed.
+         */
+        post: operations["login_v1_auth_login_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/complete-initial-setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Complete the mandatory credential change
+         * @description Requires the `change_token` from login as a bearer token. Updates the password and, optionally, the username in a single transaction; if the username is taken the whole operation rolls back and the password is unchanged. On success every existing session is revoked and a new session cookie is issued.
+         */
+        post: operations["complete_initial_setup_v1_auth_complete_initial_setup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/change-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Change your own password */
+        post: operations["change_password_v1_auth_change_password_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke the current session */
+        post: operations["logout_v1_auth_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The current principal
+         * @description Allowlisted during a mandatory credential change so the UI can render the dialog for the correct account.
+         */
+        get: operations["me_v1_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List users */
+        get: operations["list_users_v1_users_get"];
+        put?: never;
+        /**
+         * Create a user
+         * @description The new account starts with a mandatory credential change, so the generated password is a one-time handover rather than a shared secret.
+         */
+        post: operations["create_user_v1_users_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/users/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a user */
+        get: operations["get_user_v1_users__user_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a user
+         * @description Soft delete. Revokes every session, grant, and API key the account held — a key that outlives its owner is a credential nobody is accountable for.
+         */
+        delete: operations["delete_user_v1_users__user_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update a user */
+        patch: operations["update_user_v1_users__user_id__patch"];
+        trace?: never;
+    };
+    "/v1/users/{user_id}/force-password-change": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Require a credential change at next login
+         * @description Reuses the identical forced flow as first-boot bootstrap (FR-A-12).
+         */
+        post: operations["force_password_change_v1_users__user_id__force_password_change_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Grant permissions on a resource
+         * @description Administrators may grant anything. Other principals may only delegate permissions they hold themselves, on resources they manage.
+         */
+        post: operations["create_grant_v1_grants_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/users/{user_id}/grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Grants held by a user */
+        get: operations["list_user_grants_v1_users__user_id__grants_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/users/{user_id}/permissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resolved effective permissions
+         * @description The union of a subject's live grants, plus any role-implied capabilities. This is what the system actually evaluates.
+         */
+        get: operations["effective_permissions_v1_users__user_id__permissions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/grants/{grant_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke a grant */
+        delete: operations["revoke_grant_v1_grants__grant_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/knowledge-bases/{kb_id}/break-glass": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open time-boxed administrator access to knowledge base content
+         * @description Under the default `break_glass` policy an administrator manages a knowledge base but cannot read its content. This opens a time-boxed, reasoned, audited window. The owner is notified.
+         */
+        post: operations["open_break_glass_v1_knowledge_bases__kb_id__break_glass_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/api-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List API keys */
+        get: operations["list_api_keys_v1_api_keys_get"];
+        put?: never;
+        /**
+         * Create an API key
+         * @description The key's effective permissions are the intersection of the requested scopes with the owner's own permissions, recomputed at every request. The plaintext key is returned once and is not recoverable.
+         */
+        post: operations["create_api_key_v1_api_keys_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/api-keys/{key_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke an API key
+         * @description Takes effect immediately across every replica, not after the cache TTL.
+         */
+        delete: operations["revoke_api_key_v1_api_keys__key_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspace/permissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The permission vocabulary
+         * @description What can be granted, by resource type. Drives the admin UI.
+         */
+        get: operations["permission_catalogue_v1_workspace_permissions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/rate-limit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Current rate limit state */
+        get: operations["rate_limit_state_v1_me_rate_limit_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Usage */
+        get: operations["get_usage_v1_usage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/audit-log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Query the audit log
+         * @description Append-only. Filterable by actor, action, resource, outcome, and time range.
+         */
+        get: operations["query_audit_log_v1_audit_log_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/audit-log/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export the audit log as JSONL
+         * @description Streamed in batches. An export covering a year must not materialise in the API process.
+         */
+        get: operations["export_audit_log_v1_audit_log_export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Workspace settings */
+        get: operations["get_workspace_settings_v1_settings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update workspace settings */
+        patch: operations["update_workspace_settings_v1_settings_patch"];
+        trace?: never;
+    };
+    "/v1/tasks/queues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Queue depth and starvation age
+         * @description `oldest_ready_age_seconds` is the signal that matters: depth alone can look healthy while one task sits behind a saturated workspace.
+         */
+        get: operations["queue_stats_v1_tasks_queues_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mcp-service": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Service */
+        get: operations["get_service_v1_mcp_service_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mcp-service/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Configure Service */
+        put: operations["configure_service_v1_mcp_service_config_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mcp-service/actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Service Action */
+        post: operations["service_action_v1_mcp_service_actions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mcp-service/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Service Logs */
+        get: operations["service_logs_v1_mcp_service_logs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mcp-service/logs/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download Logs */
+        get: operations["download_logs_v1_mcp_service_logs_download_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/knowledge-base-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List safe knowledge-base setup options */
+        get: operations["knowledge_base_options_v1_knowledge_base_options_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/knowledge-bases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List knowledge bases
+         * @description Administrators see the whole workspace; everyone else sees only the knowledge bases they hold a grant on. The filter is applied in the query, so inaccessible rows are never fetched.
+         */
+        get: operations["list_knowledge_bases_v1_knowledge_bases_get"];
+        put?: never;
+        /**
+         * Create a knowledge base
+         * @description The embedding model is validated here, before anything is written. It becomes immutable once the knowledge base has been indexed (ADR-0006).
+         */
+        post: operations["create_knowledge_base_v1_knowledge_bases_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/knowledge-bases/{kb_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a knowledge base */
+        get: operations["get_knowledge_base_v1_knowledge_bases__kb_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a knowledge base
+         * @description Accepted, not completed: the row is marked and a purge task removes the documents, chunks, vectors, and objects in the background.
+         */
+        delete: operations["delete_knowledge_base_v1_knowledge_bases__kb_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update a knowledge base
+         * @description Changing the embedding model or metric on an indexed knowledge base is refused with a pointer to the reindex endpoint, because mixing embedding spaces in one index degrades retrieval silently.
+         */
+        patch: operations["update_knowledge_base_v1_knowledge_bases__kb_id__patch"];
+        trace?: never;
+    };
+    "/v1/knowledge-bases/{kb_id}/reindex": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rebuild the index
+         * @description Without `confirm` this returns a cost estimate and starts nothing. With it, a new index version begins building while the active one keeps serving queries (ADR-0007).
+         */
+        post: operations["start_reindex_v1_knowledge_bases__kb_id__reindex_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/knowledge-bases/{kb_id}/index-versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List index versions
+         * @description Newest first. A failed build keeps its error so it stays diagnosable.
+         */
+        get: operations["list_index_versions_v1_knowledge_bases__kb_id__index_versions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/knowledge-bases/{kb_id}/index-progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Index build progress */
+        get: operations["get_index_progress_v1_knowledge_bases__kb_id__index_progress_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/knowledge-bases/{kb_id}/documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List documents */
+        get: operations["list_documents_v1_knowledge_bases__kb_id__documents_get"];
+        put?: never;
+        /**
+         * Register uploaded documents
+         * @description Registers content already written to object storage and queues it for parsing. The bytes never pass through this endpoint, so a large upload does not occupy an API worker. Content already present in this knowledge base comes back as `skipped`, which is a success.
+         */
+        post: operations["register_documents_v1_knowledge_bases__kb_id__documents_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/knowledge-bases/{kb_id}/documents/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload and register a document */
+        post: operations["upload_document_v1_knowledge_bases__kb_id__documents_upload_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/knowledge-bases/{kb_id}/documents/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Document counts by state */
+        get: operations["document_stats_v1_knowledge_bases__kb_id__documents_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/knowledge-bases/{kb_id}/documents/{document_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a document */
+        get: operations["get_document_v1_knowledge_bases__kb_id__documents__document_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete a document */
+        delete: operations["delete_document_v1_knowledge_bases__kb_id__documents__document_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/knowledge-bases/{kb_id}/documents/{document_id}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download a document source */
+        get: operations["download_document_v1_knowledge_bases__kb_id__documents__document_id__download_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/knowledge-bases/{kb_id}/documents/{document_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry a failed document
+         * @description Resumes the durable failed stage for a document in `failed`.
+         */
+        post: operations["retry_document_v1_knowledge_bases__kb_id__documents__document_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/knowledge-bases/{kb_id}/documents/{document_id}/chunks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a document's chunks
+         * @description Defaults to the active index version. Paginated by `after_ordinal` rather than a cursor, because chunk order within a document is stable and meaningful.
+         */
+        get: operations["list_chunks_v1_knowledge_bases__kb_id__documents__document_id__chunks_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/chunks/{chunk_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resolve a cited chunk
+         * @description Citation resolution after retrieval. Requires kb:read on the chunk's knowledge base — more than kb:query, so a search-only key cannot walk the corpus. A chunk the caller may not read is reported as not found.
+         */
+        get: operations["resolve_chunk_v1_chunks__chunk_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/documents/{document_id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a document's parsed text
+         * @description The Markdown text that was chunked and indexed for the current revision (at most 20 MB; larger documents answer 413). Requires kb:read on the document's knowledge base.
+         */
+        get: operations["document_content_v1_documents__document_id__content_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/knowledge-bases/{kb_id}/chunks/{chunk_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Edit a chunk
+         * @description Marks the chunk as edited so the next rebuild carries the correction forward (FR-F-09). Only chunks in the active index version are editable — an edit to a building version would be discarded by the next switch, which looks like data loss.
+         */
+        patch: operations["edit_chunk_v1_knowledge_bases__kb_id__chunks__chunk_id__patch"];
+        trace?: never;
+    };
+    "/v1/storage-bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List storage bindings
+         * @description Guarded by `kb:create` rather than `platform:storage`: choosing a backend is part of creating a knowledge base, and the response carries no credentials.
+         */
+        get: operations["list_bindings_v1_storage_bindings_get"];
+        put?: never;
+        /**
+         * Create a storage binding
+         * @description Reachability is verified before this returns, so a misconfigured backend fails here rather than when the first document is uploaded.
+         */
+        post: operations["create_binding_v1_storage_bindings_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/storage-bindings/{binding_id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Re-test a storage binding */
+        post: operations["test_binding_v1_storage_bindings__binding_id__test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/storage-bindings/{binding_id}/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Rotate Binding Credentials */
+        put: operations["rotate_binding_credentials_v1_storage_bindings__binding_id__credentials_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/storage-bindings/{binding_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a storage binding
+         * @description Refused while any knowledge base still points at it.
+         */
+        delete: operations["delete_binding_v1_storage_bindings__binding_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/documents/{document_id}/parse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Document Parse Summary */
+        get: operations["document_parse_summary_v1_documents__document_id__parse_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/documents/{document_id}/parse/elements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Document Parse Elements */
+        get: operations["document_parse_elements_v1_documents__document_id__parse_elements_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/documents/{document_id}/parse/elements/{element_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Document Parse Element */
+        get: operations["document_parse_element_v1_documents__document_id__parse_elements__element_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/documents/{document_id}/parse/pages/{page}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Document Parse Preview */
+        get: operations["document_parse_preview_v1_documents__document_id__parse_pages__page__preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/documents/{document_id}/parse/assets/{asset_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Document Parse Asset */
+        get: operations["document_parse_asset_v1_documents__document_id__parse_assets__asset_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/model-providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Providers */
+        get: operations["list_providers_v1_model_providers_get"];
+        put?: never;
+        /** Create Provider */
+        post: operations["create_provider_v1_model_providers_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/model-providers/{provider_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Provider */
+        delete: operations["delete_provider_v1_model_providers__provider_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/model-providers/{provider_id}/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Replace a provider's API key
+         * @description Write-only: the key is stored encrypted and never returned.
+         */
+        put: operations["replace_provider_credentials_v1_model_providers__provider_id__credentials_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Models */
+        get: operations["list_models_v1_models_get"];
+        put?: never;
+        /** Create Model */
+        post: operations["create_model_v1_models_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/models/usable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Usable Models */
+        get: operations["usable_models_v1_models_usable_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/models/{model_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Model */
+        delete: operations["delete_model_v1_models__model_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/models/{model_id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test Model */
+        post: operations["test_model_v1_models__model_id__test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/models/{model_id}/chat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Chat Model */
+        post: operations["chat_model_v1_models__model_id__chat_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/models/{model_id}/rerank": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rerank Model */
+        post: operations["rerank_model_v1_models__model_id__rerank_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/retrieval/query": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retrieve cited chunks from knowledge bases
+         * @description Requires kb:query on every target. Full-text (BM25 or learned sparse), vector and hybrid search with filters, reranking, parent expansion, deduplication, MMR, highlights and a token budget. Any reduced-quality result is reported in `degraded` or `partial_failures`. `options.explain` returns the query plan and per-stage trace and has its own, smaller per-key rate limit.
+         */
+        post: operations["query_v1_retrieval_query_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/retrieval/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run up to 20 retrieval queries in one request
+         * @description Each query counts against the key's rate limit. A malformed or unauthorized query rejects the whole batch; a query that fails at run time returns no results and one partial failure per target while the others succeed. Explain is not available here.
+         */
+        post: operations["batch_v1_retrieval_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/retrieval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retrieval */
+        post: operations["retrieval_retrieval_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+}
+export type webhooks = Record<string, never>;
+export interface components {
+    schemas: {
+        /** ApiKeyCreatedResponse */
+        ApiKeyCreatedResponse: {
+            api_key: components["schemas"]["ApiKeyResponse"];
+            /** Key */
+            key: string;
+            /**
+             * Warning
+             * @default This key is displayed once and cannot be retrieved again.
+             */
+            warning?: string;
+        };
+        /** ApiKeyResponse */
+        ApiKeyResponse: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Key Prefix */
+            key_prefix: string;
+            /** Last Four */
+            last_four: string;
+            /** Scopes */
+            scopes: string[];
+            /** Knowledge Base Ids */
+            knowledge_base_ids: string[];
+            /** Rate Limit Rpm */
+            rate_limit_rpm: number | null;
+            /** Expires At */
+            expires_at: string | null;
+            /** Revoked At */
+            revoked_at: string | null;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Use Count */
+            use_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** BatchRequest */
+        BatchRequest: {
+            /** Queries */
+            queries: components["schemas"]["RetrievalRequest"][];
+        };
+        /** BatchResponse */
+        BatchResponse: {
+            /** Request Id */
+            request_id: string;
+            /** Responses */
+            responses: components["schemas"]["RetrievalResponse"][];
+            usage: components["schemas"]["BatchUsage"];
+        };
+        /** BatchUsage */
+        BatchUsage: {
+            /**
+             * Embedding Tokens
+             * @default 0
+             */
+            embedding_tokens?: number;
+            /** Latency Ms */
+            latency_ms?: {
+                [key: string]: number;
+            };
+        };
+        /** BindingResponse */
+        BindingResponse: {
+            /** Id */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Driver */
+            driver: string;
+            /** Name */
+            name: string;
+            /** Config */
+            config: {
+                [key: string]: unknown;
+            };
+            /** Health State */
+            health_state: string;
+            /**
+             * Has Credentials
+             * @default false
+             */
+            has_credentials?: boolean;
+        };
+        /** Body_upload_document_v1_knowledge_bases__kb_id__documents_upload_post */
+        Body_upload_document_v1_knowledge_bases__kb_id__documents_upload_post: {
+            /** File */
+            file: string;
+            /**
+             * Metadata
+             * @description Document metadata as a JSON object (FR-D-10), e.g. `{"lang": "en", "tags": ["ops"]}`. Retrieval filters match it; at most 8 KB, 4 levels and 64 keys per object.
+             */
+            metadata?: string | null;
+        };
+        /** BreakGlassRequest */
+        BreakGlassRequest: {
+            /**
+             * Reason
+             * @description Why this access is needed. Recorded in the audit log and sent to the knowledge base owner.
+             */
+            reason: string;
+            /** Ttl Minutes */
+            ttl_minutes?: number | null;
+        };
+        /** ChangePasswordRequest */
+        ChangePasswordRequest: {
+            /** Current Password */
+            current_password: string;
+            /** New Password */
+            new_password: string;
+        };
+        /** ChatMessage */
+        ChatMessage: {
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "system" | "user" | "assistant";
+            /** Content */
+            content: string;
+        };
+        /** ChatRequest */
+        ChatRequest: {
+            /** Messages */
+            messages: components["schemas"]["ChatMessage"][];
+            /**
+             * Max Tokens
+             * @default 1024
+             */
+            max_tokens?: number;
+            /**
+             * Temperature
+             * @default 0.7
+             */
+            temperature?: number;
+            /**
+             * Stream
+             * @default false
+             */
+            stream?: boolean;
+        };
+        /** ChunkConfig */
+        ChunkConfig: {
+            /**
+             * Strategy
+             * @default parent_child
+             * @enum {string}
+             */
+            strategy?: "fixed" | "recursive" | "markdown" | "semantic" | "parent_child" | "custom";
+            /**
+             * Child Tokens
+             * @default 512
+             */
+            child_tokens?: number;
+            /**
+             * Child Overlap
+             * @default 64
+             */
+            child_overlap?: number;
+            /**
+             * Parent Tokens
+             * @default 2048
+             */
+            parent_tokens?: number;
+            /** Separators */
+            separators?: string[];
+            /**
+             * Keep Tables Intact
+             * @default true
+             */
+            keep_tables_intact?: boolean;
+            /**
+             * Min Chunk Tokens
+             * @default 32
+             */
+            min_chunk_tokens?: number;
+            /**
+             * Prepend Heading Path
+             * @default true
+             */
+            prepend_heading_path?: boolean;
+            /** Function Id */
+            function_id?: string | null;
+            /** Function Version */
+            function_version?: number | null;
+        };
+        /** ChunkResponse */
+        ChunkResponse: {
+            /** Id */
+            id: string;
+            /** Document Id */
+            document_id: string;
+            /** Index Version */
+            index_version: number;
+            /** Parent Id */
+            parent_id: string | null;
+            /** Ordinal */
+            ordinal: number;
+            /** Content */
+            content: string;
+            /** Token Count */
+            token_count: number;
+            /** Metadata */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /** Is Edited */
+            is_edited: boolean;
+        };
+        /**
+         * CitedChunkResponse
+         * @description A chunk resolved from a retrieval citation, with its knowledge base.
+         */
+        CitedChunkResponse: {
+            /** Id */
+            id: string;
+            /** Document Id */
+            document_id: string;
+            /** Index Version */
+            index_version: number;
+            /** Parent Id */
+            parent_id: string | null;
+            /** Ordinal */
+            ordinal: number;
+            /** Content */
+            content: string;
+            /** Token Count */
+            token_count: number;
+            /** Metadata */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /** Is Edited */
+            is_edited: boolean;
+            /** Knowledge Base Id */
+            knowledge_base_id: string;
+        };
+        /** CompleteSetupRequest */
+        CompleteSetupRequest: {
+            /** Current Password */
+            current_password: string;
+            /** New Password */
+            new_password: string;
+            /** Confirm Password */
+            confirm_password?: string | null;
+            /** New Username */
+            new_username?: string | null;
+        };
+        /** CreateApiKeyRequest */
+        CreateApiKeyRequest: {
+            /** Name */
+            name: string;
+            /** Scopes */
+            scopes: string[];
+            /** Knowledge Base Ids */
+            knowledge_base_ids?: string[] | null;
+            /** Rate Limit Rpm */
+            rate_limit_rpm?: number | null;
+            /** Ip Allowlist */
+            ip_allowlist?: string[] | null;
+            /** Expires At */
+            expires_at?: string | null;
+        };
+        /** CreateBindingRequest */
+        CreateBindingRequest: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "vector" | "object";
+            /** Driver */
+            driver: string;
+            /** Name */
+            name: string;
+            /** Config */
+            config?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Is Default
+             * @default false
+             */
+            is_default?: boolean;
+            credentials?: components["schemas"]["StorageCredentials"] | null;
+        };
+        /** CreateGrantRequest */
+        CreateGrantRequest: {
+            /**
+             * Subject Type
+             * @enum {string}
+             */
+            subject_type: "user" | "api_key";
+            /** Subject Id */
+            subject_id: string;
+            /**
+             * Resource Type
+             * @enum {string}
+             */
+            resource_type: "workspace" | "knowledge_base" | "pipeline" | "function" | "model" | "golden_set";
+            /** Resource Id */
+            resource_id?: string | null;
+            /** Permissions */
+            permissions: string[];
+            /** Expires At */
+            expires_at?: string | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /** CreateKbRequest */
+        CreateKbRequest: {
+            /** Name */
+            name: string;
+            /**
+             * Embedding Model Id
+             * @description Prefixed model id (`mdl_...`).
+             */
+            embedding_model_id: string;
+            /**
+             * Vector Binding Id
+             * @description Prefixed storage binding id (`bind_...`).
+             */
+            vector_binding_id: string;
+            /** Object Binding Id */
+            object_binding_id: string;
+            /** Description */
+            description?: string | null;
+            /** Slug */
+            slug?: string | null;
+            /**
+             * Metric
+             * @default cosine
+             * @enum {string}
+             */
+            metric?: "cosine" | "dot" | "l2";
+            chunk_config?: components["schemas"]["ChunkConfig"] | null;
+            retrieval_config?: components["schemas"]["RetrievalConfig"] | null;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
+            sparse?: components["schemas"]["SparseChoiceRequest"] | null;
+        };
+        /** CreateModelRequest */
+        CreateModelRequest: {
+            /** Provider Id */
+            provider_id: string;
+            /** Model Key */
+            model_key: string;
+            /** Display Name */
+            display_name: string;
+            /**
+             * Capability
+             * @default embedding
+             * @enum {string}
+             */
+            capability?: "embedding" | "chat" | "rerank";
+            /** Dimension */
+            dimension?: number | null;
+            /**
+             * Max Input Tokens
+             * @default 4096
+             */
+            max_input_tokens?: number;
+            /**
+             * Normalize
+             * @default true
+             */
+            normalize?: boolean;
+            /** Query Prefix */
+            query_prefix?: string | null;
+            /**
+             * Optimal Batch Size
+             * @default 16
+             */
+            optimal_batch_size?: number;
+            /** Tokenizer Id */
+            tokenizer_id?: string | null;
+            /** Cost Per 1K Input */
+            cost_per_1k_input?: number | string | null;
+            /** Cost Per 1K Output */
+            cost_per_1k_output?: number | string | null;
+            /**
+             * Sparse
+             * @default false
+             */
+            sparse?: boolean;
+            /**
+             * Send Dimension
+             * @default false
+             */
+            send_dimension?: boolean;
+        };
+        /** CreateProviderRequest */
+        CreateProviderRequest: {
+            /** Name */
+            name: string;
+            /**
+             * Family
+             * @enum {string}
+             */
+            family: "tei" | "infinity" | "bge_m3" | "dashscope" | "volcengine" | "openai_compatible" | "openai" | "anthropic" | "google" | "deepseek" | "ollama" | "vllm";
+            /** Base Url */
+            base_url?: string | null;
+            /** Api Key */
+            api_key?: string | null;
+            config?: components["schemas"]["ProviderConfigRequest"];
+        };
+        /** CreateUserRequest */
+        CreateUserRequest: {
+            /** Username */
+            username: string;
+            /** Email */
+            email?: string | null;
+            /** Display Name */
+            display_name?: string | null;
+            /**
+             * Role
+             * @default user
+             * @enum {string}
+             */
+            role?: "admin" | "user";
+        };
+        /** CreatedUserResponse */
+        CreatedUserResponse: {
+            user: components["schemas"]["UserResponse"];
+            /** Initial Password */
+            initial_password: string | null;
+            /**
+             * Warning
+             * @default This password is displayed once and cannot be retrieved again.
+             */
+            warning?: string;
+        };
+        /** CursorPage[DocumentResponse] */
+        CursorPage_DocumentResponse_: {
+            /** Items */
+            items: components["schemas"]["DocumentResponse"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+            /**
+             * Has More
+             * @default false
+             */
+            has_more?: boolean;
+        };
+        /** CursorPage[KnowledgeBaseResponse] */
+        CursorPage_KnowledgeBaseResponse_: {
+            /** Items */
+            items: components["schemas"]["KnowledgeBaseResponse"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+            /**
+             * Has More
+             * @default false
+             */
+            has_more?: boolean;
+        };
+        /** DegradationNotice */
+        DegradationNotice: {
+            /** Stage */
+            stage: string;
+            /** Reason */
+            reason: string;
+            /** Detail */
+            detail: string;
+        };
+        /** DifyError */
+        DifyError: {
+            /** Error Code */
+            error_code: number;
+            /** Error Msg */
+            error_msg: string;
+        };
+        /** DifyRecord */
+        DifyRecord: {
+            /** Content */
+            content: string;
+            /** Score */
+            score: number;
+            /** Title */
+            title: string;
+            /** Metadata */
+            metadata: {
+                [key: string]: unknown;
+            };
+        };
+        /** DifyRequest */
+        DifyRequest: {
+            /** Knowledge Id */
+            knowledge_id: string;
+            /** Query */
+            query: string;
+            retrieval_setting?: components["schemas"]["RetrievalSetting"];
+            /** Metadata Condition */
+            metadata_condition?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** DifyResponse */
+        DifyResponse: {
+            /** Records */
+            records: components["schemas"]["DifyRecord"][];
+        };
+        /**
+         * DocumentRegistrationResponse
+         * @description One entry in a bulk registration result.
+         *
+         *     ``skipped`` is not a failure: re-registering identical content is the normal
+         *     outcome of a retried sync, and reporting it as an error trains users to
+         *     ignore errors.
+         */
+        DocumentRegistrationResponse: {
+            /** Filename */
+            filename: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "accepted" | "skipped" | "rejected";
+            document?: components["schemas"]["DocumentResponse"] | null;
+            /** Reason */
+            reason?: string | null;
+            /** Existing Document Id */
+            existing_document_id?: string | null;
+        };
+        /** DocumentResponse */
+        DocumentResponse: {
+            /** Id */
+            id: string;
+            /** Kb Id */
+            kb_id: string;
+            /** Title */
+            title: string | null;
+            /** Source Type */
+            source_type: string;
+            /** Source Ref */
+            source_ref: string | null;
+            /** Mime Type */
+            mime_type: string | null;
+            /** Size Bytes */
+            size_bytes: number | null;
+            /** Content Hash */
+            content_hash: string;
+            /** State */
+            state: string;
+            /** Stage Detail */
+            stage_detail: string | null;
+            /** Error Code */
+            error_code: string | null;
+            /** Error Detail */
+            error_detail: string | null;
+            /** Progress Pct */
+            progress_pct: number;
+            /** Revision */
+            revision: number;
+            /** Page Count */
+            page_count: number | null;
+            /** Chunk Count */
+            chunk_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Indexed At */
+            indexed_at: string | null;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * DocumentStateCounts
+         * @description Counts by pipeline state — what the ingestion progress bar is built from.
+         */
+        DocumentStateCounts: {
+            /** Counts */
+            counts: {
+                [key: string]: number;
+            };
+            /** Total */
+            total: number;
+        };
+        /** EditChunkRequest */
+        EditChunkRequest: {
+            /** Content */
+            content: string;
+        };
+        /**
+         * EffectivePermissionsResponse
+         * @description Answers "why can this principal do that?" — the question an operator
+         *     actually asks during a review.
+         */
+        EffectivePermissionsResponse: {
+            /** Subject Id */
+            subject_id: string;
+            /** Role */
+            role: string;
+            /** Workspace Permissions */
+            workspace_permissions: string[];
+            /** Resource Permissions */
+            resource_permissions: {
+                [key: string]: string[];
+            };
+            /** Accessible Knowledge Bases */
+            accessible_knowledge_bases: string[];
+        };
+        /** Element */
+        Element: {
+            /** Local Id */
+            local_id: string;
+            /** Element Id */
+            element_id?: string | null;
+            /** Parent Id */
+            parent_id?: string | null;
+            /**
+             * Caption Ids
+             * @default []
+             */
+            caption_ids?: string[];
+            /** Order */
+            order: number;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "text" | "heading" | "list" | "code" | "table" | "image" | "formula";
+            /**
+             * Text
+             * @default
+             */
+            text?: string;
+            /** Source Url */
+            source_url?: string | null;
+            /** Legacy Page */
+            legacy_page?: number | null;
+            /** Legacy Bbox */
+            legacy_bbox?: [
+                number,
+                number,
+                number,
+                number
+            ] | null;
+            /** Orig */
+            orig?: string | null;
+            /**
+             * Locations
+             * @default []
+             */
+            locations?: components["schemas"]["Location"][];
+            /**
+             * Provenance
+             * @default []
+             */
+            provenance?: components["schemas"]["Provenance"][];
+            table?: components["schemas"]["Table"] | null;
+            formula?: components["schemas"]["Formula"] | null;
+            /** Asset Id */
+            asset_id?: string | null;
+            /** Asset Status */
+            asset_status?: ("available" | "unavailable") | null;
+            /** Heading Level */
+            heading_level?: number | null;
+            /**
+             * Heading Path
+             * @default []
+             */
+            heading_path?: string[];
+        };
+        /**
+         * ExplainOutput
+         * @description Query plan and per-stage trace (FR-H-08); present only when requested.
+         */
+        ExplainOutput: {
+            /** Plan */
+            plan?: {
+                [key: string]: unknown;
+            };
+            /** Stages */
+            stages?: {
+                [key: string]: unknown;
+            }[];
+        };
+        /** FilterSpec */
+        FilterSpec: {
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            } | null;
+            /** Document Ids */
+            document_ids?: string[] | null;
+            /** Created After */
+            created_after?: string | null;
+            /** Created Before */
+            created_before?: string | null;
+        };
+        /** ForcedChangeResponse */
+        ForcedChangeResponse: {
+            /** User Id */
+            user_id: string;
+            /**
+             * Must Change Password
+             * @default true
+             * @constant
+             */
+            must_change_password?: true;
+            /**
+             * Effective At
+             * Format: date-time
+             */
+            effective_at: string;
+        };
+        /** Formula */
+        Formula: {
+            /**
+             * Native
+             * @default
+             */
+            native?: string;
+            /** Recognized */
+            recognized?: string | null;
+            /** Format */
+            format?: ("latex" | "mathml" | "native") | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "recognized" | "unrecognized" | "missing";
+        };
+        /** FusionSpec */
+        FusionSpec: {
+            /**
+             * Method
+             * @default rrf
+             * @enum {string}
+             */
+            method?: "rrf" | "weighted";
+            /**
+             * K
+             * @default 60
+             */
+            k?: number;
+        };
+        /** GrantResponse */
+        GrantResponse: {
+            /** Id */
+            id: string;
+            /** Subject Type */
+            subject_type: string;
+            /** Subject Id */
+            subject_id: string;
+            /** Resource Type */
+            resource_type: string;
+            /** Resource Id */
+            resource_id: string | null;
+            /** Permissions */
+            permissions: string[];
+            /** Is Break Glass */
+            is_break_glass: boolean;
+            /** Reason */
+            reason: string | null;
+            /** Expires At */
+            expires_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** HTTPValidationError */
+        HTTPValidationError: {
+            /** Detail */
+            detail?: components["schemas"]["ValidationError"][];
+        };
+        /** IndexProgressResponse */
+        IndexProgressResponse: {
+            /** Active Index Version */
+            active_index_version: number | null;
+            /** Building Index Version */
+            building_index_version: number | null;
+            /** State */
+            state: string;
+            /** Chunk Total */
+            chunk_total: number;
+            /** Chunk Done */
+            chunk_done: number;
+            /** Percent */
+            percent: number;
+            /** Eta Seconds */
+            eta_seconds: number | null;
+            /** Started At */
+            started_at: string | null;
+            /** Error */
+            error?: string | null;
+        };
+        /** IndexVersionResponse */
+        IndexVersionResponse: {
+            /** Version */
+            version: number;
+            /** State */
+            state: string;
+            /** Layout */
+            layout: string;
+            /** Chunk Total */
+            chunk_total: number;
+            /** Chunk Done */
+            chunk_done: number;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Completed At */
+            completed_at: string | null;
+            /** Error */
+            error: string | null;
+        };
+        /** KnowledgeBaseOptionsResponse */
+        KnowledgeBaseOptionsResponse: {
+            /** Models */
+            models: components["schemas"]["ModelChoiceResponse"][];
+            /** Bindings */
+            bindings: components["schemas"]["SafeBindingResponse"][];
+            /** Tokenizers */
+            tokenizers: string[];
+            /** Supported Extensions */
+            supported_extensions: string[];
+            /** Max Upload Bytes */
+            max_upload_bytes: number;
+        };
+        /** KnowledgeBaseResponse */
+        KnowledgeBaseResponse: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Slug */
+            slug: string;
+            /** Description */
+            description: string | null;
+            /** Icon Url */
+            icon_url: string | null;
+            /** Embedding Model Id */
+            embedding_model_id: string;
+            /** Embedding Dim */
+            embedding_dim: number;
+            /** Metric */
+            metric: string;
+            /** Vector Binding Id */
+            vector_binding_id: string;
+            /** Object Binding Id */
+            object_binding_id: string;
+            chunk_config: components["schemas"]["ChunkConfig"];
+            retrieval_config: components["schemas"]["RetrievalConfig"];
+            /** Active Index Version */
+            active_index_version: number | null;
+            /** Building Index Version */
+            building_index_version: number | null;
+            /** Config Version */
+            config_version: number;
+            /** Owner User Id */
+            owner_user_id: string;
+            /** Status */
+            status: string;
+            /** Doc Count */
+            doc_count: number;
+            /** Chunk Count */
+            chunk_count: number;
+            /** Bytes Used */
+            bytes_used: number;
+            /** Last Indexed At */
+            last_indexed_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Sparse Kind
+             * @default bm25
+             */
+            sparse_kind?: string;
+            /** Sparse Model Id */
+            sparse_model_id?: string | null;
+            /**
+             * Reindex Required
+             * @default false
+             */
+            reindex_required?: boolean;
+            /** Permissions */
+            permissions?: string[];
+        };
+        /** Location */
+        Location: {
+            /** Page */
+            page: number;
+            /** Width */
+            width: number;
+            /** Height */
+            height: number;
+            /** Bbox */
+            bbox: [
+                number,
+                number,
+                number,
+                number
+            ];
+            /**
+             * Coordinate Space
+             * @default pdf_points_bottom_left
+             * @constant
+             */
+            coordinate_space?: "pdf_points_bottom_left";
+            /** Crop */
+            crop?: [
+                number,
+                number,
+                number,
+                number
+            ] | null;
+            /**
+             * Rotation
+             * @default 0
+             * @enum {integer}
+             */
+            rotation?: 0 | 90 | 180 | 270;
+            /** Char Start */
+            char_start?: number | null;
+            /** Char End */
+            char_end?: number | null;
+            /** Span Source */
+            span_source?: ("text" | "orig") | null;
+        };
+        /** LoginRequest */
+        LoginRequest: {
+            /** Username */
+            username: string;
+            /** Password */
+            password: string;
+        };
+        /**
+         * LoginResponse
+         * @description Two shapes in one model, discriminated by ``status``.
+         *
+         *     On ``password_change_required`` there is **no session cookie** on the
+         *     response and no session token here — see FR-A-04.
+         */
+        LoginResponse: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "password_change_required";
+            user: components["schemas"]["UserResponse"];
+            /** Reason */
+            reason?: string | null;
+            /** Change Token */
+            change_token?: string | null;
+            /** Expires In */
+            expires_in?: number | null;
+            policy?: components["schemas"]["PolicyResponse"] | null;
+        };
+        /** MCPAction */
+        MCPAction: {
+            /** Expected Generation */
+            expected_generation: number;
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "start" | "stop" | "restart";
+        };
+        /** MCPConfigUpdate */
+        MCPConfigUpdate: {
+            /** Expected Generation */
+            expected_generation: number;
+            config: components["schemas"]["ManagedMCPConfig"];
+        };
+        /** MCPLogView */
+        MCPLogView: {
+            /** Id */
+            id: number;
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Level */
+            level: string;
+            /** Event */
+            event: string;
+            /** Detail */
+            detail: string;
+            /** Request Id */
+            request_id?: string | null;
+            /** Status */
+            status?: number | null;
+            /** Duration Ms */
+            duration_ms?: number | null;
+        };
+        /** MCPLogs */
+        MCPLogs: {
+            /** Items */
+            items: components["schemas"]["MCPLogView"][];
+        };
+        /** MCPServiceView */
+        MCPServiceView: {
+            config: components["schemas"]["ManagedMCPConfig"];
+            /** Generation */
+            generation: number;
+            /** Observed Generation */
+            observed_generation: number;
+            /**
+             * Desired State
+             * @enum {string}
+             */
+            desired_state: "running" | "stopped";
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "running" | "stopped" | "starting" | "stopping" | "error" | "unknown";
+            /** Effective Port */
+            effective_port: number | null;
+            /** Started At */
+            started_at: string | null;
+            /** Heartbeat At */
+            heartbeat_at: string | null;
+            /** Last Error */
+            last_error: string | null;
+            /** Allowed Ports */
+            allowed_ports: number[];
+            /** Managed */
+            managed: boolean;
+        };
+        /** ManagedMCPConfig */
+        ManagedMCPConfig: {
+            /**
+             * Port
+             * @default 8081
+             */
+            port?: number;
+            /**
+             * Auto Start
+             * @default true
+             */
+            auto_start?: boolean;
+            /** Allowed Hosts */
+            allowed_hosts?: string[];
+            /** Allowed Origins */
+            allowed_origins?: string[];
+            /**
+             * Request Timeout S
+             * @default 15
+             */
+            request_timeout_s?: number;
+            /**
+             * Max Request Bytes
+             * @default 65536
+             */
+            max_request_bytes?: number;
+        };
+        /** MeResponse */
+        MeResponse: {
+            user: components["schemas"]["UserResponse"];
+            /** Workspace Id */
+            workspace_id: string;
+            /** Permissions */
+            permissions: string[];
+            /** Must Change Password */
+            must_change_password: boolean;
+        };
+        /** MmrSpec */
+        MmrSpec: {
+            /**
+             * Enabled
+             * @default false
+             */
+            enabled?: boolean;
+            /**
+             * Lambda
+             * @default 0.5
+             */
+            lambda?: number;
+        };
+        /** ModelChoiceResponse */
+        ModelChoiceResponse: {
+            /** Id */
+            id: string;
+            /** Provider Id */
+            provider_id: string;
+            /** Display Name */
+            display_name: string;
+            /** Model Key */
+            model_key: string;
+            /** Dimension */
+            dimension: number | null;
+            /** Max Input Tokens */
+            max_input_tokens: number | null;
+            /** Tokenizer Id */
+            tokenizer_id: string | null;
+            /**
+             * Provider Family
+             * @default
+             */
+            provider_family?: string;
+            /**
+             * Sparse
+             * @default false
+             */
+            sparse?: boolean;
+        };
+        /** ModelResponse */
+        ModelResponse: {
+            /** Id */
+            id: string;
+            /** Provider Id */
+            provider_id: string;
+            /** Display Name */
+            display_name: string;
+            /** Model Key */
+            model_key: string;
+            /** Capability */
+            capability: string;
+            /** Dimension */
+            dimension: number | null;
+            /** Max Input Tokens */
+            max_input_tokens: number | null;
+            /** Tokenizer Id */
+            tokenizer_id: string | null;
+            /** Normalize */
+            normalize: boolean;
+            /** Query Prefix */
+            query_prefix: string | null;
+            /** Optimal Batch Size */
+            optimal_batch_size: number;
+            /** Is Enabled */
+            is_enabled: boolean;
+            /** Health State */
+            health_state: string;
+            /** Checked At */
+            checked_at: string | null;
+            /**
+             * Provider Family
+             * @default
+             */
+            provider_family?: string;
+            /**
+             * Sparse
+             * @default false
+             */
+            sparse?: boolean;
+            /**
+             * Send Dimension
+             * @default false
+             */
+            send_dimension?: boolean;
+        };
+        /** ModelTestResponse */
+        ModelTestResponse: {
+            /** Healthy */
+            healthy: boolean;
+            /** Dimensions */
+            dimensions: number;
+            /** Tokens */
+            tokens: number;
+            /** Sparse Terms */
+            sparse_terms?: number | null;
+        };
+        /** ParseElementsResponse */
+        ParseElementsResponse: {
+            /** Items */
+            items: components["schemas"]["Element"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /** ParseSummaryResponse */
+        ParseSummaryResponse: {
+            /** Parse Version */
+            parse_version: string;
+            /** Revision */
+            revision: number;
+            /** Pages */
+            pages: number;
+            /** Producer */
+            producer: string;
+            /** Engine */
+            engine: string | null;
+            /** Warnings */
+            warnings: string[];
+            /** Quality Status */
+            quality_status: string;
+            /** Element Count */
+            element_count: number;
+            /** View */
+            view: string;
+        };
+        /** PasswordPolicySettings */
+        PasswordPolicySettings: {
+            /**
+             * Min Length
+             * @default 12
+             */
+            min_length?: number;
+            /**
+             * Require Classes
+             * @default 3
+             */
+            require_classes?: number;
+        };
+        /** PolicyResponse */
+        PolicyResponse: {
+            /** Min Length */
+            min_length: number;
+            /** Max Length */
+            max_length: number;
+            /** Require Classes */
+            require_classes: number;
+            /** Classes */
+            classes: string[];
+            /** Username Editable */
+            username_editable: boolean;
+            /** Disallow Previous */
+            disallow_previous: boolean;
+        };
+        /** Provenance */
+        Provenance: {
+            /**
+             * Method
+             * @enum {string}
+             */
+            method: "native" | "ocr" | "model-derived" | "legacy";
+            /** Producer */
+            producer: string;
+            /** Confidence */
+            confidence?: number | null;
+            /** Confidence Meaning */
+            confidence_meaning?: string | null;
+        };
+        /** ProviderConfigRequest */
+        ProviderConfigRequest: {
+            /**
+             * Binding Revision
+             * @default v1
+             */
+            binding_revision?: string;
+            /**
+             * Allow Private
+             * @default false
+             */
+            allow_private?: boolean;
+            /**
+             * Max Batch Size
+             * @default 16
+             */
+            max_batch_size?: number;
+        };
+        /** ProviderCredentialsRequest */
+        ProviderCredentialsRequest: {
+            /** Api Key */
+            api_key: string | null;
+        };
+        /** ProviderResponse */
+        ProviderResponse: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Family */
+            family: string;
+            /** Base Url */
+            base_url: string | null;
+            /** Is Enabled */
+            is_enabled: boolean;
+            /** Model Count */
+            model_count: number;
+            /**
+             * Has Credentials
+             * @default false
+             */
+            has_credentials?: boolean;
+        };
+        /**
+         * RegisterUploadRequest
+         * @description Registers content already written to object storage.
+         *
+         *     The bytes do not pass through this endpoint: the client uploads to a
+         *     presigned URL and then registers the result, so a 500 MB PDF never occupies
+         *     an API worker.
+         */
+        RegisterUploadRequest: {
+            /** Filename */
+            filename: string;
+            /**
+             * Content Hash
+             * @description SHA-256, lowercase hex.
+             */
+            content_hash: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Mime Type */
+            mime_type: string;
+            /** Object Key */
+            object_key: string;
+            /** Title */
+            title?: string | null;
+            /**
+             * Source Type
+             * @default upload
+             * @enum {string}
+             */
+            source_type?: "upload" | "crawl" | "s3_sync" | "api" | "connector";
+            /** Source Ref */
+            source_ref?: string | null;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
+        };
+        /** RegisterUploadsRequest */
+        RegisterUploadsRequest: {
+            /** Documents */
+            documents: components["schemas"]["RegisterUploadRequest"][];
+        };
+        /**
+         * ReindexEstimateResponse
+         * @description Returned when ``confirm`` is absent. Nothing has been started.
+         *
+         *     Spending hours of compute and provider budget on a UI click nobody costed is
+         *     a footgun, so the cost is shown before the rebuild rather than after.
+         */
+        ReindexEstimateResponse: {
+            /**
+             * Confirmation Required
+             * @default true
+             * @constant
+             */
+            confirmation_required?: true;
+            /** Chunks */
+            chunks: number;
+            /** Embedding Tokens */
+            embedding_tokens: number;
+            /** Estimated Cost Usd */
+            estimated_cost_usd: number | null;
+            /** Estimated Minutes */
+            estimated_minutes: number;
+            /** Peak Storage Bytes */
+            peak_storage_bytes: number;
+        };
+        /** ReindexRequest */
+        ReindexRequest: {
+            /**
+             * Embedding Model Id
+             * @description The only supported way to change the embedding model.
+             */
+            embedding_model_id?: string | null;
+            chunk_config?: components["schemas"]["ChunkConfig"] | null;
+            sparse?: components["schemas"]["SparseChoiceRequest"] | null;
+            /**
+             * Confirm
+             * @default false
+             */
+            confirm?: boolean;
+            /** Reason */
+            reason?: string | null;
+        };
+        /** RerankResponse */
+        RerankResponse: {
+            /** Model Id */
+            model_id: string;
+            /** Scores */
+            scores: number[];
+        };
+        /** RerankSpec */
+        RerankSpec: {
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled?: boolean;
+            /** Model Id */
+            model_id?: string | null;
+            /**
+             * Top N
+             * @default 5
+             */
+            top_n?: number;
+            /**
+             * Timeout S
+             * @default 1.5
+             */
+            timeout_s?: number;
+        };
+        /** RetrievalConfig */
+        RetrievalConfig: {
+            /**
+             * Search Mode
+             * @default hybrid
+             * @enum {string}
+             */
+            search_mode?: "vector" | "fulltext" | "hybrid";
+            fusion?: components["schemas"]["FusionSpec"];
+            weights?: components["schemas"]["SearchWeights"];
+            /**
+             * Top K
+             * @default 5
+             */
+            top_k?: number;
+            /**
+             * Candidate K
+             * @default 100
+             */
+            candidate_k?: number;
+            /**
+             * Score Threshold
+             * @default 0
+             */
+            score_threshold?: number;
+            rerank?: components["schemas"]["RerankSpec"];
+            /**
+             * Expand Parent
+             * @default true
+             */
+            expand_parent?: boolean;
+            /**
+             * Dedupe
+             * @default none
+             * @enum {string}
+             */
+            dedupe?: "none" | "by_chunk" | "by_document";
+            mmr?: components["schemas"]["MmrSpec"];
+        };
+        /** RetrievalHit */
+        RetrievalHit: {
+            /** Chunk Id */
+            chunk_id: string;
+            /** Document Id */
+            document_id: string;
+            /** Knowledge Base Id */
+            knowledge_base_id: string;
+            /** Content */
+            content: string;
+            /** Token Count */
+            token_count?: number | null;
+            /** Score */
+            score: number;
+            /** Scores */
+            scores?: {
+                [key: string]: number;
+            };
+            /** Highlights */
+            highlights?: {
+                [key: string]: number;
+            }[];
+            /** Matched Child Ids */
+            matched_child_ids?: string[];
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
+            source?: components["schemas"]["SourceInfo"] | null;
+        };
+        /** RetrievalOptions */
+        RetrievalOptions: {
+            /** Expand Parent */
+            expand_parent?: boolean | null;
+            /**
+             * Include Highlights
+             * @default false
+             */
+            include_highlights?: boolean;
+            /**
+             * Include Metadata
+             * @default true
+             */
+            include_metadata?: boolean;
+            /** Max Context Tokens */
+            max_context_tokens?: number | null;
+            /** Dedupe */
+            dedupe?: ("none" | "by_chunk" | "by_document") | null;
+            mmr?: components["schemas"]["MmrSpec"] | null;
+            /**
+             * Explain
+             * @default false
+             */
+            explain?: boolean;
+        };
+        /** RetrievalRequest */
+        RetrievalRequest: {
+            /** Targets */
+            targets: components["schemas"]["RetrievalTarget"][];
+            /** Query */
+            query?: string | null;
+            /** Query Vector */
+            query_vector?: number[] | null;
+            /** Top K */
+            top_k?: number | null;
+            /** Candidate K */
+            candidate_k?: number | null;
+            /** Search Mode */
+            search_mode?: ("vector" | "fulltext" | "hybrid") | null;
+            fusion?: components["schemas"]["FusionSpec"] | null;
+            weights?: components["schemas"]["SearchWeights"] | null;
+            /** Score Threshold */
+            score_threshold?: number | null;
+            rerank?: components["schemas"]["cairn__retrieval__dto__RerankRequest"] | null;
+            filters?: components["schemas"]["FilterSpec"] | null;
+            options?: components["schemas"]["RetrievalOptions"];
+            /**
+             * Strict
+             * @default false
+             */
+            strict?: boolean;
+        };
+        /** RetrievalResponse */
+        RetrievalResponse: {
+            /** Request Id */
+            request_id: string;
+            /** Results */
+            results: components["schemas"]["RetrievalHit"][];
+            usage: components["schemas"]["UsageInfo"];
+            /** Degraded */
+            degraded?: components["schemas"]["DegradationNotice"][];
+            /** Partial Failures */
+            partial_failures?: components["schemas"]["TargetFailure"][];
+            /**
+             * Truncated To Token Budget
+             * @default false
+             */
+            truncated_to_token_budget?: boolean;
+            explain?: components["schemas"]["ExplainOutput"] | null;
+        };
+        /** RetrievalSetting */
+        RetrievalSetting: {
+            /**
+             * Top K
+             * @default 5
+             */
+            top_k?: number;
+            /** Score Threshold */
+            score_threshold?: number | null;
+        };
+        /** RetrievalTarget */
+        RetrievalTarget: {
+            /** Knowledge Base Id */
+            knowledge_base_id: string;
+            /**
+             * Weight
+             * @default 1
+             */
+            weight?: number;
+        };
+        /** SafeBindingResponse */
+        SafeBindingResponse: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Kind */
+            kind: string;
+            /** Driver */
+            driver: string;
+        };
+        /** SearchWeights */
+        SearchWeights: {
+            /**
+             * Dense
+             * @default 0.7
+             */
+            dense?: number;
+            /**
+             * Sparse
+             * @default 0.3
+             */
+            sparse?: number;
+        };
+        /** SettingsResponse */
+        SettingsResponse: {
+            settings: components["schemas"]["WorkspaceSettings"];
+            /**
+             * Requires Restart
+             * @default []
+             */
+            requires_restart?: string[];
+            /**
+             * Hot Reloadable
+             * @default [
+             *       "admin_content_access",
+             *       "audit_retention_days",
+             *       "break_glass_ttl_minutes",
+             *       "crawler_respect_robots",
+             *       "default_rate_limit_rpm",
+             *       "max_upload_bytes"
+             *     ]
+             */
+            hot_reloadable?: string[];
+        };
+        /** SettingsUpdateRequest */
+        SettingsUpdateRequest: {
+            /** Settings */
+            settings: {
+                [key: string]: unknown;
+            };
+        };
+        /** SourceInfo */
+        SourceInfo: {
+            /** Title */
+            title?: string | null;
+            /** Url */
+            url?: string | null;
+            /** Type */
+            type?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * SparseChoiceRequest
+         * @description How keyword (sparse) vectors are produced for the next index version.
+         */
+        SparseChoiceRequest: {
+            /**
+             * Kind
+             * @default auto
+             * @enum {string}
+             */
+            kind?: "auto" | "bm25" | "model";
+            /**
+             * Model Id
+             * @description Prefixed model id when kind=model.
+             */
+            model_id?: string | null;
+        };
+        /** StorageCredentials */
+        StorageCredentials: {
+            /** Access Key Id */
+            access_key_id: string;
+            /**
+             * Secret Access Key
+             * Format: password
+             */
+            secret_access_key: string;
+            /** Session Token */
+            session_token?: string | null;
+        };
+        /** Table */
+        Table: {
+            /** Rows */
+            rows: number;
+            /** Columns */
+            columns: number;
+            /** Cells */
+            cells: components["schemas"]["TableCell"][];
+        };
+        /** TableCell */
+        TableCell: {
+            /** Text */
+            text: string;
+            /** Row Start */
+            row_start: number;
+            /** Row End */
+            row_end: number;
+            /** Col Start */
+            col_start: number;
+            /** Col End */
+            col_end: number;
+            /** Row Span */
+            row_span?: number | null;
+            /** Col Span */
+            col_span?: number | null;
+            /**
+             * Locations
+             * @default []
+             */
+            locations?: components["schemas"]["Location"][];
+            /** Value */
+            value?: string | null;
+            /**
+             * Value Type
+             * @default unknown
+             * @enum {string}
+             */
+            value_type?: "decimal" | "integer" | "text" | "unknown";
+            /** Unit */
+            unit?: string | null;
+        };
+        /** TargetFailure */
+        TargetFailure: {
+            /** Knowledge Base Id */
+            knowledge_base_id: string;
+            /** Code */
+            code: string;
+            /** Detail */
+            detail: string;
+        };
+        /**
+         * UpdateKbRequest
+         * @description A partial update: every field is optional and ``None`` means "unchanged".
+         *
+         *     ``embedding_model_id`` and ``metric`` are accepted rather than rejected by
+         *     the schema so the service can answer with the reindex path (ADR-0006);
+         *     silently dropping them would leave the caller believing a change landed.
+         */
+        UpdateKbRequest: {
+            /** Name */
+            name?: string | null;
+            /** Description */
+            description?: string | null;
+            chunk_config?: components["schemas"]["ChunkConfig"] | null;
+            retrieval_config?: components["schemas"]["RetrievalConfig"] | null;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            } | null;
+            /** Embedding Model Id */
+            embedding_model_id?: string | null;
+            /** Metric */
+            metric?: ("cosine" | "dot" | "l2") | null;
+        };
+        /** UpdateUserRequest */
+        UpdateUserRequest: {
+            /** Email */
+            email?: string | null;
+            /** Display Name */
+            display_name?: string | null;
+            /** Role */
+            role?: ("admin" | "user") | null;
+            /** Is Active */
+            is_active?: boolean | null;
+        };
+        /** UsageInfo */
+        UsageInfo: {
+            /**
+             * Embedding Tokens
+             * @default 0
+             */
+            embedding_tokens?: number;
+            /**
+             * Rerank Units
+             * @default 0
+             */
+            rerank_units?: number;
+            /** Cached Embedding */
+            cached_embedding?: boolean | null;
+            /** Index Versions */
+            index_versions?: {
+                [key: string]: number;
+            };
+            /** Latency Ms */
+            latency_ms?: {
+                [key: string]: number;
+            };
+        };
+        /** UserResponse */
+        UserResponse: {
+            /** Id */
+            id: string;
+            /** Username */
+            username: string;
+            /** Email */
+            email: string | null;
+            /** Display Name */
+            display_name: string | null;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "admin" | "user";
+            /** Must Change Password */
+            must_change_password: boolean;
+            /** Is Active */
+            is_active: boolean;
+            /** Last Login At */
+            last_login_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** ValidationError */
+        ValidationError: {
+            /** Location */
+            loc: (string | number)[];
+            /** Message */
+            msg: string;
+            /** Error Type */
+            type: string;
+            /** Input */
+            input?: unknown;
+            /** Context */
+            ctx?: Record<string, never>;
+        };
+        /** WorkspaceSettings */
+        WorkspaceSettings: {
+            /**
+             * Admin Content Access
+             * @default break_glass
+             * @enum {string}
+             */
+            admin_content_access?: "always" | "on_grant" | "break_glass";
+            /**
+             * Break Glass Ttl Minutes
+             * @default 60
+             */
+            break_glass_ttl_minutes?: number;
+            password_policy?: components["schemas"]["PasswordPolicySettings"];
+            /**
+             * Session Ttl Minutes
+             * @default 480
+             */
+            session_ttl_minutes?: number;
+            /**
+             * Default Rate Limit Rpm
+             * @default 600
+             */
+            default_rate_limit_rpm?: number;
+            /**
+             * Max Upload Bytes
+             * @default 209715200
+             */
+            max_upload_bytes?: number;
+            /**
+             * Audit Retention Days
+             * @default 365
+             */
+            audit_retention_days?: number;
+            /**
+             * Crawler Respect Robots
+             * @default true
+             */
+            crawler_respect_robots?: boolean;
+            /** Default Embedding Model Id */
+            default_embedding_model_id?: string | null;
+        };
+        /** RerankRequest */
+        cairn__modelgw__invocation__RerankRequest: {
+            /** Query */
+            query: string;
+            /** Documents */
+            documents: string[];
+        };
+        /** RerankRequest */
+        cairn__retrieval__dto__RerankRequest: {
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled?: boolean;
+            /** Model */
+            model?: string | null;
+            /** Model Id */
+            model_id?: string | null;
+            /**
+             * Top N
+             * @default 5
+             */
+            top_n?: number;
+            /**
+             * Timeout S
+             * @default 1.5
+             */
+            timeout_s?: number;
+        };
+    };
+    responses: never;
+    parameters: never;
+    requestBodies: never;
+    headers: never;
+    pathItems: never;
+}
+export type $defs = Record<string, never>;
+export interface operations {
+    meta_v1_meta_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    login_v1_auth_login_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    complete_initial_setup_v1_auth_complete_initial_setup_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompleteSetupRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    change_password_v1_auth_change_password_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangePasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    logout_v1_auth_logout_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    me_v1_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+        };
+    };
+    list_users_v1_users_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserResponse"][];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_user_v1_users_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateUserRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatedUserResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_user_v1_users__user_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_user_v1_users__user_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_user_v1_users__user_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateUserRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    force_password_change_v1_users__user_id__force_password_change_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ForcedChangeResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_grant_v1_grants_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateGrantRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrantResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_user_grants_v1_users__user_id__grants_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrantResponse"][];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    effective_permissions_v1_users__user_id__permissions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EffectivePermissionsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_grant_v1_grants__grant_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                grant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    open_break_glass_v1_knowledge_bases__kb_id__break_glass_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BreakGlassRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrantResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_api_keys_v1_api_keys_get: {
+        parameters: {
+            query?: {
+                /** @description Administrators only. */
+                all_users?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKeyResponse"][];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_api_key_v1_api_keys_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateApiKeyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiKeyCreatedResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_api_key_v1_api_keys__key_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    permission_catalogue_v1_workspace_permissions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string[];
+                    };
+                };
+            };
+        };
+    };
+    rate_limit_state_v1_me_rate_limit_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: number;
+                    };
+                };
+            };
+        };
+    };
+    get_usage_v1_usage_get: {
+        parameters: {
+            query?: {
+                model_id?: string | null;
+                principal_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    query_audit_log_v1_audit_log_get: {
+        parameters: {
+            query?: {
+                actor_id?: string | null;
+                action?: string | null;
+                /** @description e.g. `break_glass.` */
+                action_prefix?: string | null;
+                resource_type?: string | null;
+                outcome?: string | null;
+                since?: string | null;
+                until?: string | null;
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_audit_log_v1_audit_log_export_get: {
+        parameters: {
+            query?: {
+                since?: string | null;
+                until?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_workspace_settings_v1_settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+        };
+    };
+    update_workspace_settings_v1_settings_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SettingsUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    queue_stats_v1_tasks_queues_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+        };
+    };
+    get_service_v1_mcp_service_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MCPServiceView"];
+                };
+            };
+        };
+    };
+    configure_service_v1_mcp_service_config_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MCPConfigUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MCPServiceView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    service_action_v1_mcp_service_actions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MCPAction"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MCPServiceView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    service_logs_v1_mcp_service_logs_get: {
+        parameters: {
+            query?: {
+                after_id?: number;
+                limit?: number;
+                level?: ("INFO" | "WARNING" | "ERROR") | null;
+                since?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MCPLogs"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_logs_v1_mcp_service_logs_download_get: {
+        parameters: {
+            query?: {
+                level?: ("INFO" | "WARNING" | "ERROR") | null;
+                since?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    knowledge_base_options_v1_knowledge_base_options_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeBaseOptionsResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+        };
+    };
+    list_knowledge_bases_v1_knowledge_bases_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CursorPage_KnowledgeBaseResponse_"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_knowledge_base_v1_knowledge_bases_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateKbRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeBaseResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_knowledge_base_v1_knowledge_bases__kb_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeBaseResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_knowledge_base_v1_knowledge_bases__kb_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_knowledge_base_v1_knowledge_bases__kb_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateKbRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeBaseResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_reindex_v1_knowledge_bases__kb_id__reindex_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ReindexRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReindexEstimateResponse"] | components["schemas"]["IndexVersionResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_index_versions_v1_knowledge_bases__kb_id__index_versions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IndexVersionResponse"][];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_index_progress_v1_knowledge_bases__kb_id__index_progress_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IndexProgressResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_documents_v1_knowledge_bases__kb_id__documents_get: {
+        parameters: {
+            query?: {
+                state?: string | null;
+                source_type?: string | null;
+                search?: string | null;
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path: {
+                kb_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CursorPage_DocumentResponse_"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    register_documents_v1_knowledge_bases__kb_id__documents_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterUploadsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentRegistrationResponse"][];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_document_v1_knowledge_bases__kb_id__documents_upload_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_document_v1_knowledge_bases__kb_id__documents_upload_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentRegistrationResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    document_stats_v1_knowledge_bases__kb_id__documents_stats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentStateCounts"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_document_v1_knowledge_bases__kb_id__documents__document_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: string;
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_document_v1_knowledge_bases__kb_id__documents__document_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: string;
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_document_v1_knowledge_bases__kb_id__documents__document_id__download_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: string;
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_document_v1_knowledge_bases__kb_id__documents__document_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: string;
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_chunks_v1_knowledge_bases__kb_id__documents__document_id__chunks_get: {
+        parameters: {
+            query?: {
+                index_version?: number | null;
+                limit?: number;
+                after_ordinal?: number | null;
+            };
+            header?: never;
+            path: {
+                kb_id: string;
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChunkResponse"][];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resolve_chunk_v1_chunks__chunk_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                chunk_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CitedChunkResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    document_content_v1_documents__document_id__content_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The parsed text */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                    "text/markdown": unknown;
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    edit_chunk_v1_knowledge_bases__kb_id__chunks__chunk_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kb_id: string;
+                chunk_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EditChunkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChunkResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_bindings_v1_storage_bindings_get: {
+        parameters: {
+            query?: {
+                kind?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BindingResponse"][];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_binding_v1_storage_bindings_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateBindingRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BindingResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_binding_v1_storage_bindings__binding_id__test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                binding_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rotate_binding_credentials_v1_storage_bindings__binding_id__credentials_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                binding_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StorageCredentials"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BindingResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_binding_v1_storage_bindings__binding_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                binding_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    document_parse_summary_v1_documents__document_id__parse_get: {
+        parameters: {
+            query?: {
+                view?: "active" | "candidate";
+            };
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ParseSummaryResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    document_parse_elements_v1_documents__document_id__parse_elements_get: {
+        parameters: {
+            query: {
+                view: "active" | "candidate";
+                parse_version: string;
+                page?: number | null;
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ParseElementsResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    document_parse_element_v1_documents__document_id__parse_elements__element_id__get: {
+        parameters: {
+            query: {
+                view: "active" | "candidate";
+                parse_version: string;
+            };
+            header?: never;
+            path: {
+                document_id: string;
+                element_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Element"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    document_parse_preview_v1_documents__document_id__parse_pages__page__preview_get: {
+        parameters: {
+            query: {
+                view: "active" | "candidate";
+                parse_version: string;
+            };
+            header?: never;
+            path: {
+                document_id: string;
+                page: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    document_parse_asset_v1_documents__document_id__parse_assets__asset_id__get: {
+        parameters: {
+            query: {
+                view: "active" | "candidate";
+                parse_version: string;
+            };
+            header?: never;
+            path: {
+                document_id: string;
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_providers_v1_model_providers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderResponse"][];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+        };
+    };
+    create_provider_v1_model_providers_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateProviderRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_provider_v1_model_providers__provider_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replace_provider_credentials_v1_model_providers__provider_id__credentials_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderCredentialsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_models_v1_models_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelResponse"][];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+        };
+    };
+    create_model_v1_models_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateModelRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    usable_models_v1_models_usable_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelResponse"][];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+        };
+    };
+    delete_model_v1_models__model_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_model_v1_models__model_id__test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelTestResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    chat_model_v1_models__model_id__chat_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChatRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rerank_model_v1_models__model_id__rerank_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["cairn__modelgw__invocation__RerankRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RerankResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    query_v1_retrieval_query_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetrievalRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetrievalResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+        };
+    };
+    batch_v1_retrieval_batch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatchResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": unknown;
+                };
+            };
+        };
+    };
+    retrieval_retrieval_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DifyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DifyResponse"];
+                };
+            };
+            /** @description Dify error_code/error_msg response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DifyError"];
+                };
+            };
+            /** @description Dify error_code/error_msg response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DifyError"];
+                };
+            };
+            /** @description Dify error_code/error_msg response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DifyError"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Dify error_code/error_msg response */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DifyError"];
+                };
+            };
+            /** @description Dify error_code/error_msg response */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DifyError"];
+                };
+            };
+            /** @description Dify error_code/error_msg response */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DifyError"];
+                };
+            };
+        };
+    };
+}

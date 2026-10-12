@@ -1,0 +1,1 @@
+import { CairnClient, type RetrievalResponse } from "@cairn/client"; const c = new CairnClient("https://example.test", "key"); const r: RetrievalResponse = await c.retrieve({targets:[{knowledge_base_id:"kb_1",weight:1}],query:"q",strict:false}); console.log(r.request_id);
