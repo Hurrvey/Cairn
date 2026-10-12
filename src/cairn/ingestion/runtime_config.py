@@ -34,6 +34,7 @@ class IngestionRuntimeSettings(BaseSettings):
     docling_timeout_s: float = Field(default=600, gt=0, le=3600, allow_inf_nan=False)
     docling_memory_bytes: int = Field(default=4 * 1024**3, gt=0)
     docling_persistent: bool = True
+    docling_scan_text_layer: bool = True
     preview_max_page_pixels: int = Field(default=4_000_000, gt=0)
     preview_max_image_bytes: int = Field(default=8 * 1024**2, gt=0)
     preview_max_document_bytes: int = Field(default=64 * 1024**2, gt=0)

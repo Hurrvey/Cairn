@@ -182,6 +182,20 @@ class _Extraction:
     output_bytes: int = 0
 
 
+@dataclass(frozen=True, slots=True)
+class PdfPageFacts:
+    """Cheap per-page facts from the native extraction: no OCR, no rendering."""
+
+    number: int
+    has_page_objects: bool
+    has_raster_objects: bool
+    raster_coverage: float
+    largest_raster_coverage: float
+    native_text_coverage: float
+    extracted_characters: int
+    text: str
+
+
 class PdfParser:
     supported_mimes: ClassVar[frozenset[str]] = frozenset({"application/pdf"})
 
@@ -207,6 +221,37 @@ class PdfParser:
             raise PdfTooLarge() from exc
         except ProcessSupervisionUnavailable as exc:
             raise PdfEngineUnavailable() from exc
+
+    async def inspect(self, data: bytes) -> tuple[PdfPageFacts, ...]:
+        """Per-page facts for routing decisions, without OCR or page rendering."""
+        if len(data) > self._limits.max_input_bytes:
+            raise PdfTooLarge()
+        if not data.startswith(b"%PDF-"):
+            raise PdfCorruptFile()
+        try:
+            async with asyncio.timeout(self._limits.timeout_seconds):
+                extraction = await self._extract(data)
+        except TimeoutError as exc:
+            raise PdfTimedOut() from exc
+        except ProcessTimedOut as exc:
+            raise PdfTimedOut() from exc
+        except ProcessOutputTooLarge as exc:
+            raise PdfTooLarge() from exc
+        except ProcessSupervisionUnavailable as exc:
+            raise PdfEngineUnavailable() from exc
+        return tuple(
+            PdfPageFacts(
+                number=page.number,
+                has_page_objects=page.has_page_objects,
+                has_raster_objects=page.has_raster_objects,
+                raster_coverage=page.raster_coverage,
+                largest_raster_coverage=page.largest_raster_coverage,
+                native_text_coverage=page.native_text_coverage,
+                extracted_characters=page.extracted_characters,
+                text=" ".join(item.text for item in page.layout),
+            )
+            for page in extraction.pages
+        )
 
     async def _parse(self, data: bytes, ctx: ParseContext) -> ParsedDocument:
         hooks = current_hooks.get()

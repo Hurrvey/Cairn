@@ -156,8 +156,11 @@ def get_parser_registry() -> ParserRegistry:
         if settings.ocr_enabled
         else None
     )
-    pdf = (
-        DoclingPdfParser(
+    pdf: Parser
+    if settings.pdf_engine == "docling":
+        from cairn.ingestion.pdf_routing import ScanTextLayerRoutedPdfParser
+
+        docling = DoclingPdfParser(
             python=settings.docling_python,
             assets_path=settings.docling_assets_path,
             manifest_path=settings.docling_manifest_path,
@@ -170,8 +173,19 @@ def get_parser_registry() -> ParserRegistry:
                 max_memory_bytes=settings.docling_memory_bytes,
             ),
         )
-        if settings.pdf_engine == "docling"
-        else PdfParser(ocr=ocr)
+        # Docling is the product engine; scans that already carry a text layer are
+        # read by the baseline instead of being OCR'd a second time.
+        pdf = (
+            ScanTextLayerRoutedPdfParser(docling=docling, baseline=PdfParser(ocr=None))
+            if settings.docling_scan_text_layer
+            else docling
+        )
+    else:
+        pdf = PdfParser(ocr=ocr)
+    pdf_routing_rule = (
+        "docling+scan-text-layer/1"
+        if settings.pdf_engine == "docling" and settings.docling_scan_text_layer
+        else "cairn-image-dominated/1"
     )
     for parser in (
         TextParser(),
@@ -198,7 +212,8 @@ def get_parser_registry() -> ParserRegistry:
                     if settings.pdf_engine == "pdfium"
                     else "2.135.0",
                     "layout": "cairn-pdf-layout/4",
-                    "routing": "cairn-image-dominated/1",
+                    "routing": pdf_routing_rule,
+                    "baseline_package": package_version("pypdfium2"),
                     "render_scale": 2.0,
                     "ocr_text_threshold": 8,
                     "ocr_identity": None

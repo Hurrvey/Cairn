@@ -100,6 +100,23 @@ child exits when the worker closes its stdin, including on runtime shutdown. OCR
 with the full configured language set because the converter is built once; set the
 variable to `false` to return to one short-lived child per document.
 
+## Scanned PDFs with an embedded text layer
+
+Docling runs OCR on every bitmap page, even when the producer already embedded an
+OCR text layer (archive scans, scanner output). With
+`CAIRN_INGESTION__DOCLING_SCAN_TEXT_LAYER=true` (the default) the parse worker first
+inspects the document with the pdfium baseline, which costs well under a second and
+performs no OCR. If at least 90 percent of the content pages are full-page scans
+(largest raster covering 80 percent or more of the page) and every one of those pages
+carries at least 200 characters of text that is mostly alphanumeric, the baseline parse
+is used; such documents take about a second instead of about 6.5 seconds per page. Any
+other document, including scans without a text layer and ordinary native PDFs, goes to
+Docling. If the baseline still decides a page needs OCR, the document falls through to
+Docling as well. The decision and page counts are recorded in
+`metadata.pdf_routing` (`rule`, `engine`, `reason`), and the routing rule
+`docling+scan-text-layer/1` is part of the parser descriptor, so changing the policy
+reparses on the next reindex. Set the variable to `false` to send every PDF to Docling.
+
 ## Reading order and paragraphs (pdfium baseline)
 
 The pdfium baseline keeps pypdfium2's own reading order. The worker records the
