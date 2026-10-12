@@ -41,7 +41,8 @@
       "connect": "接入",
       "setup": "部署配置",
       "admin": "管理"
-    }
+    },
+    "modelConsole": "模型试用"
   },
   "shell": {
     "toggleTheme": "切换浅色或深色主题",
@@ -299,7 +300,10 @@
         "failed": "失败",
         "skipped": "已跳过",
         "deleting": "删除中"
-      }
+      },
+      "metadata": "文档元数据",
+      "metadataHint": "填写 JSON 对象，会附加到下一次上传的每个文件。检索过滤会匹配这些字段；之后修改需要重新上传。",
+      "metadataInvalid": "请输入 JSON 对象，或留空。"
     },
     "chunks": {
       "title": "分块",
@@ -349,7 +353,36 @@
       "matchedChildren": "{n} 个匹配子块",
       "openDocument": "打开文档",
       "noResults": "没有匹配的段落",
-      "noResultsHint": "换个说法、改用全文检索，或确认文档已经索引完成。"
+      "noResultsHint": "换个说法、改用全文检索，或确认文档已经索引完成。",
+      "filters": "过滤",
+      "metadataFilter": "文档元数据（JSON）",
+      "metadataFilterHint": "匹配添加文档时填写的元数据。支持的运算符：{ops}。",
+      "metadataFilterInvalid": "请输入由字段条件组成的 JSON 对象。",
+      "documentsFilter": "仅检索这些文档",
+      "documentsAll": "全部文档",
+      "createdAfter": "添加时间不早于",
+      "createdBefore": "添加时间早于",
+      "ranking": "排序",
+      "dedupeByDocument": "每个文档只保留一个段落",
+      "mmr": "分散相似段落（MMR）",
+      "mmrLambda": "相关性权重",
+      "highlights": "高亮匹配词",
+      "explain": "解释排序过程",
+      "copyCurl": "复制为 curl",
+      "curlHint": "将 CAIRN_API_KEY 设为对该知识库拥有 kb:query 权限的密钥。",
+      "explainTitle": "排序是如何得出的",
+      "explainPlan": "查询计划",
+      "explainStages": "各阶段",
+      "explainStage": "阶段",
+      "explainTime": "耗时",
+      "explainDetail": "详情",
+      "explainReturned": "返回 {n} 条",
+      "explainRemoved": "移除 {n} 条",
+      "explainCollapsed": "{n} 个子块合并为 {parents} 个父块",
+      "explainMoved": "{n} 条位置变化",
+      "source": "来源",
+      "updated": "更新于 {date}",
+      "rebuildForFilters": "重建该知识库的索引后，才能按文档元数据或日期过滤。"
     },
     "versions": {
       "lede": "每次重建都会生成一个新版本。检索使用当前版本；失败的构建会保留错误信息以便排查。",
@@ -411,11 +444,19 @@
         "next": "重建时使用",
         "rebuild": "用此来源重建"
       }
+    },
+    "parse": {
+      "title": "解析结构",
+      "active": "当前索引",
+      "candidate": "构建中",
+      "page": "页码",
+      "previewUnavailable": "页面预览不可用或超过资源预算。",
+      "unscored": "机器提取结果；结构准确率尚未评分。"
     }
   },
   "models": {
     "title": "模型",
-    "lede": "用于索引文档和向量化查询的向量模型服务。",
+    "lede": "管理嵌入、对话和重排序模型，检查连接并查看调用用量。",
     "health": {
       "unknown": "未测试",
       "healthy": "正常",
@@ -490,7 +531,11 @@
       "sparse": "输出关键词权重（稀疏向量）",
       "sendDimension": "向服务商请求指定维度",
       "sparseBadge": "关键词权重",
-      "testOkSparse": "正常 · {dims} 维 · {tokens} tokens · {terms} 个关键词"
+      "testOkSparse": "正常 · {dims} 维 · {tokens} tokens · {terms} 个关键词",
+      "capability": "模型用途",
+      "inputPrice": "输入价格（美元/千 token）",
+      "outputPrice": "输出价格（美元/千 token）",
+      "testOkChat": "模型连接正常，对话测试成功。"
     },
     "families": {
       "tei": {
@@ -516,7 +561,68 @@
       "openai_compatible": {
         "name": "OpenAI 兼容",
         "hint": "OpenAI、智谱、硅基流动、vLLM、Ollama 等 /embeddings 接口。"
+      },
+      "openai": {
+        "name": "OpenAI",
+        "description": "文本对话模型服务",
+        "hint": "用于文本对话；密钥仅在创建或替换时提交。"
+      },
+      "anthropic": {
+        "name": "Anthropic",
+        "description": "文本对话模型服务",
+        "hint": "用于文本对话；密钥仅在创建或替换时提交。"
+      },
+      "google": {
+        "name": "Google Gemini",
+        "description": "文本对话模型服务",
+        "hint": "用于文本对话；密钥仅在创建或替换时提交。"
+      },
+      "deepseek": {
+        "name": "DeepSeek",
+        "description": "文本对话模型服务",
+        "hint": "用于文本对话；密钥仅在创建或替换时提交。"
+      },
+      "ollama": {
+        "name": "Ollama",
+        "description": "文本对话模型服务",
+        "hint": "用于文本对话；密钥仅在创建或替换时提交。"
+      },
+      "vllm": {
+        "name": "vLLM",
+        "description": "文本对话模型服务",
+        "hint": "用于文本对话；密钥仅在创建或替换时提交。"
       }
+    },
+    "capabilities": {
+      "embedding": "向量嵌入",
+      "chat": "文本对话",
+      "rerank": "重排序"
+    },
+    "chat": {
+      "open": "试用对话",
+      "title": "测试 {name}",
+      "hint": "向模型发送文本，逐步查看回复。",
+      "prompt": "你的消息",
+      "empty": "回复将在这里显示。",
+      "send": "发送",
+      "cancel": "停止生成",
+      "cancelled": "已停止生成。",
+      "failed": "模型调用未完成，请重试或检查模型配置。",
+      "tokens": "输入 {input} / 输出 {output} token",
+      "noModels": "暂无可用的对话模型",
+      "requestAccess": "请联系管理员配置模型并授予使用权限。",
+      "loading": "正在加载模型…"
+    },
+    "usage": {
+      "title": "近 30 天模型用量",
+      "hint": "仅统计此网关的对话与重排调用，不包含嵌入和检索。异步汇总可能延迟或遗漏。",
+      "failed": "暂时无法读取用量。",
+      "calls": "调用次数",
+      "input": "已报告输入 token",
+      "output": "已报告输出 token",
+      "cost": "已知费用",
+      "unknown": "{n} 次调用缺少完整计费信息。",
+      "coverage": "输入未知 {input} 次，输出未知 {output} 次；计费完整率 {coverage}。"
     }
   },
   "storage": {
@@ -548,7 +654,20 @@
     "created": "已添加 {name}。",
     "deleteTitle": "删除存储绑定 {name}？",
     "deleteBody": "只能删除未被使用的绑定，底层存储卷不会受影响。",
-    "deleted": "存储绑定已删除。"
+    "deleted": "存储绑定已删除。",
+    "driver": "文件存储方式",
+    "localDriver": "本地目录",
+    "s3Driver": "S3 兼容存储",
+    "s3Hint": "文档保存在 S3 兼容的存储桶中。",
+    "endpoint": "服务地址（使用 AWS 时可留空）",
+    "bucket": "存储桶",
+    "region": "区域",
+    "prefix": "对象路径前缀",
+    "allowPrivate": "允许访问此内网服务地址",
+    "accessKey": "访问密钥 ID",
+    "secretKey": "访问密钥",
+    "rotateCredentials": "更换凭据",
+    "hasCredentials": "已保存凭据"
   },
   "users": {
     "title": "用户",

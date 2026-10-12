@@ -41,7 +41,8 @@
       "connect": "Connect",
       "setup": "Setup",
       "admin": "Administration"
-    }
+    },
+    "modelConsole": "Model console"
   },
   "shell": {
     "toggleTheme": "Switch light or dark theme",
@@ -299,7 +300,10 @@
         "failed": "Failed",
         "skipped": "Skipped",
         "deleting": "Deleting"
-      }
+      },
+      "metadata": "Document metadata",
+      "metadataHint": "A JSON object added to each file in the next upload. Search filters match it; it cannot be changed later without re-uploading.",
+      "metadataInvalid": "Enter a JSON object, or leave the field empty."
     },
     "chunks": {
       "title": "Chunks",
@@ -349,7 +353,36 @@
       "matchedChildren": "{n} matching child chunks",
       "openDocument": "Open document",
       "noResults": "No matching passages",
-      "noResultsHint": "Try other words, switch to full text, or check that the documents are indexed."
+      "noResultsHint": "Try other words, switch to full text, or check that the documents are indexed.",
+      "filters": "Filters",
+      "metadataFilter": "Document metadata (JSON)",
+      "metadataFilterHint": "Matches the metadata given when documents were added. Operators: {ops}.",
+      "metadataFilterInvalid": "Enter a JSON object of field conditions.",
+      "documentsFilter": "Only these documents",
+      "documentsAll": "All documents",
+      "createdAfter": "Added on or after",
+      "createdBefore": "Added before",
+      "ranking": "Ranking",
+      "dedupeByDocument": "One passage per document",
+      "mmr": "Diversify similar passages (MMR)",
+      "mmrLambda": "Relevance weight",
+      "highlights": "Highlight matching terms",
+      "explain": "Explain the ranking",
+      "copyCurl": "Copy as curl",
+      "curlHint": "Set CAIRN_API_KEY to a key with kb:query on this knowledge base.",
+      "explainTitle": "How this ranking was produced",
+      "explainPlan": "Plan",
+      "explainStages": "Stages",
+      "explainStage": "Stage",
+      "explainTime": "Time",
+      "explainDetail": "Detail",
+      "explainReturned": "{n} returned",
+      "explainRemoved": "{n} removed",
+      "explainCollapsed": "{n} children collapsed into {parents} parents",
+      "explainMoved": "{n} moved",
+      "source": "Source",
+      "updated": "Updated {date}",
+      "rebuildForFilters": "Rebuild this knowledge base to filter by document metadata or date."
     },
     "versions": {
       "lede": "Each rebuild creates a new version. Search uses the active one; failed builds keep their error so they stay diagnosable.",
@@ -411,11 +444,19 @@
         "next": "Rebuild with",
         "rebuild": "Rebuild with this source"
       }
+    },
+    "parse": {
+      "title": "Parsed structure",
+      "active": "Active index",
+      "candidate": "Building index",
+      "page": "Page",
+      "previewUnavailable": "Page preview is unavailable or exceeds its resource budget.",
+      "unscored": "Machine extraction; structure accuracy has not been scored."
     }
   },
   "models": {
     "title": "Models",
-    "lede": "The embedding service used to index documents and embed queries.",
+    "lede": "Manage embedding, chat and reranking models, test connections and inspect usage.",
     "health": {
       "unknown": "Not tested",
       "healthy": "Healthy",
@@ -490,7 +531,11 @@
       "sparse": "Returns keyword weights (sparse vectors)",
       "sendDimension": "Request exactly this dimension from the provider",
       "sparseBadge": "Keyword weights",
-      "testOkSparse": "Healthy · {dims} dimensions · {tokens} tokens · {terms} keyword terms"
+      "testOkSparse": "Healthy · {dims} dimensions · {tokens} tokens · {terms} keyword terms",
+      "capability": "Capability",
+      "inputPrice": "Input USD / 1K tokens",
+      "outputPrice": "Output USD / 1K tokens",
+      "testOkChat": "The model answered the test successfully."
     },
     "families": {
       "tei": {
@@ -516,7 +561,68 @@
       "openai_compatible": {
         "name": "OpenAI-compatible",
         "hint": "OpenAI, Zhipu, SiliconFlow, vLLM, Ollama and other /embeddings APIs."
+      },
+      "openai": {
+        "name": "OpenAI",
+        "description": "Text generation provider",
+        "hint": "Text chat provider; credentials are write-only."
+      },
+      "anthropic": {
+        "name": "Anthropic",
+        "description": "Text generation provider",
+        "hint": "Text chat provider; credentials are write-only."
+      },
+      "google": {
+        "name": "Google Gemini",
+        "description": "Text generation provider",
+        "hint": "Text chat provider; credentials are write-only."
+      },
+      "deepseek": {
+        "name": "DeepSeek",
+        "description": "Text generation provider",
+        "hint": "Text chat provider; credentials are write-only."
+      },
+      "ollama": {
+        "name": "Ollama",
+        "description": "Text generation provider",
+        "hint": "Text chat provider; credentials are write-only."
+      },
+      "vllm": {
+        "name": "vLLM",
+        "description": "Text generation provider",
+        "hint": "Text chat provider; credentials are write-only."
       }
+    },
+    "capabilities": {
+      "embedding": "Embedding",
+      "chat": "Text chat",
+      "rerank": "Reranking"
+    },
+    "chat": {
+      "open": "Try chat",
+      "title": "Test {name}",
+      "hint": "Send text to this model and watch the reply arrive.",
+      "prompt": "Your message",
+      "empty": "The reply will appear here.",
+      "send": "Send",
+      "cancel": "Stop generating",
+      "cancelled": "Generation stopped.",
+      "failed": "The model call did not finish. Retry or check its configuration.",
+      "tokens": "{input} input / {output} output tokens",
+      "noModels": "No authorized chat models",
+      "requestAccess": "Ask an administrator to configure a model and grant you access.",
+      "loading": "Loading models…"
+    },
+    "usage": {
+      "title": "Model usage · last 30 days",
+      "hint": "Gateway chat and rerank calls only; embeddings and retrieval are not included. Asynchronous reporting may be delayed or incomplete.",
+      "failed": "Usage is unavailable.",
+      "calls": "Calls",
+      "input": "Reported input tokens",
+      "output": "Reported output tokens",
+      "cost": "Known cost",
+      "unknown": "{n} calls have incomplete cost information.",
+      "coverage": "{input} calls with unknown input, {output} with unknown output; cost coverage {coverage}."
     }
   },
   "storage": {
@@ -548,7 +654,20 @@
     "created": "Added {name}.",
     "deleteTitle": "Delete storage binding {name}?",
     "deleteBody": "Only unused bindings can be deleted. The underlying volume is not touched.",
-    "deleted": "Storage binding deleted."
+    "deleted": "Storage binding deleted.",
+    "driver": "Document storage",
+    "localDriver": "Local folder",
+    "s3Driver": "S3-compatible",
+    "s3Hint": "Document files in an S3-compatible bucket.",
+    "endpoint": "Endpoint (leave empty for AWS)",
+    "bucket": "Bucket",
+    "region": "Region",
+    "prefix": "Key prefix",
+    "allowPrivate": "Allow this endpoint on a private network",
+    "accessKey": "Access key ID",
+    "secretKey": "Secret access key",
+    "rotateCredentials": "Replace credentials",
+    "hasCredentials": "Credentials saved"
   },
   "users": {
     "title": "Users",

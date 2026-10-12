@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Cairn",
-    "description": "\nCairn is a knowledge base platform and RAG infrastructure server.\n\nAgents are clients: point at this URL, present an API key, send a query and a\nknowledge base ID, and receive ranked, cited passages.\n\n**Phase 0** ships authentication only. Knowledge base, ingestion, and retrieval\nendpoints arrive in Phase 2.\n",
+    "description": "\nCairn is a knowledge base platform and RAG infrastructure server.\n\nAgents are clients: point at this URL, present an API key, send a query and a\nknowledge base ID, and receive ranked, cited passages.\n\nThe control plane manages knowledge bases, documents, models, storage, keys and\ngrants; the data plane serves `/v1/retrieval/query`, `/v1/retrieval/batch` and MCP.\nEvery retrieval response states any reduction in quality in `degraded` or\n`partial_failures`.\n",
     "version": "0.1.0"
   },
   "paths": {
@@ -1060,6 +1060,79 @@
                   },
                   "type": "object",
                   "title": "Response Rate Limit State V1 Me Rate Limit Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/usage": {
+      "get": {
+        "tags": [
+          "platform"
+        ],
+        "summary": "Get Usage",
+        "operationId": "get_usage_v1_usage_get",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Model Id"
+            }
+          },
+          {
+            "name": "principal_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Principal Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Usage V1 Usage Get"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -2992,6 +3065,129 @@
         }
       }
     },
+    "/v1/chunks/{chunk_id}": {
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Resolve a cited chunk",
+        "description": "Citation resolution after retrieval. Requires kb:read on the chunk's knowledge base \u2014 more than kb:query, so a search-only key cannot walk the corpus. A chunk the caller may not read is reported as not found.",
+        "operationId": "resolve_chunk_v1_chunks__chunk_id__get",
+        "parameters": [
+          {
+            "name": "chunk_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Chunk Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CitedChunkResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/documents/{document_id}/content": {
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Read a document's parsed text",
+        "description": "The Markdown text that was chunked and indexed for the current revision (at most 20 MB; larger documents answer 413). Requires kb:read on the document's knowledge base.",
+        "operationId": "document_content_v1_documents__document_id__content_get",
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Document Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The parsed text",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/markdown": {}
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/knowledge-bases/{kb_id}/chunks/{chunk_id}": {
       "patch": {
         "tags": [
@@ -3267,6 +3463,76 @@
         }
       }
     },
+    "/v1/storage-bindings/{binding_id}/credentials": {
+      "put": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Rotate Binding Credentials",
+        "operationId": "rotate_binding_credentials_v1_storage_bindings__binding_id__credentials_put",
+        "parameters": [
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Binding Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StorageCredentials"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BindingResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/storage-bindings/{binding_id}": {
       "delete": {
         "tags": [
@@ -3289,6 +3555,480 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/documents/{document_id}/parse": {
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Document Parse Summary",
+        "operationId": "document_parse_summary_v1_documents__document_id__parse_get",
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Document Id"
+            }
+          },
+          {
+            "name": "view",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "active",
+                "candidate"
+              ],
+              "type": "string",
+              "default": "active",
+              "title": "View"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParseSummaryResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/documents/{document_id}/parse/elements": {
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Document Parse Elements",
+        "operationId": "document_parse_elements_v1_documents__document_id__parse_elements_get",
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Document Id"
+            }
+          },
+          {
+            "name": "view",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "active",
+                "candidate"
+              ],
+              "type": "string",
+              "title": "View"
+            }
+          },
+          {
+            "name": "parse_version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$",
+              "title": "Parse Version"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Page"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParseElementsResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/documents/{document_id}/parse/elements/{element_id}": {
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Document Parse Element",
+        "operationId": "document_parse_element_v1_documents__document_id__parse_elements__element_id__get",
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Document Id"
+            }
+          },
+          {
+            "name": "element_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Element Id"
+            }
+          },
+          {
+            "name": "view",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "active",
+                "candidate"
+              ],
+              "type": "string",
+              "title": "View"
+            }
+          },
+          {
+            "name": "parse_version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$",
+              "title": "Parse Version"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Element"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/documents/{document_id}/parse/pages/{page}/preview": {
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Document Parse Preview",
+        "operationId": "document_parse_preview_v1_documents__document_id__parse_pages__page__preview_get",
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Document Id"
+            }
+          },
+          {
+            "name": "page",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Page"
+            }
+          },
+          {
+            "name": "view",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "active",
+                "candidate"
+              ],
+              "type": "string",
+              "title": "View"
+            }
+          },
+          {
+            "name": "parse_version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$",
+              "title": "Parse Version"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/documents/{document_id}/parse/assets/{asset_id}": {
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Document Parse Asset",
+        "operationId": "document_parse_asset_v1_documents__document_id__parse_assets__asset_id__get",
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Document Id"
+            }
+          },
+          {
+            "name": "asset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Asset Id"
+            }
+          },
+          {
+            "name": "view",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "active",
+                "candidate"
+              ],
+              "type": "string",
+              "title": "View"
+            }
+          },
+          {
+            "name": "parse_version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$",
+              "title": "Parse Version"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
           },
           "403": {
             "content": {
@@ -3645,6 +4385,49 @@
         }
       }
     },
+    "/v1/models/usable": {
+      "get": {
+        "tags": [
+          "models"
+        ],
+        "summary": "Usable Models",
+        "operationId": "usable_models_v1_models_usable_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ModelResponse"
+                  },
+                  "type": "array",
+                  "title": "Response Usable Models V1 Models Usable Get"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {}
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {}
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {}
+            }
+          }
+        }
+      }
+    },
     "/v1/models/{model_id}": {
       "delete": {
         "tags": [
@@ -3758,13 +4541,151 @@
         }
       }
     },
+    "/v1/models/{model_id}/chat": {
+      "post": {
+        "tags": [
+          "models"
+        ],
+        "summary": "Chat Model",
+        "operationId": "chat_model_v1_models__model_id__chat_post",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Model Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/models/{model_id}/rerank": {
+      "post": {
+        "tags": [
+          "models"
+        ],
+        "summary": "Rerank Model",
+        "operationId": "rerank_model_v1_models__model_id__rerank_post",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Model Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/cairn__modelgw__invocation__RerankRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RerankResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {}
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/retrieval/query": {
       "post": {
         "tags": [
           "retrieval"
         ],
         "summary": "Retrieve cited chunks from knowledge bases",
-        "description": "Requires kb:query on every target. Supports bounded full-text (BM25), vector, and hybrid search; unsupported advanced options are rejected or reported degraded.",
+        "description": "Requires kb:query on every target. Full-text (BM25 or learned sparse), vector and hybrid search with filters, reranking, parent expansion, deduplication, MMR, highlights and a token budget. Any reduced-quality result is reported in `degraded` or `partial_failures`. `options.explain` returns the query plan and per-stage trace and has its own, smaller per-key rate limit.",
         "operationId": "query_v1_retrieval_query_post",
         "requestBody": {
           "content": {
@@ -3805,6 +4726,12 @@
               "application/problem+json": {}
             }
           },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/problem+json": {}
+            }
+          },
           "502": {
             "description": "Bad Gateway",
             "content": {
@@ -3815,6 +4742,185 @@
             "description": "Service Unavailable",
             "content": {
               "application/problem+json": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/retrieval/batch": {
+      "post": {
+        "tags": [
+          "retrieval"
+        ],
+        "summary": "Run up to 20 retrieval queries in one request",
+        "description": "Each query counts against the key's rate limit. A malformed or unauthorized query rejects the whole batch; a query that fails at run time returns no results and one partial failure per target while the others succeed. Explain is not available here.",
+        "operationId": "batch_v1_retrieval_batch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {}
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/problem+json": {}
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/problem+json": {}
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/problem+json": {}
+            }
+          },
+          "502": {
+            "description": "Bad Gateway",
+            "content": {
+              "application/problem+json": {}
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/problem+json": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/retrieval": {
+      "post": {
+        "tags": [
+          "compatibility"
+        ],
+        "summary": "Retrieval",
+        "operationId": "retrieval_retrieval_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DifyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DifyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Dify error_code/error_msg response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DifyError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Dify error_code/error_msg response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DifyError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Dify error_code/error_msg response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DifyError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Dify error_code/error_msg response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DifyError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Dify error_code/error_msg response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DifyError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dify error_code/error_msg response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DifyError"
+                }
+              }
             }
           },
           "422": {
@@ -3961,6 +5067,70 @@
         ],
         "title": "ApiKeyResponse"
       },
+      "BatchRequest": {
+        "properties": {
+          "queries": {
+            "items": {
+              "$ref": "#/components/schemas/RetrievalRequest"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Queries"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "queries"
+        ],
+        "title": "BatchRequest"
+      },
+      "BatchResponse": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "responses": {
+            "items": {
+              "$ref": "#/components/schemas/RetrievalResponse"
+            },
+            "type": "array",
+            "title": "Responses"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/BatchUsage"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "request_id",
+          "responses",
+          "usage"
+        ],
+        "title": "BatchResponse"
+      },
+      "BatchUsage": {
+        "properties": {
+          "embedding_tokens": {
+            "type": "integer",
+            "title": "Embedding Tokens",
+            "default": 0
+          },
+          "latency_ms": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Latency Ms"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "BatchUsage"
+      },
       "BindingResponse": {
         "properties": {
           "id": {
@@ -3987,6 +5157,11 @@
           "health_state": {
             "type": "string",
             "title": "Health State"
+          },
+          "has_credentials": {
+            "type": "boolean",
+            "title": "Has Credentials",
+            "default": false
           }
         },
         "type": "object",
@@ -4006,6 +5181,18 @@
             "type": "string",
             "contentMediaType": "application/octet-stream",
             "title": "File"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata",
+            "description": "Document metadata as a JSON object (FR-D-10), e.g. `{\"lang\": \"en\", \"tags\": [\"ops\"]}`. Retrieval filters match it; at most 8 KB, 4 levels and 64 keys per object."
           }
         },
         "type": "object",
@@ -4066,6 +5253,70 @@
           "new_password"
         ],
         "title": "ChangePasswordRequest"
+      },
+      "ChatMessage": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "system",
+              "user",
+              "assistant"
+            ],
+            "title": "Role"
+          },
+          "content": {
+            "type": "string",
+            "maxLength": 32768,
+            "minLength": 1,
+            "title": "Content"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "role",
+          "content"
+        ],
+        "title": "ChatMessage"
+      },
+      "ChatRequest": {
+        "properties": {
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/ChatMessage"
+            },
+            "type": "array",
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "Messages"
+          },
+          "max_tokens": {
+            "type": "integer",
+            "maximum": 8192.0,
+            "minimum": 1.0,
+            "title": "Max Tokens",
+            "default": 1024
+          },
+          "temperature": {
+            "type": "number",
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Temperature",
+            "default": 0.7
+          },
+          "stream": {
+            "type": "boolean",
+            "title": "Stream",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "messages"
+        ],
+        "title": "ChatRequest"
       },
       "ChunkConfig": {
         "properties": {
@@ -4214,6 +5465,73 @@
           "is_edited"
         ],
         "title": "ChunkResponse"
+      },
+      "CitedChunkResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "document_id": {
+            "type": "string",
+            "title": "Document Id"
+          },
+          "index_version": {
+            "type": "integer",
+            "title": "Index Version"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "ordinal": {
+            "type": "integer",
+            "title": "Ordinal"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "token_count": {
+            "type": "integer",
+            "title": "Token Count"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          },
+          "is_edited": {
+            "type": "boolean",
+            "title": "Is Edited"
+          },
+          "knowledge_base_id": {
+            "type": "string",
+            "title": "Knowledge Base Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "document_id",
+          "index_version",
+          "parent_id",
+          "ordinal",
+          "content",
+          "token_count",
+          "metadata",
+          "is_edited",
+          "knowledge_base_id"
+        ],
+        "title": "CitedChunkResponse",
+        "description": "A chunk resolved from a retrieval citation, with its knowledge base."
       },
       "CompleteSetupRequest": {
         "properties": {
@@ -4374,6 +5692,16 @@
             "type": "boolean",
             "title": "Is Default",
             "default": false
+          },
+          "credentials": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StorageCredentials"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -4589,7 +5917,11 @@
           },
           "capability": {
             "type": "string",
-            "const": "embedding",
+            "enum": [
+              "embedding",
+              "chat",
+              "rerank"
+            ],
             "title": "Capability",
             "default": "embedding"
           },
@@ -4608,9 +5940,10 @@
           },
           "max_input_tokens": {
             "type": "integer",
-            "maximum": 32768.0,
+            "maximum": 1000000.0,
             "minimum": 1.0,
-            "title": "Max Input Tokens"
+            "title": "Max Input Tokens",
+            "default": 4096
           },
           "normalize": {
             "type": "boolean",
@@ -4637,10 +5970,49 @@
             "default": 16
           },
           "tokenizer_id": {
-            "type": "string",
-            "maxLength": 255,
-            "minLength": 1,
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Tokenizer Id"
+          },
+          "cost_per_1k_input": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,6}|(?=[\\d.]{1,13}0*$)\\d{0,6}\\.\\d{0,6}0*$)"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Per 1K Input"
+          },
+          "cost_per_1k_output": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,6}|(?=[\\d.]{1,13}0*$)\\d{0,6}\\.\\d{0,6}0*$)"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Per 1K Output"
           },
           "sparse": {
             "type": "boolean",
@@ -4658,9 +6030,7 @@
         "required": [
           "provider_id",
           "model_key",
-          "display_name",
-          "max_input_tokens",
-          "tokenizer_id"
+          "display_name"
         ],
         "title": "CreateModelRequest"
       },
@@ -4680,7 +6050,13 @@
               "bge_m3",
               "dashscope",
               "volcengine",
-              "openai_compatible"
+              "openai_compatible",
+              "openai",
+              "anthropic",
+              "google",
+              "deepseek",
+              "ollama",
+              "vllm"
             ],
             "title": "Family"
           },
@@ -4889,6 +6265,107 @@
         ],
         "title": "DegradationNotice"
       },
+      "DifyError": {
+        "properties": {
+          "error_code": {
+            "type": "integer",
+            "title": "Error Code"
+          },
+          "error_msg": {
+            "type": "string",
+            "title": "Error Msg"
+          }
+        },
+        "type": "object",
+        "required": [
+          "error_code",
+          "error_msg"
+        ],
+        "title": "DifyError"
+      },
+      "DifyRecord": {
+        "properties": {
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "score": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Score"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "content",
+          "score",
+          "title",
+          "metadata"
+        ],
+        "title": "DifyRecord"
+      },
+      "DifyRequest": {
+        "properties": {
+          "knowledge_id": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Knowledge Id"
+          },
+          "query": {
+            "type": "string",
+            "maxLength": 8192,
+            "minLength": 1,
+            "title": "Query"
+          },
+          "retrieval_setting": {
+            "$ref": "#/components/schemas/RetrievalSetting"
+          },
+          "metadata_condition": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata Condition"
+          }
+        },
+        "type": "object",
+        "required": [
+          "knowledge_id",
+          "query"
+        ],
+        "title": "DifyRequest"
+      },
+      "DifyResponse": {
+        "properties": {
+          "records": {
+            "items": {
+              "$ref": "#/components/schemas/DifyRecord"
+            },
+            "type": "array",
+            "title": "Records"
+          }
+        },
+        "type": "object",
+        "required": [
+          "records"
+        ],
+        "title": "DifyResponse"
+      },
       "DocumentRegistrationResponse": {
         "properties": {
           "filename": {
@@ -5083,6 +6560,11 @@
               }
             ],
             "title": "Indexed At"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
           }
         },
         "type": "object",
@@ -5192,6 +6674,243 @@
         "title": "EffectivePermissionsResponse",
         "description": "Answers \"why can this principal do that?\" \u2014 the question an operator\nactually asks during a review."
       },
+      "Element": {
+        "properties": {
+          "local_id": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Local Id"
+          },
+          "element_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Element Id"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "caption_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Caption Ids",
+            "default": []
+          },
+          "order": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Order"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "text",
+              "heading",
+              "list",
+              "code",
+              "table",
+              "image",
+              "formula"
+            ],
+            "title": "Type"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text",
+            "default": ""
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "legacy_page": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legacy Page"
+          },
+          "legacy_bbox": {
+            "anyOf": [
+              {
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array",
+                "maxItems": 4,
+                "minItems": 4
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legacy Bbox"
+          },
+          "orig": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Orig"
+          },
+          "locations": {
+            "items": {
+              "$ref": "#/components/schemas/Location"
+            },
+            "type": "array",
+            "title": "Locations",
+            "default": []
+          },
+          "provenance": {
+            "items": {
+              "$ref": "#/components/schemas/Provenance"
+            },
+            "type": "array",
+            "title": "Provenance",
+            "default": []
+          },
+          "table": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Table"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "formula": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Formula"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "asset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Id"
+          },
+          "asset_status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "available",
+                  "unavailable"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Status"
+          },
+          "heading_level": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 6.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heading Level"
+          },
+          "heading_path": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Heading Path",
+            "default": []
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "local_id",
+          "order",
+          "type"
+        ],
+        "title": "Element"
+      },
+      "ExplainOutput": {
+        "properties": {
+          "plan": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Plan"
+          },
+          "stages": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Stages"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ExplainOutput",
+        "description": "Query plan and per-stage trace (FR-H-08); present only when requested."
+      },
       "FilterSpec": {
         "properties": {
           "metadata": {
@@ -5273,6 +6992,57 @@
           "effective_at"
         ],
         "title": "ForcedChangeResponse"
+      },
+      "Formula": {
+        "properties": {
+          "native": {
+            "type": "string",
+            "title": "Native",
+            "default": ""
+          },
+          "recognized": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recognized"
+          },
+          "format": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "latex",
+                  "mathml",
+                  "native"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Format"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "recognized",
+              "unrecognized",
+              "missing"
+            ],
+            "title": "Status"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "Formula"
       },
       "FusionSpec": {
         "properties": {
@@ -5736,6 +7506,13 @@
             "type": "boolean",
             "title": "Reindex Required",
             "default": false
+          },
+          "permissions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Permissions"
           }
         },
         "type": "object",
@@ -5764,6 +7541,137 @@
           "created_at"
         ],
         "title": "KnowledgeBaseResponse"
+      },
+      "Location": {
+        "properties": {
+          "page": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Page"
+          },
+          "width": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Width"
+          },
+          "height": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Height"
+          },
+          "bbox": {
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 4,
+            "title": "Bbox"
+          },
+          "coordinate_space": {
+            "type": "string",
+            "const": "pdf_points_bottom_left",
+            "title": "Coordinate Space",
+            "default": "pdf_points_bottom_left"
+          },
+          "crop": {
+            "anyOf": [
+              {
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array",
+                "maxItems": 4,
+                "minItems": 4
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Crop"
+          },
+          "rotation": {
+            "type": "integer",
+            "enum": [
+              0,
+              90,
+              180,
+              270
+            ],
+            "title": "Rotation",
+            "default": 0
+          },
+          "char_start": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Char Start"
+          },
+          "char_end": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Char End"
+          },
+          "span_source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "text",
+                  "orig"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Span Source"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "page",
+          "width",
+          "height",
+          "bbox"
+        ],
+        "title": "Location"
       },
       "LoginRequest": {
         "properties": {
@@ -6420,6 +8328,97 @@
         ],
         "title": "ModelTestResponse"
       },
+      "ParseElementsResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Element"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "ParseElementsResponse"
+      },
+      "ParseSummaryResponse": {
+        "properties": {
+          "parse_version": {
+            "type": "string",
+            "title": "Parse Version"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "pages": {
+            "type": "integer",
+            "title": "Pages"
+          },
+          "producer": {
+            "type": "string",
+            "title": "Producer"
+          },
+          "engine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Engine"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "quality_status": {
+            "type": "string",
+            "title": "Quality Status"
+          },
+          "element_count": {
+            "type": "integer",
+            "title": "Element Count"
+          },
+          "view": {
+            "type": "string",
+            "title": "View"
+          }
+        },
+        "type": "object",
+        "required": [
+          "parse_version",
+          "revision",
+          "pages",
+          "producer",
+          "engine",
+          "warnings",
+          "quality_status",
+          "element_count",
+          "view"
+        ],
+        "title": "ParseSummaryResponse"
+      },
       "PasswordPolicySettings": {
         "properties": {
           "min_length": {
@@ -6480,6 +8479,55 @@
           "disallow_previous"
         ],
         "title": "PolicyResponse"
+      },
+      "Provenance": {
+        "properties": {
+          "method": {
+            "type": "string",
+            "enum": [
+              "native",
+              "ocr",
+              "model-derived",
+              "legacy"
+            ],
+            "title": "Method"
+          },
+          "producer": {
+            "type": "string",
+            "title": "Producer"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "confidence_meaning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence Meaning"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "method",
+          "producer"
+        ],
+        "title": "Provenance"
       },
       "ProviderConfigRequest": {
         "properties": {
@@ -6786,53 +8834,26 @@
         "type": "object",
         "title": "ReindexRequest"
       },
-      "RerankRequest": {
+      "RerankResponse": {
         "properties": {
-          "enabled": {
-            "type": "boolean",
-            "title": "Enabled",
-            "default": true
-          },
-          "model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model"
-          },
           "model_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
             "title": "Model Id"
           },
-          "top_n": {
-            "type": "integer",
-            "maximum": 100.0,
-            "minimum": 1.0,
-            "title": "Top N",
-            "default": 5
-          },
-          "timeout_s": {
-            "type": "number",
-            "maximum": 30.0,
-            "exclusiveMinimum": 0.0,
-            "title": "Timeout S",
-            "default": 1.5
+          "scores": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Scores"
           }
         },
-        "additionalProperties": false,
         "type": "object",
-        "title": "RerankRequest"
+        "required": [
+          "model_id",
+          "scores"
+        ],
+        "title": "RerankResponse"
       },
       "RerankSpec": {
         "properties": {
@@ -7206,7 +9227,7 @@
           "rerank": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/RerankRequest"
+                "$ref": "#/components/schemas/cairn__retrieval__dto__RerankRequest"
               },
               {
                 "type": "null"
@@ -7275,8 +9296,14 @@
             "default": false
           },
           "explain": {
-            "type": "null",
-            "title": "Explain"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExplainOutput"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -7287,6 +9314,31 @@
           "usage"
         ],
         "title": "RetrievalResponse"
+      },
+      "RetrievalSetting": {
+        "properties": {
+          "top_k": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Top K",
+            "default": 5
+          },
+          "score_threshold": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score Threshold"
+          }
+        },
+        "type": "object",
+        "title": "RetrievalSetting"
       },
       "RetrievalTarget": {
         "properties": {
@@ -7489,6 +9541,179 @@
         "type": "object",
         "title": "SparseChoiceRequest",
         "description": "How keyword (sparse) vectors are produced for the next index version."
+      },
+      "StorageCredentials": {
+        "properties": {
+          "access_key_id": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Access Key Id"
+          },
+          "secret_access_key": {
+            "type": "string",
+            "maxLength": 4096,
+            "minLength": 1,
+            "format": "password",
+            "title": "Secret Access Key",
+            "writeOnly": true
+          },
+          "session_token": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "password",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Token"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "access_key_id",
+          "secret_access_key"
+        ],
+        "title": "StorageCredentials"
+      },
+      "Table": {
+        "properties": {
+          "rows": {
+            "type": "integer",
+            "maximum": 10000.0,
+            "minimum": 1.0,
+            "title": "Rows"
+          },
+          "columns": {
+            "type": "integer",
+            "maximum": 1000.0,
+            "minimum": 1.0,
+            "title": "Columns"
+          },
+          "cells": {
+            "items": {
+              "$ref": "#/components/schemas/TableCell"
+            },
+            "type": "array",
+            "maxItems": 100000,
+            "title": "Cells"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "rows",
+          "columns",
+          "cells"
+        ],
+        "title": "Table"
+      },
+      "TableCell": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "row_start": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Row Start"
+          },
+          "row_end": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Row End"
+          },
+          "col_start": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Col Start"
+          },
+          "col_end": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Col End"
+          },
+          "row_span": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Row Span"
+          },
+          "col_span": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Col Span"
+          },
+          "locations": {
+            "items": {
+              "$ref": "#/components/schemas/Location"
+            },
+            "type": "array",
+            "title": "Locations",
+            "default": []
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "value_type": {
+            "type": "string",
+            "enum": [
+              "decimal",
+              "integer",
+              "text",
+              "unknown"
+            ],
+            "title": "Value Type",
+            "default": "unknown"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "text",
+          "row_start",
+          "row_end",
+          "col_start",
+          "col_end"
+        ],
+        "title": "TableCell"
       },
       "TargetFailure": {
         "properties": {
@@ -7890,6 +10115,80 @@
         },
         "type": "object",
         "title": "WorkspaceSettings"
+      },
+      "cairn__modelgw__invocation__RerankRequest": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "maxLength": 8192,
+            "minLength": 1,
+            "title": "Query"
+          },
+          "documents": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Documents"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "query",
+          "documents"
+        ],
+        "title": "RerankRequest"
+      },
+      "cairn__retrieval__dto__RerankRequest": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": true
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "top_n": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Top N",
+            "default": 5
+          },
+          "timeout_s": {
+            "type": "number",
+            "maximum": 30.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Timeout S",
+            "default": 1.5
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "RerankRequest"
       }
     }
   }

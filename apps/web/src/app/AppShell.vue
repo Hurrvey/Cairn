@@ -89,6 +89,7 @@ const groups = computed<NavGroup[]>(() =>
       key: "setup",
       items: [
         { name: "models", labelKey: "nav.models", icon: Blocks, visible: permissions.canManageModels.value },
+        { name: "model-console", labelKey: "nav.modelConsole", icon: Blocks, visible: true },
         { name: "storage", labelKey: "nav.storage", icon: Database, visible: permissions.canManageStorage.value },
       ],
     },

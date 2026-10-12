@@ -59,6 +59,12 @@ const routes: RouteRecordRaw[] = [
         meta: { capability: "platform:models", titleKey: "nav.models" },
       },
       {
+        path: "model-console",
+        name: "model-console",
+        component: () => import("@/features/models/ModelConsoleView.vue"),
+        meta: { titleKey: "nav.modelConsole" },
+      },
+      {
         path: "storage",
         name: "storage",
         component: () => import("@/features/storage/StorageView.vue"),

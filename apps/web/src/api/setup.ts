@@ -28,6 +28,8 @@ export const models = {
 };
 
 export const bindings = {
+  replaceCredentials: (id: string, body: { access_key_id: string; secret_access_key: string }) =>
+    api.put<Binding>(`/v1/storage-bindings/${encodeURIComponent(id)}/credentials`, body),
   list: (signal?: AbortSignal) => api.get<Binding[]>("/v1/storage-bindings", { signal }),
   create: (body: CreateBindingRequest) => api.post<Binding>("/v1/storage-bindings", body),
   remove: (id: string) => api.delete<void>(`/v1/storage-bindings/${encodeURIComponent(id)}`),
