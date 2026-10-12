@@ -7,12 +7,15 @@ from typing import ClassVar, Literal, Protocol
 
 from pydantic import JsonValue
 
+from cairn.core.document_ir import DocumentIR, Element, Location
+
 BlockKind = Literal["heading", "paragraph", "table", "list", "code", "image"]
 
 
 @dataclass(frozen=True, slots=True)
 class ParseContext:
     source_url: str | None = None
+
     language: str = "und"
     encoding: str = "utf-8"
     json_fields: tuple[str, ...] = ()
@@ -28,6 +31,9 @@ class Block:
     page: int | None = None
     bbox: tuple[float, float, float, float] | None = None
     source_url: str | None = None
+    element_id: str | None = None
+    parse_version: str | None = None
+    locations: tuple[Location, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +52,8 @@ class ParsedDocument:
     language: str = "und"
     metadata: dict[str, JsonValue] = field(default_factory=dict)
     assets: list[Asset] = field(default_factory=list)
+    elements: list[Element] = field(default_factory=list)
+    ir: DocumentIR | None = None
 
     def layout(self) -> list[dict[str, JsonValue]]:
         """JSON-ready citations; absent page geometry remains explicitly unknown."""

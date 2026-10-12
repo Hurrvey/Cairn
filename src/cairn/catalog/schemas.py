@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
 from cairn.catalog.config import ChunkConfig, RetrievalConfig
 from cairn.catalog.dto import (
@@ -27,6 +27,7 @@ from cairn.catalog.dto import (
     KnowledgeBaseView,
     ReindexEstimate,
 )
+from cairn.core.document_ir import Element
 from cairn.core.ids import encode_id
 from cairn.modelgw.dto import ModelView
 
@@ -154,6 +155,13 @@ class EditChunkRequest(BaseModel):
     content: str = Field(min_length=1, max_length=100_000)
 
 
+class StorageCredentials(BaseModel):
+    model_config = _Strict
+    access_key_id: str = Field(min_length=1, max_length=256)
+    secret_access_key: SecretStr = Field(min_length=1, max_length=4096)
+    session_token: SecretStr | None = None
+
+
 class CreateBindingRequest(BaseModel):
     model_config = _Strict
 
@@ -162,6 +170,7 @@ class CreateBindingRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     config: dict[str, Any] = Field(default_factory=dict)
     is_default: bool = False
+    credentials: StorageCredentials | None = None
 
 
 class ModelChoiceResponse(BaseModel):
@@ -245,6 +254,9 @@ class KnowledgeBaseResponse(BaseModel):
     #: True when a config change needs a rebuild before it takes effect, so the
     #: UI can prompt instead of leaving the user wondering why nothing changed.
     reindex_required: bool = False
+    #: What the caller may do here (FR-I-12), e.g. ``["kb:query"]`` for a
+    #: search-only key; lets self-configuring clients pick usable targets.
+    permissions: list[str] = Field(default_factory=list)
 
     @classmethod
     def from_dto(cls, kb: KnowledgeBaseView) -> KnowledgeBaseResponse:
@@ -300,6 +312,8 @@ class DocumentResponse(BaseModel):
     chunk_count: int
     created_at: datetime
     indexed_at: datetime | None
+    #: Matched by retrieval `filters.metadata`.
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
     def from_dto(cls, document: DocumentView) -> DocumentResponse:
@@ -322,6 +336,7 @@ class DocumentResponse(BaseModel):
             chunk_count=document.chunk_count,
             created_at=document.created_at,
             indexed_at=document.indexed_at,
+            metadata=document.metadata,
         )
 
 
@@ -378,6 +393,17 @@ class ChunkResponse(BaseModel):
             metadata=chunk.metadata,
             is_edited=chunk.is_edited,
         )
+
+
+class CitedChunkResponse(ChunkResponse):
+    """A chunk resolved from a retrieval citation, with its knowledge base."""
+
+    knowledge_base_id: str
+
+    @classmethod
+    def from_view(cls, chunk: ChunkView) -> CitedChunkResponse:
+        base = ChunkResponse.from_dto(chunk)
+        return cls(**base.model_dump(), knowledge_base_id=encode_id("kb", chunk.kb_id))
 
 
 class IndexVersionResponse(BaseModel):
@@ -464,6 +490,7 @@ class BindingResponse(BaseModel):
     #: never appear in an API response.
     config: dict[str, Any]
     health_state: str
+    has_credentials: bool = False
 
     @classmethod
     def from_dto(cls, binding: BindingRef) -> BindingResponse:
@@ -474,4 +501,22 @@ class BindingResponse(BaseModel):
             name=binding.name,
             config=binding.config,
             health_state=binding.health_state,
+            has_credentials=binding.has_credentials,
         )
+
+
+class ParseSummaryResponse(BaseModel):
+    parse_version: str
+    revision: int
+    pages: int
+    producer: str
+    engine: str | None
+    warnings: list[str]
+    quality_status: str
+    element_count: int
+    view: str
+
+
+class ParseElementsResponse(BaseModel):
+    items: list[Element]
+    next_cursor: str | None

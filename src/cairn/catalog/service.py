@@ -13,12 +13,16 @@ Three behaviours in here carry most of the module's weight:
 from __future__ import annotations
 
 import asyncio
+import binascii
+import json
 import re
 from collections.abc import AsyncIterator
 from contextlib import suppress
 from datetime import timedelta
+from typing import Any
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cairn.authz.model import Principal
@@ -60,17 +64,30 @@ from cairn.catalog.models import (
 )
 from cairn.catalog.reindex import activate_build_if_ready
 from cairn.catalog.repository import CatalogRepository
+from cairn.catalog.storage import object_binding
 from cairn.core.cache import Cache, get_cache
 from cairn.core.db import session_scope, transaction
-from cairn.core.errors import Conflict, NotFound, ValidationFailed
+from cairn.core.document_ir import DocumentIR
+from cairn.core.document_metadata import READ_MODEL_SCHEMA, check_document_metadata
+from cairn.core.errors import (
+    Conflict,
+    NotFound,
+    PayloadTooLarge,
+    UpstreamUnavailable,
+    ValidationFailed,
+)
+from cairn.core.ids import new_uuid
 from cairn.core.logging import get_logger
 from cairn.core.modelref import ModelRef
+from cairn.core.parse_artifact import ParseArtifactIdentity, decode_payload, verified_parse_payload
 from cairn.core.sparse import SparseSpec
 from cairn.core.time import utcnow
 from cairn.modelgw.catalog import ModelCatalog, get_model_catalog
+from cairn.modelgw.secrets import delete_secret, store_secret
 from cairn.objectstore.base import ObjectStore, Uploadable
+from cairn.objectstore.errors import ObjectTooLarge
 from cairn.objectstore.keys import ObjectKeys
-from cairn.objectstore.registry import ObjectBindingRef, get_object_registry
+from cairn.objectstore.registry import get_object_registry
 from cairn.platform.audit import AuditService, get_audit_service
 from cairn.tasks.dto import TaskSpec
 from cairn.tasks.service import TaskService, get_task_service
@@ -137,6 +154,10 @@ class CatalogService:
         slug = spec.slug or slugify(spec.name)
         sparse = await self._resolve_sparse(actor.workspace_id, model, spec.sparse)
 
+        from cairn.authz.service import get_authz_service
+
+        authz = get_authz_service()
+        kb_id = new_uuid()
         async with transaction() as session:
             vector = await self._require_binding(session, actor, spec.vector_binding_id, "vector")
             objects = await self._require_binding(session, actor, spec.object_binding_id, "object")
@@ -144,9 +165,11 @@ class CatalogService:
             if await self._repo.slug_taken(session, actor.workspace_id, slug):
                 raise Conflict(f"A knowledge base with the slug {slug!r} already exists.")
 
+            owner_user_id = await authz.bootstrap_created_kb_owner(session, actor, kb_id)
             kb = await self._repo.add_kb(
                 session,
                 KnowledgeBase(
+                    id=kb_id,
                     workspace_id=actor.workspace_id,
                     name=spec.name,
                     slug=slug,
@@ -164,23 +187,8 @@ class CatalogService:
                     object_binding_id=objects.id,
                     chunk_config=chunk_config.model_dump(mode="json"),
                     retrieval_config=retrieval_config.model_dump(mode="json", by_alias=True),
-                    owner_user_id=actor.id,
+                    owner_user_id=owner_user_id,
                     active_index_version=None,
-                ),
-            )
-
-            # Without this the creator cannot use the knowledge base they just
-            # made, which is a confusing first five minutes.
-            from cairn.authz.service import GrantSpec, get_authz_service
-
-            await get_authz_service().grant(
-                actor,
-                GrantSpec(
-                    subject_type="user",
-                    subject_id=actor.id,
-                    resource_type="knowledge_base",
-                    resource_id=kb.id,
-                    permissions=["kb:read", "kb:query", "kb:write", "kb:manage"],
                 ),
             )
 
@@ -189,6 +197,7 @@ class CatalogService:
                 workspace_id=actor.workspace_id,
                 action="kb.create",
                 actor_id=actor.id,
+                actor_type=actor.type,
                 actor_label=actor.username,
                 resource_type="knowledge_base",
                 resource_id=kb.id,
@@ -196,7 +205,11 @@ class CatalogService:
             )
             view = _kb_view(kb)
 
-        await self.publish_runtime(kb.id)
+        await authz.invalidate_owner_key_caches(actor.workspace_id, owner_user_id)
+        # A newly created KB has no active runtime yet. Its first index
+        # activation publishes the runtime; publishing here would attempt a
+        # cache delete for a non-existent runtime and make Redis availability
+        # incorrectly decide whether creation succeeded.
         log.info("catalog.kb_created", kb_id=str(kb.id), embedding_dim=model.dimension)
         return view
 
@@ -432,6 +445,16 @@ class CatalogService:
                     session, kb.id, kb.active_index_version
                 ),
                 sparse=config.sparse,
+                payload_schema=config.payload_schema,
+                directory={
+                    "name": kb.name,
+                    "description": kb.description,
+                    "doc_count": kb.doc_count,
+                    "chunk_count": kb.chunk_count,
+                    "last_indexed_at": kb.last_indexed_at.isoformat()
+                    if kb.last_indexed_at
+                    else None,
+                },
             )
 
             async with asyncio.timeout(RUNTIME_CACHE_TIMEOUT_S):
@@ -792,9 +815,7 @@ class CatalogService:
                 or binding.kind != "object"
             ):
                 raise NotFound("Object storage binding not found.")
-            store = await get_object_registry().for_binding(
-                ObjectBindingRef(binding.id, binding.driver, dict(binding.config or {}))
-            )
+            store = await get_object_registry().for_binding(await object_binding(session, binding))
             present = await store.head(canonical_key)
             if present is not None and present.size != spec.size_bytes:
                 raise Conflict("The canonical source object does not match its content hash.")
@@ -860,7 +881,7 @@ class CatalogService:
                 size_bytes=spec.size_bytes,
                 content_hash=spec.content_hash,
                 object_key=spec.object_key,
-                doc_metadata=dict(spec.metadata),
+                doc_metadata=check_document_metadata(spec.metadata),
                 state="registered",
             ),
         )
@@ -994,7 +1015,7 @@ class CatalogService:
             ):
                 raise NotFound("Object storage binding not found.")
             store: ObjectStore = await get_object_registry().for_binding(
-                ObjectBindingRef(binding.id, binding.driver, dict(binding.config or {}))
+                await object_binding(session, binding)
             )
             stream = store.get(document.object_key)
             view = _document_view(document)
@@ -1306,6 +1327,94 @@ class CatalogService:
             )
         return [_chunk_view(row) for row in rows]
 
+    async def resolve_chunk(self, actor: Principal, chunk_id: UUID) -> ChunkView:
+        """A cited chunk (``GET /v1/chunks/{id}``); needs ``kb:read`` on its knowledge base.
+
+        Anything the caller may not read is "not found", so a search-only key
+        cannot probe which chunk IDs exist.
+        """
+        async with session_scope() as session:
+            chunk = await self._repo.find_chunk(session, chunk_id)
+            if chunk is None or not actor.can("kb:read", chunk.kb_id):
+                raise NotFound("Chunk not found.")
+            document = await self._repo.get_document(session, chunk.document_id)
+            if (
+                chunk.workspace_id != actor.workspace_id
+                or document is None
+                or document.deleted_at is not None
+            ):
+                raise NotFound("Chunk not found.")
+            return _chunk_view(chunk)
+
+    async def document_content(self, actor: Principal, doc_id: UUID) -> tuple[DocumentView, str]:
+        """The parsed text of a document's current revision, as Markdown.
+
+        Needs ``kb:read``. The text comes from the parse artifact, so it is what
+        was chunked and indexed, not the original file.
+        """
+        async with session_scope() as session:
+            document = await self._repo.get_document(session, doc_id)
+            if (
+                document is None
+                or document.deleted_at is not None
+                or document.workspace_id != actor.workspace_id
+                or not actor.can("kb:read", document.kb_id)
+            ):
+                raise NotFound("Document not found.")
+            if document.parsed_object_key is None:
+                raise DocumentContentUnavailable(
+                    "This document has not been parsed yet; its content is not available."
+                )
+            kb = await self._repo.get_kb(session, document.kb_id)
+            if kb is None:
+                raise NotFound("Document not found.")
+            binding = await self._repo.get_binding(session, kb.object_binding_id)
+            if binding is None or binding.kind != "object":
+                raise NotFound("Object storage binding not found.")
+            key = document.parsed_object_key
+            from cairn.catalog.models import DocumentIngestion
+
+            candidates = list(
+                (
+                    await session.scalars(
+                        select(DocumentIngestion).where(
+                            DocumentIngestion.document_id == document.id,
+                            DocumentIngestion.revision == document.revision,
+                            DocumentIngestion.source_content_hash == document.content_hash,
+                            DocumentIngestion.parsed_object_key == key,
+                        )
+                    )
+                ).all()
+            )
+            if len(candidates) != 1:
+                raise DocumentContentUnavailable(
+                    "The current revision's committed parse cannot be located."
+                )
+            run = candidates[0]
+            identity = ParseArtifactIdentity(
+                document.workspace_id,
+                document.kb_id,
+                document.id,
+                document.revision,
+                document.content_hash,
+                run.index_version,
+                run.parse_version_id,
+            )
+            view = _document_view(document)
+            binding_ref = await object_binding(session, binding)
+        store: ObjectStore = await get_object_registry().for_binding(binding_ref)
+        try:
+            raw = await store.get_bytes(key, max_bytes=MAX_PARSE_ARTIFACT_BYTES)
+        except ObjectTooLarge as exc:
+            raise PayloadTooLarge("The document's parsed content is too large to return.") from exc
+        text = parsed_markdown(raw, identity=identity)
+        if len(text.encode("utf-8")) > MAX_DOCUMENT_CONTENT_BYTES:
+            raise PayloadTooLarge(
+                f"The document's text exceeds {MAX_DOCUMENT_CONTENT_BYTES} bytes; "
+                "read it chunk by chunk instead."
+            )
+        return view, text
+
     async def edit_chunk(
         self, actor: Principal, kb_id: UUID, chunk_id: UUID, content: str
     ) -> ChunkView:
@@ -1467,9 +1576,22 @@ class CatalogService:
         name: str,
         config: dict[str, object] | None = None,
         is_default: bool = False,
+        credentials: dict[str, Any] | None = None,
     ) -> BindingRef:
         if kind not in ("vector", "object"):
             raise ValidationFailed("Binding kind must be 'vector' or 'object'.")
+        if driver in {"s3", "minio", "oss", "cos"}:
+            from cairn.objectstore.s3 import validate_config
+
+            if kind != "object":
+                raise ValidationFailed("S3 bindings store objects, not vectors.")
+            config = validate_config(config or {}).model_dump()
+            if driver != "s3" and not config.get("endpoint"):
+                raise ValidationFailed("This S3-compatible driver requires an endpoint.")
+            if config.get("endpoint") and not credentials:
+                raise ValidationFailed("Custom S3 endpoints require credentials.")
+        elif credentials:
+            raise ValidationFailed("This storage driver does not accept credentials.")
 
         async with transaction() as session:
             binding = await self._repo.add_binding(
@@ -1483,6 +1605,10 @@ class CatalogService:
                     is_default=is_default,
                 ),
             )
+            if credentials:
+                binding.secret_ref = await store_secret(
+                    session, actor.workspace_id, _credential_json(credentials)
+                )
             await self._audit.record(
                 session,
                 workspace_id=actor.workspace_id,
@@ -1500,24 +1626,66 @@ class CatalogService:
         await self.test_binding(ref.id)
         return ref
 
+    async def rotate_binding_credentials(
+        self,
+        actor: Principal,
+        binding_id: UUID,
+        credentials: dict[str, Any],
+    ) -> BindingRef:
+        async with transaction() as session:
+            binding = await self._repo.get_binding(session, binding_id, for_update=True)
+            if binding is None or binding.workspace_id != actor.workspace_id:
+                raise NotFound("Storage binding not found.")
+            if binding.driver not in {"s3", "minio", "oss", "cos"}:
+                raise ValidationFailed("Only S3 bindings have replaceable credentials.")
+            previous = binding.secret_ref
+            binding.secret_ref = await store_secret(
+                session, actor.workspace_id, _credential_json(credentials)
+            )
+            await session.flush()
+            await delete_secret(session, actor.workspace_id, previous)
+            await self._audit.record(
+                session,
+                workspace_id=actor.workspace_id,
+                action="storage_binding.credentials.rotate",
+                actor_id=actor.id,
+                actor_label=actor.username,
+                resource_type="storage_binding",
+                resource_id=binding.id,
+            )
+            ref = _binding_ref(binding)
+        await self.test_binding(ref.id)
+        return ref
+
     async def list_bindings(self, workspace_id: UUID, kind: str | None = None) -> list[BindingRef]:
         async with session_scope() as session:
             rows = await self._repo.list_bindings(session, workspace_id, kind)
         return [_binding_ref(row) for row in rows]
 
-    async def test_binding(self, binding_id: UUID) -> bool:
+    async def test_binding(self, binding_id: UUID, *, workspace_id: UUID | None = None) -> bool:
         async with session_scope() as session:
             binding = await self._repo.get_binding(session, binding_id)
+            if (
+                binding is not None
+                and workspace_id is not None
+                and binding.workspace_id != workspace_id
+            ):
+                raise NotFound("Storage binding not found.")
+            object_ref = (
+                await object_binding(session, binding)
+                if binding and binding.kind == "object"
+                else None
+            )
         if binding is None:
             raise NotFound("Storage binding not found.")
 
         healthy = False
         try:
             if binding.kind == "object":
-                from cairn.objectstore.registry import ObjectBindingRef, get_object_registry
+                from cairn.objectstore.registry import get_object_registry
 
                 store = await get_object_registry().for_binding(
-                    ObjectBindingRef(binding.id, binding.driver, dict(binding.config))
+                    object_ref  # type: ignore[arg-type]  # object-kind checked above
                 )
                 healthy = await store.health()
             else:
@@ -1536,9 +1704,11 @@ class CatalogService:
             )
 
         async with transaction() as session:
-            await self._repo.set_binding_health(
-                session, binding_id, "healthy" if healthy else "unavailable"
-            )
+            current = await self._repo.get_binding(session, binding_id, for_update=True)
+            if current is not None and current.secret_ref == binding.secret_ref:
+                await self._repo.set_binding_health(
+                    session, binding_id, "healthy" if healthy else "unavailable"
+                )
         return healthy
 
     async def delete_binding(self, actor: Principal, binding_id: UUID) -> None:
@@ -1553,7 +1723,10 @@ class CatalogService:
                     "This binding is in use by at least one knowledge base. "
                     "Move or delete those knowledge bases first."
                 )
+            previous = binding.secret_ref
             await session.delete(binding)
+            await session.flush()
+            await delete_secret(session, actor.workspace_id, previous)
             await self._audit.record(
                 session,
                 workspace_id=actor.workspace_id,
@@ -1648,6 +1821,7 @@ def _document_view(document: Document) -> DocumentView:
         chunk_count=document.chunk_count,
         created_at=document.created_at,
         indexed_at=document.indexed_at,
+        metadata=dict(document.doc_metadata or {}),
     )
 
 
@@ -1666,6 +1840,22 @@ def _chunk_view(chunk: Chunk) -> ChunkView:
     )
 
 
+def _credential_json(credentials: dict[str, Any]) -> str:
+    values = {
+        key: value.get_secret_value() if hasattr(value, "get_secret_value") else value
+        for key, value in credentials.items()
+    }
+    if (
+        set(values) - {"access_key_id", "secret_access_key", "session_token"}
+        or not isinstance(values.get("access_key_id"), str)
+        or not values["access_key_id"]
+        or not isinstance(values.get("secret_access_key"), str)
+        or not values["secret_access_key"]
+    ):
+        raise ValidationFailed("S3 access key ID and secret access key are required.")
+    return json.dumps(values)
+
+
 def _binding_ref(binding: StorageBinding) -> BindingRef:
     return BindingRef(
         id=binding.id,
@@ -1674,6 +1864,8 @@ def _binding_ref(binding: StorageBinding) -> BindingRef:
         name=binding.name,
         config=dict(binding.config),
         health_state=binding.health_state,
+        has_credentials=binding.secret_ref is not None,
+        workspace_id=binding.workspace_id,
     )
 
 
@@ -1700,6 +1892,7 @@ def _capture_version_config(
         metric=kb.metric,
         chunk_config=ChunkConfig.model_validate(kb.chunk_config or {}),
         sparse=sparse,
+        payload_schema=READ_MODEL_SCHEMA,
     )
     return config.model_dump(mode="json")
 
@@ -1737,3 +1930,39 @@ def get_catalog_service() -> CatalogService:
 def reset_catalog_service() -> None:
     global _service
     _service = None
+
+
+MAX_DOCUMENT_CONTENT_BYTES = 20 * 1024 * 1024
+#: Parse artifacts also carry extracted images, so they can be much larger than
+#: the text they hold.
+MAX_PARSE_ARTIFACT_BYTES = 512 * 1024 * 1024
+
+
+class DocumentContentUnavailable(Conflict):
+    code = "DOCUMENT_CONTENT_UNAVAILABLE"
+    title = "Document content unavailable"
+
+
+def parsed_markdown(raw: bytes, *, identity: ParseArtifactIdentity | None = None) -> str:
+    """The Markdown text inside an ingestion parse artifact (envelope version 1).
+
+    The artifact format belongs to ``cairn.ingestion.artifacts``, which the
+    catalog may not import (layering); a unit test encodes with that module and
+    decodes here so the two cannot drift apart.
+    """
+    try:
+        payload = verified_parse_payload(raw, identity) if identity else decode_payload(raw)
+        if payload.get("type") != "parse":
+            raise ValueError("not a parse artifact")
+        if payload.get("ir") is not None:
+            ir = DocumentIR.model_validate(payload["ir"])
+            from cairn.core.document_projection import project_ir
+
+            markdown = "\n\n".join(block.text for block in project_ir(ir))
+        else:
+            markdown = payload["parsed"]["markdown"]
+    except (KeyError, TypeError, ValueError, binascii.Error) as exc:
+        raise UpstreamUnavailable("The document's parsed content is unreadable.") from exc
+    if not isinstance(markdown, str):
+        raise UpstreamUnavailable("The document's parsed content is unreadable.")
+    return markdown

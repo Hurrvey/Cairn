@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from base64 import urlsafe_b64encode
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal, TypeVar, cast
 from uuid import UUID
 
@@ -26,10 +27,12 @@ from cairn.catalog.models import (
 from cairn.catalog.reindex import activate_build_if_ready
 from cairn.catalog.repository import CatalogRepository
 from cairn.core.db import session_scope, transaction
+from cairn.core.document_metadata import DocumentFacts, document_type
 from cairn.core.errors import CairnError, NotFound, ValidationFailed
 from cairn.core.modelref import ModelRef
 from cairn.core.sparse import SparseSpec
 from cairn.core.time import utcnow
+from cairn.modelgw.secrets import sealed_secret
 from cairn.tasks.dto import TaskContext, TaskSpec
 from cairn.tasks.service import TaskLeaseLostError, TaskService, get_task_service
 
@@ -38,6 +41,20 @@ class IngestionOwnershipError(CairnError):
     code = "INGESTION_OWNERSHIP_MISMATCH"
     http_status = 409
     title = "The ingestion task no longer owns this document revision."
+    retryable = False
+
+
+class ManualEditsConflict(CairnError):
+    code = "REPARSE_MANUAL_EDITS_CONFLICT"
+    http_status = 409
+    title = "Manual edits cannot be mapped to this parse and chunk configuration."
+    retryable = False
+
+
+class ParserDeploymentMismatch(CairnError):
+    code = "PARSER_DEPLOYMENT_MISMATCH"
+    http_status = 409
+    title = "The building index contains a different parser deployment for this file type."
     retryable = False
 
 
@@ -66,6 +83,13 @@ class IngestionRun:
     active_index_version: int | None
     building_index_version: int | None
     recovery_generation: int = 0
+    #: Document facts copied into every point (ADR-0005); ``None`` only in tests.
+    document: DocumentFacts | None = None
+    source_size_bytes: int = 0
+
+    @property
+    def payload_schema(self) -> int:
+        return self.version_config.payload_schema
 
     @property
     def chunk_config(self) -> ChunkConfig:
@@ -138,6 +162,16 @@ class IndexMutationGuard:
 
 
 @dataclass(frozen=True, slots=True)
+class ParseMutationGuard:
+    _before_external: Callable[[], Awaitable[float]]
+
+    async def apply(self, operation: Callable[[], Awaitable[_T]]) -> _T:
+        budget = await self._before_external()
+        async with asyncio.timeout(budget):
+            return await operation()
+
+
+@dataclass(frozen=True, slots=True)
 class DeletedIndexMutationGuard:
     target: DeletedBuildTarget
     _before_external: Callable[[], Awaitable[float]]
@@ -167,6 +201,37 @@ class ChunkReembedMutationGuard:
 
 
 class CatalogIngestionFacade:
+    @asynccontextmanager
+    async def parse_mutation(
+        self, context: TaskContext, *, timeout_s: float = 30.0
+    ) -> AsyncIterator[ParseMutationGuard]:
+        await context.heartbeat()
+        async with asyncio.timeout(timeout_s), transaction() as session:
+            locked = await self._lock_current(session, context)
+            if locked is None or locked[1].state != "registered":
+                raise IngestionOwnershipError()
+
+            async def before_external() -> float:
+                return await self._owned_lease_budget(session, context, timeout_s)
+
+            yield ParseMutationGuard(before_external)
+
+    async def parse_progress(
+        self, context: TaskContext, *, completed: int | None, total: int | None, phase: str
+    ) -> None:
+        await context.heartbeat()
+        async with transaction() as session:
+            locked = await self._lock_current(session, context)
+            if locked is None:
+                raise IngestionOwnershipError()
+            document, run, _kb = locked
+            document.stage_detail = json.dumps(
+                {"phase": phase, "completed_pages": completed, "total_pages": total},
+                separators=(",", ":"),
+            )
+            if run.state == "registered" and completed is not None and total:
+                document.progress_pct = min(24, int(24 * completed / total))
+
     def __init__(
         self,
         repository: CatalogRepository | None = None,
@@ -208,6 +273,7 @@ class CatalogIngestionFacade:
             if index_version is None:
                 raise IngestionOwnershipError("The knowledge base has no index target.")
             document.revision += 1
+            document.revised_at = utcnow()
             document.object_key = object_key
             document.content_hash = content_hash
             document.size_bytes = size_bytes
@@ -303,7 +369,12 @@ class CatalogIngestionFacade:
                 run,
                 kb,
                 version_config,
-                _binding_ref(object_binding),
+                replace(
+                    _binding_ref(object_binding),
+                    credential=await sealed_secret(
+                        session, object_binding.workspace_id, object_binding.secret_ref
+                    ),
+                ),
                 _binding_ref(vector_binding),
                 previous_key,
             )
@@ -314,6 +385,8 @@ class CatalogIngestionFacade:
         *,
         parsed_object_key: str,
         page_count: int,
+        parse_version_id: str | None = None,
+        parser_fingerprint: str | None = None,
     ) -> bool:
         async with transaction() as session:
             await self._tasks.lock_owned_task(session, context)
@@ -323,8 +396,30 @@ class CatalogIngestionFacade:
             document, run, _kb = locked
             if _stage_at_least(run.state, "parsed"):
                 return False
+            if _kb.building_index_version == run.index_version:
+                incompatible = await session.scalar(
+                    select(DocumentIngestion.document_id)
+                    .join(
+                        Document,
+                        Document.id == DocumentIngestion.document_id,
+                    )
+                    .where(
+                        DocumentIngestion.kb_id == run.kb_id,
+                        DocumentIngestion.index_version == run.index_version,
+                        DocumentIngestion.parsed_object_key.is_not(None),
+                        Document.mime_type == document.mime_type,
+                        Document.deleted_at.is_(None),
+                        DocumentIngestion.document_id != document.id,
+                        DocumentIngestion.parser_fingerprint.is_distinct_from(parser_fingerprint),
+                    )
+                    .limit(1)
+                )
+                if incompatible is not None:
+                    raise ParserDeploymentMismatch()
             run.state = "parsed"
             run.parsed_object_key = parsed_object_key
+            run.parse_version_id = parse_version_id
+            run.parser_fingerprint = parser_fingerprint
             document.state = "parsed"
             document.parsed_object_key = parsed_object_key
             document.page_count = page_count
@@ -363,6 +458,48 @@ class CatalogIngestionFacade:
                 run.active_index_version,
             )
         return {row.ordinal: (row.content, row.content_hash) for row in rows}
+
+    async def verified_parse_edits(
+        self, context: TaskContext, chunks: list[ChunkSpec]
+    ) -> dict[int, tuple[str, str]]:
+        run = await self.load_run(context)
+        if run is None or run.active_index_version is None:
+            return {}
+        async with session_scope() as session:
+            rows = await self._repo.edited_chunks(
+                session, run.kb_id, run.document_id, run.active_index_version
+            )
+            if not rows:
+                return {}
+            active = await self._repo.get_index_version(
+                session, run.kb_id, run.active_index_version
+            )
+            if active is None or _load_version_config(active).chunk_config != run.chunk_config:
+                raise ManualEditsConflict()
+            matched: dict[int, tuple[str, str]] = {}
+            for row in rows:
+                citations = row.chunk_metadata.get("citations")
+                if (
+                    not isinstance(citations, list)
+                    or not citations
+                    or any(
+                        not isinstance(item, dict)
+                        or not item.get("element_id")
+                        or not item.get("parse_version")
+                        for item in citations
+                    )
+                ):
+                    raise ManualEditsConflict()
+                candidates = [
+                    chunk
+                    for chunk in chunks
+                    if chunk.metadata.get("citations") == citations
+                    and chunk.metadata.get("role") == row.chunk_metadata.get("role")
+                ]
+                if len(candidates) != 1:
+                    raise ManualEditsConflict()
+                matched[candidates[0].ordinal] = (row.content, row.content_hash)
+            return matched
 
     async def load_chunk_reembed(self, context: TaskContext) -> ChunkReembedTarget | None:
         identity = _chunk_reembed_identity(context)
@@ -560,18 +697,34 @@ class CatalogIngestionFacade:
 
             preserved = {}
             if kb.active_index_version is not None:
-                preserved = {
-                    row.ordinal: row
-                    for row in await self._repo.edited_chunks(
-                        session,
-                        run.kb_id,
-                        document.id,
-                        kb.active_index_version,
-                    )
-                }
+                edited_rows = await self._repo.edited_chunks(
+                    session, run.kb_id, document.id, kb.active_index_version
+                )
+                for edited in edited_rows:
+                    citations = edited.chunk_metadata.get("citations")
+                    if (
+                        not isinstance(citations, list)
+                        or not citations
+                        or any(
+                            not isinstance(citation, dict)
+                            or not citation.get("element_id")
+                            or not citation.get("parse_version")
+                            for citation in citations
+                        )
+                    ):
+                        raise ManualEditsConflict()
+                    matching = [
+                        chunk
+                        for chunk in chunks
+                        if chunk.metadata.get("citations") == citations
+                        and chunk.metadata.get("role") == edited.chunk_metadata.get("role")
+                    ]
+                    if len(matching) != 1 or matching[0].id in preserved:
+                        raise ManualEditsConflict()
+                    preserved[matching[0].id] = edited
             rows: list[dict[str, object]] = []
             for chunk in chunks:
-                edit = preserved.get(chunk.ordinal)
+                edit = preserved.get(chunk.id)
                 if edit is not None and (
                     chunk.content != edit.content or chunk.content_hash != edit.content_hash
                 ):
@@ -603,6 +756,7 @@ class CatalogIngestionFacade:
             run.point_count = sum(
                 chunk.metadata.get("embed", True) is not False for chunk in chunks
             )
+            _clear_retried_failure(document)
             document.state = "chunked"
             document.chunk_count = len(chunks)
             document.token_count = sum(chunk.token_count for chunk in chunks)
@@ -633,6 +787,7 @@ class CatalogIngestionFacade:
                 raise IngestionOwnershipError("Chunking has not committed for this revision.")
             run.state = "embedded"
             run.embeddings_object_key = embeddings_object_key
+            _clear_retried_failure(document)
             document.state = "embedded"
             document.progress_pct = 75
             await self._tasks.enqueue(
@@ -787,6 +942,7 @@ class CatalogIngestionFacade:
         if run.state != "embedded" or verified_point_count != run.point_count:
             raise IngestionOwnershipError("The verified index does not match this revision.")
         run.state = "indexed"
+        _clear_retried_failure(document)
         document.state = "indexed"
         document.progress_pct = 100
         document.indexed_at = utcnow()
@@ -812,6 +968,10 @@ class CatalogIngestionFacade:
                     repository=self._repo,
                     tasks=self._tasks,
                 )
+        if kb.active_index_version == run.index_version:
+            await session.flush()
+            kb.chunk_count = await self._repo.count_live_chunks(session, kb.id, run.index_version)
+            kb.last_indexed_at = document.indexed_at
         return IndexCommit(advanced=True, activated=activated)
 
     async def record_failure(
@@ -999,6 +1159,8 @@ def _binding_ref(binding: StorageBinding) -> BindingRef:
         name=binding.name,
         config=dict(binding.config or {}),
         health_state=binding.health_state,
+        workspace_id=binding.workspace_id,
+        has_credentials=binding.secret_ref is not None,
     )
 
 
@@ -1025,6 +1187,9 @@ def _chunk_reembed_target(
         metric=version_config.metric,
         vector_binding=vector_binding,
         sparse=version_config.sparse,
+        document=document_facts(document),
+        payload_schema=version_config.payload_schema,
+        ordinal=chunk.ordinal,
     )
 
 
@@ -1040,6 +1205,7 @@ def _run_view(
     if document.object_key is None or document.mime_type is None:
         raise IngestionOwnershipError()
     return IngestionRun(
+        source_size_bytes=document.size_bytes or 0,
         document_id=document.id,
         workspace_id=document.workspace_id,
         kb_id=document.kb_id,
@@ -1063,6 +1229,17 @@ def _run_view(
         stale_point_ids=tuple(UUID(value) for value in run.stale_point_ids),
         active_index_version=kb.active_index_version,
         building_index_version=kb.building_index_version,
+        document=document_facts(document),
+    )
+
+
+def document_facts(document: Document) -> DocumentFacts:
+    return DocumentFacts(
+        metadata=dict(document.doc_metadata or {}),
+        title=document.title,
+        type=document_type(document.source_ref or document.title, document.mime_type),
+        created_at=document.created_at,
+        revised_at=document.revised_at or document.created_at,
     )
 
 
@@ -1116,3 +1293,14 @@ def _chunk_reembed_identity(
     ):
         return None
     return chunk_id, revision, index_version, content_hash, edit_generation
+
+
+def _clear_retried_failure(document: Document) -> None:
+    """A stage that commits after a retried failure makes that failure history.
+
+    Without this an indexed document would keep reporting the transient error
+    its earlier attempt recorded.
+    """
+    document.stage_detail = None
+    document.error_code = None
+    document.error_detail = None

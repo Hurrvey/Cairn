@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import unicodedata
 from base64 import urlsafe_b64encode
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, replace
+from functools import partial
 from hashlib import sha256
 from typing import cast
 from uuid import UUID, uuid4
@@ -41,7 +43,10 @@ from cairn.ingestion.artifacts import (
 from cairn.ingestion.base import ParseContext, ParsedDocument
 from cairn.ingestion.chunkers import DocumentChunker
 from cairn.ingestion.custom import CustomChunkExecutor
-from cairn.ingestion.registry import ParserRegistry
+from cairn.ingestion.ir import bind_document, project_document
+from cairn.ingestion.ocr import OcrResult
+from cairn.ingestion.ocr_cache import current_hooks, decode_ocr, encode_ocr
+from cairn.ingestion.registry import ParserRegistry, context_fingerprint
 from cairn.ingestion.semantic import EmbeddingServiceSemanticEmbedding
 from cairn.objectstore.base import ObjectStore
 from cairn.objectstore.errors import ObjectNotFound, ObjectTooLarge
@@ -80,10 +85,93 @@ class SourceIntegrityError(CairnError):
     retryable = False
 
 
+class ReparseManualEditsConflict(CairnError):
+    code = "REPARSE_MANUAL_EDITS_CONFLICT"
+    http_status = 409
+    title = "Manual edits cannot be mapped to this parse and chunk configuration."
+    retryable = False
+
+
+class _RunParseHooks:
+    def __init__(
+        self,
+        catalog: CatalogIngestionFacade,
+        context: TaskContext,
+        run: IngestionRun,
+        store: ObjectStore,
+        ocr_fingerprint: str | None,
+    ) -> None:
+        self._catalog, self._context, self._run, self._store = catalog, context, run, store
+        self._fingerprint = ocr_fingerprint
+
+    def _key(self, image_sha: str) -> tuple[str, str]:
+        identity = sha256(
+            f"{self._run.workspace_id}/{self._run.kb_id}/{self._run.document_id}/"
+            f"{self._run.revision}/{image_sha}/{self._fingerprint}".encode()
+        ).hexdigest()
+        compact = urlsafe_b64encode(self._run.document_id.bytes).rstrip(b"=").decode()
+        return (
+            f"{self._run.workspace_id}/{self._run.kb_id}/i/{compact}/ocr/{self._run.revision}/{identity}",
+            identity,
+        )
+
+    async def get(self, image_sha: str) -> OcrResult | None:
+        if self._fingerprint is None:
+            return None
+        key, identity = self._key(image_sha)
+        try:
+            raw = await self._store.get_bytes(key, max_bytes=16 * 1024**2)
+            return decode_ocr(raw, identity=identity)
+        except (OSError, ValueError, KeyError, TypeError, ObjectNotFound, ObjectTooLarge):
+            return None
+
+    async def put(self, image_sha: str, result: OcrResult) -> None:
+        if self._fingerprint is None:
+            return
+        key, identity = self._key(image_sha)
+        raw = encode_ocr(result, identity=identity)
+        if len(raw) > 16 * 1024**2:
+            return
+        async with self._catalog.parse_mutation(self._context) as apply:
+            await apply.apply(lambda: self._store.put(key, raw, content_type="application/json"))
+
+    async def progress(self, completed: int | None, total: int | None, phase: str) -> None:
+        await self._catalog.parse_progress(
+            self._context, completed=completed, total=total, phase=phase
+        )
+
+    async def diagnostic(self, payload: dict[str, object]) -> None:
+        from cairn.core.parse_artifact import encode_payload
+
+        raw = encode_payload(
+            {
+                "type": "parse-diagnostic",
+                "document_id": str(self._run.document_id),
+                "revision": self._run.revision,
+                "payload": payload,
+            }
+        )
+        if len(raw) > 128 * 1024**2:
+            return
+        key = (
+            f"{self._run.artifact_prefix}/diagnostics/"
+            f"{self._context.task_id}-{self._context.attempt}.json"
+        )
+        async with self._catalog.parse_mutation(self._context) as guard:
+            await guard.apply(lambda: self._store.put(key, raw, content_type="application/json"))
+
+
 class PipelineArtifactError(CairnError):
     code = "INGESTION_ARTIFACT_INVALID"
     http_status = 500
     title = "A saved ingestion stage could not be verified."
+    retryable = False
+
+
+class NoSearchRepresentation(CairnError):
+    code = "PARSE_NO_SEARCH_REPRESENTATION"
+    http_status = 422
+    title = "The parse preserves source evidence but has no extractable search text."
     retryable = False
 
 
@@ -128,17 +216,78 @@ class IngestionPipeline:
                 raise SourceIntegrityError()
             await self._prepared_embedding(run)
             store = await self._resources.object_store_for(run.object_binding)
+            parse_context = ParseContext(source_url=run.source_url)
+            descriptor = self._resources.parsers.describe(run.mime_type)
+            parser_fp = descriptor.fingerprint if descriptor else None
+            context_fp = context_fingerprint(parse_context)
             parsed = await self._reuse_parsed(run, store)
             if parsed is None:
                 source = await store.get_bytes(
                     run.object_key, max_bytes=self._resources.max_source_bytes
                 )
                 self._verify_source(run, source)
-                parsed = await self._resources.parsers.parse(
-                    source,
-                    mime=run.mime_type,
-                    ctx=ParseContext(source_url=run.source_url),
+                hooks = _RunParseHooks(
+                    self._catalog,
+                    context,
+                    run,
+                    store,
+                    str(descriptor.options["ocr_identity"])
+                    if descriptor and isinstance(descriptor.options.get("ocr_identity"), str)
+                    else None,
                 )
+                token = current_hooks.set(hooks)
+                finished = asyncio.Event()
+
+                async def heartbeat() -> None:
+                    while not finished.is_set():
+                        await context.heartbeat()
+                        with contextlib.suppress(TimeoutError):
+                            await asyncio.wait_for(finished.wait(), timeout=10)
+
+                try:
+                    async with asyncio.TaskGroup() as group:
+                        group.create_task(heartbeat())
+                        try:
+                            parsed = await self._resources.parsers.parse(
+                                source,
+                                mime=run.mime_type,
+                                ctx=parse_context,
+                            )
+                        finally:
+                            finished.set()
+                finally:
+                    current_hooks.reset(token)
+                original_assets = parsed.assets
+                parsed = project_document(
+                    bind_document(
+                        parsed,
+                        workspace_id=run.workspace_id,
+                        kb_id=run.kb_id,
+                        document_id=run.document_id,
+                        revision=run.revision,
+                        source_sha256=run.source_content_hash,
+                        parser_fingerprint=parser_fp,
+                        context_fingerprint=context_fp,
+                    )
+                )
+                self._resources.parsers.validate_bound(parsed, mime=run.mime_type)
+                if parsed.ir:
+                    for asset in original_assets:
+                        asset_id = sha256(asset.data).hexdigest()
+                        if any(item.asset_id == asset_id for item in parsed.ir.assets):
+                            asset_key = (
+                                f"{run.workspace_id}/{run.kb_id}/assets/{run.document_id}/"
+                                f"{parsed.ir.parse_version}/{asset_id}"
+                            )
+                            async with self._catalog.parse_mutation(context) as apply:
+                                await apply.apply(
+                                    partial(
+                                        store.put,
+                                        asset_key,
+                                        asset.data,
+                                        content_type=asset.mime_type,
+                                    )
+                                )
             await context.heartbeat()
             manifest = ParseManifest(
                 document_id=run.document_id,
@@ -146,11 +295,22 @@ class IngestionPipeline:
                 index_version=run.index_version,
                 source_content_hash=run.source_content_hash,
                 parsed=parsed,
+                parser_fingerprint=parser_fp,
+                context_fingerprint=context_fp,
             )
             key = _stage_artifact_key(run, context, "parsed")
-            await store.put(key, encode_parse_manifest(manifest), content_type="application/json")
+            async with self._catalog.parse_mutation(context) as apply:
+                await apply.apply(
+                    lambda: store.put(
+                        key, encode_parse_manifest(manifest), content_type="application/json"
+                    )
+                )
             advanced = await self._catalog.commit_parsed(
-                context, parsed_object_key=key, page_count=parsed.pages
+                context,
+                parsed_object_key=key,
+                page_count=parsed.pages,
+                parse_version_id=parsed.ir.parse_version if parsed.ir else None,
+                parser_fingerprint=parser_fp,
             )
             return (
                 TaskResult.success() if advanced else TaskResult.skipped("stage already committed")
@@ -173,6 +333,8 @@ class IngestionPipeline:
                     run.parsed_object_key, max_bytes=self._resources.max_artifact_bytes
                 )
             )
+            if not parsed.parsed.markdown.strip() or not parsed.parsed.blocks:
+                raise NoSearchRepresentation()
             _verify_manifest_identity(run, parsed)
             prepared = await self._prepared_embedding(run)
             semantic = (
@@ -197,7 +359,7 @@ class IngestionPipeline:
                 max_input_tokens=prepared.model.max_input_tokens,
             ).chunk(parsed.parsed, run.chunk_config)
             await context.heartbeat()
-            edits = await self._catalog.preserved_edits(context)
+            edits = await self._catalog.verified_parse_edits(context, chunks)
             edited_ordinals = set(edits)
             chunks = [
                 replace(
@@ -417,7 +579,7 @@ class IngestionPipeline:
                 if count != len(points):
                     raise PipelineArtifactError("The vector index contains a partial document.")
                 committed = await mutation.commit(len(points))
-            if committed.activated:
+            if committed.activated or run.active_index_version == run.index_version:
                 await self._catalog.publish_runtime(run.kb_id)
                 await self._catalog.confirm_published(context)
             return (
@@ -505,6 +667,11 @@ class IngestionPipeline:
         return prepared
 
     async def _reuse_parsed(self, run: IngestionRun, store: ObjectStore) -> ParsedDocument | None:
+        if run.source_size_bytes > self._resources.max_source_bytes:
+            return None
+        descriptor = self._resources.parsers.describe(run.mime_type)
+        if descriptor is None:
+            return None
         key = run.prior_parsed_object_key
         if key is None or not source_key_in_scope(
             key, workspace_id=run.workspace_id, kb_id=run.kb_id
@@ -520,6 +687,15 @@ class IngestionPipeline:
             manifest.document_id != run.document_id
             or manifest.revision != run.revision
             or manifest.source_content_hash != run.source_content_hash
+            or manifest.parser_fingerprint != descriptor.fingerprint
+            or manifest.context_fingerprint
+            != context_fingerprint(ParseContext(source_url=run.source_url))
+            or manifest.parsed.ir is None
+            or manifest.parsed.pages > 500
+            or len(manifest.parsed.markdown.encode()) > self._resources.max_artifact_bytes
+            or not self._resources.parsers.accepts_cached(
+                manifest.parsed, mime=run.mime_type, source_bytes=run.source_size_bytes
+            )
         ):
             return None
         return manifest.parsed
@@ -541,6 +717,13 @@ class IngestionPipeline:
         return previous if previous.document_id == run.document_id else None
 
     async def _failed(self, context: TaskContext, stage: str, exc: Exception) -> TaskResult:
+        while isinstance(exc, ExceptionGroup) and len(exc.exceptions) == 1:
+            inner = exc.exceptions[0]
+            if not isinstance(inner, Exception):
+                raise inner
+            exc = inner
+        if isinstance(exc, TaskLeaseLostError):
+            raise exc
         if isinstance(exc, CairnError):
             code = exc.code
             detail = exc.title
@@ -614,6 +797,10 @@ def _points(
     embeddings: EmbeddingManifest,
 ) -> list[Point]:
     points: list[Point] = []
+    if run.payload_schema >= 2 and run.document is None:
+        raise PipelineArtifactError("Schema-2 indexing requires document facts.")
+    # Computed once: it bounds the document's metadata, which every point copies.
+    document_payload = run.document.payload() if run.document is not None else {}
     for chunk in chunks.chunks:
         if chunk.metadata.get("embed", True) is False:
             continue
@@ -624,6 +811,7 @@ def _points(
         payload.update(
             {
                 "chunk_id": str(chunk.id),
+                "ordinal": chunk.ordinal,
                 "content": chunk.content,
                 "content_hash": chunk.content_hash,
                 "token_count": chunk.token_count,
@@ -634,6 +822,8 @@ def _points(
                 "revision": run.revision,
             }
         )
+        if run.document is not None:
+            payload.update(document_payload)
         if chunk.content_hash in embeddings.sparse:
             sparse = embeddings.sparse[chunk.content_hash]
         elif run.sparse.kind == "bm25":
@@ -721,10 +911,13 @@ async def _verify_expected(
 def _chunk_reembed_payload(
     target: ChunkReembedTarget, *, actual_token_count: int | None = None
 ) -> dict[str, object]:
+    if target.payload_schema >= 2 and target.document is None:
+        raise PipelineArtifactError("Schema-2 reembedding requires document facts.")
     payload: dict[str, object] = deepcopy(target.metadata)
     payload.update(
         {
             "chunk_id": str(target.chunk_id),
+            "ordinal": target.ordinal,
             "content": target.content,
             "content_hash": target.content_hash,
             "document_id": str(target.document_id),
@@ -735,6 +928,8 @@ def _chunk_reembed_payload(
             "manual_edit_generation": target.edit_generation,
         }
     )
+    if target.document is not None:
+        payload.update(target.document.payload())
     if actual_token_count is not None:
         payload["token_count"] = actual_token_count
     return payload

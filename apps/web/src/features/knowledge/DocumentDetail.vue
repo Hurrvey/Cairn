@@ -25,6 +25,7 @@ import { confirm } from "@/shared/composables/useConfirm";
 import { useToasts } from "@/shared/composables/useToasts";
 import { describeError, isAbort } from "@/shared/errors";
 import { PIPELINE_STAGES, documentTone, isTerminal, stageOf } from "@/shared/pipeline";
+import ParsePreview from "./ParsePreview.vue";
 
 const props = defineProps<{ kb: KnowledgeBase; document: DocumentRecord; canWrite: boolean }>();
 const emit = defineEmits<{ back: []; changed: [] }>();
@@ -195,6 +196,11 @@ onBeforeUnmount(() => controller.abort());
     </Notice>
 
     <KeyValue :items="facts" :columns="3" class="px-4 py-3" />
+    <ParsePreview v-if="document.mime_type === 'application/pdf'" :document-id="document.id" />
+    <section v-if="Object.keys(document.metadata ?? {}).length" class="border-t border-line px-4 py-3" data-test="doc-metadata">
+      <h3 class="mb-1.5 text-[12px] font-medium text-ink-3">{{ t("knowledge.documents.metadata") }}</h3>
+      <pre class="overflow-x-auto rounded border border-line bg-surface-2 p-2 font-mono text-[11.5px] text-ink-2">{{ JSON.stringify(document.metadata, null, 2) }}</pre>
+    </section>
 
     <section class="border-t border-line px-4 py-3" :aria-label="t('knowledge.chunks.title')">
       <div class="mb-2 flex items-center justify-between gap-3">

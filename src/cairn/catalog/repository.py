@@ -799,6 +799,25 @@ class CatalogRepository:
         chunk: Chunk | None = await session.scalar(stmt)
         return chunk
 
+    async def find_chunk(self, session: AsyncSession, chunk_id: UUID) -> Chunk | None:
+        """Resolve a live ACTIVE chunk by ID for citations (``ix_chunk_id``)."""
+        chunk: Chunk | None = await session.scalar(
+            select(Chunk)
+            .join(KnowledgeBase, KnowledgeBase.id == Chunk.kb_id)
+            .join(Document, Document.id == Chunk.document_id)
+            .where(
+                Chunk.id == chunk_id,
+                Chunk.index_version == KnowledgeBase.active_index_version,
+                KnowledgeBase.deleted_at.is_(None),
+                Document.deleted_at.is_(None),
+                Document.kb_id == Chunk.kb_id,
+                Document.workspace_id == Chunk.workspace_id,
+                KnowledgeBase.workspace_id == Chunk.workspace_id,
+            )
+            .limit(1)
+        )
+        return chunk
+
     async def edited_chunks(
         self,
         session: AsyncSession,
@@ -879,10 +898,13 @@ class CatalogRepository:
         await session.flush()
         return binding
 
-    async def get_binding(self, session: AsyncSession, binding_id: UUID) -> StorageBinding | None:
-        binding: StorageBinding | None = await session.scalar(
-            select(StorageBinding).where(StorageBinding.id == binding_id)
-        )
+    async def get_binding(
+        self, session: AsyncSession, binding_id: UUID, *, for_update: bool = False
+    ) -> StorageBinding | None:
+        statement = select(StorageBinding).where(StorageBinding.id == binding_id)
+        if for_update:
+            statement = statement.with_for_update().execution_options(populate_existing=True)
+        binding: StorageBinding | None = await session.scalar(statement)
         return binding
 
     async def list_bindings(

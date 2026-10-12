@@ -59,10 +59,11 @@ class PipelineRuntime:
         self._resolution_lock = asyncio.Lock()
         self._closed = False
         settings = get_ingestion_runtime_settings()
+        self._parsers = get_parser_registry()
         self.pipeline = IngestionPipeline(
             catalog=CatalogIngestionFacade(),
             resources=PipelineResources(
-                parsers=get_parser_registry(),
+                parsers=self._parsers,
                 object_store_for=self.object_store_for,
                 vector_store_for=self.vector_store_for,
                 embedding_for=self.embedding_for,
@@ -74,7 +75,13 @@ class PipelineRuntime:
 
     async def object_store_for(self, binding: BindingRef) -> ObjectStore:
         return await get_object_registry().for_binding(
-            ObjectBindingRef(binding.id, binding.driver, binding.config)
+            ObjectBindingRef(
+                binding.id,
+                binding.driver,
+                binding.config,
+                credential=binding.credential,
+                workspace_id=binding.workspace_id,
+            )
         )
 
     async def vector_store_for(self, binding: BindingRef) -> VectorStore:
@@ -168,6 +175,8 @@ class PipelineRuntime:
         for provider in providers:
             with suppress(Exception):
                 await provider.close()
+        with suppress(Exception):
+            await self._parsers.aclose()
         await get_object_registry().close()
         await get_vector_registry().close()
 

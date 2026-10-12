@@ -65,6 +65,10 @@ async def _run(queue: str) -> None:
         await asyncio.to_thread(warm_up)
     scheduler = build_runtime_refresh_scheduler() if queue == "maintain" else None
     scheduler_stop = asyncio.Event()
+    from cairn.platform.usage import UsageConsumer
+
+    usage_consumer = UsageConsumer(get_settings().redis_url) if queue == "maintain" else None
+    usage_task = asyncio.create_task(usage_consumer.run(scheduler_stop)) if usage_consumer else None
     scheduler_task = (
         asyncio.create_task(scheduler.run(scheduler_stop)) if scheduler is not None else None
     )
@@ -73,6 +77,10 @@ async def _run(queue: str) -> None:
     try:
         await worker.run()
     finally:
+        scheduler_stop.set()
+        if usage_task is not None and usage_consumer is not None:
+            await usage_task
+            await usage_consumer.close()
         if scheduler_task is not None:
             scheduler_stop.set()
             await scheduler_task

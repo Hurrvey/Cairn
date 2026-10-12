@@ -304,6 +304,11 @@ class Document(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
+    #: When the current revision's content was registered. Unlike ``updated_at``
+    #: it does not move with processing state, so citations can show it.
+    revised_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
     indexed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -361,6 +366,8 @@ class DocumentIngestion(Base):
     recovery_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     prior_parsed_object_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     parsed_object_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    parse_version_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    parser_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
     chunks_object_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     embeddings_object_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     prior_embeddings_object_key: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -396,6 +403,8 @@ class Chunk(Base):
         ),
         Index("ix_chunk_document", "kb_id", "document_id", "index_version"),
         Index("ix_chunk_hash", "kb_id", "content_hash"),
+        #: Citation lookups (`GET /v1/chunks/{id}`) know only the chunk ID.
+        Index("ix_chunk_id", "id"),
         {"postgresql_partition_by": "HASH (kb_id)"},
     )
 

@@ -200,7 +200,13 @@ def _validate_citations(
     for raw in citations_list:
         _invalid_if(not isinstance(raw, dict))
         item = cast("dict[object, object]", raw)
-        _invalid_if(set(item) != _CITATION_FIELDS)
+        _invalid_if(
+            set(item)
+            not in (
+                _CITATION_FIELDS,
+                _CITATION_FIELDS | {"element_id", "parse_version", "locations"},
+            )
+        )
         block_ordinal = item["block_ordinal"]
         start = item["start"]
         end = item["end"]
@@ -208,6 +214,15 @@ def _validate_citations(
         ordinal = cast("int", block_ordinal)
         _invalid_if(ordinal not in block_by_ordinal)
         block_index, block = block_by_ordinal[ordinal]
+        if block.element_id is not None:
+            _invalid_if(
+                item.get("element_id") != block.element_id
+                or item.get("parse_version") != block.parse_version
+                or item.get("locations")
+                != [location.model_dump(mode="json") for location in block.locations]
+            )
+        else:
+            _invalid_if("element_id" in item or "parse_version" in item)
         source_start = cast("int", start)
         source_end = cast("int", end)
         _invalid_if(

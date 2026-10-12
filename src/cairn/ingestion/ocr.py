@@ -15,7 +15,12 @@ from PIL import Image, UnidentifiedImageError
 
 from cairn.ingestion.base import Block, ParseContext, ParsedDocument
 from cairn.ingestion.errors import ParseCorruptFile, ParseEmptyContent, ParseError, ParseTooLarge
-from cairn.ingestion.process import ProcessOutputTooLarge, ProcessTimedOut, run_bounded
+from cairn.ingestion.process import (
+    ProcessOutputTooLarge,
+    ProcessSupervisionUnavailable,
+    ProcessTimedOut,
+    run_bounded,
+)
 
 
 class OcrEngineUnavailable(ParseError):
@@ -138,6 +143,7 @@ class TesseractOcrEngine:
         *,
         command: tuple[str, ...] = ("tesseract",),
         languages: tuple[str, ...] = ("eng", "chi_sim", "chi_tra"),
+        psm: int = 3,
         timeout_seconds: float = 45,
         max_concurrency: int = 1,
         limits: OcrLimits | None = None,
@@ -154,6 +160,9 @@ class TesseractOcrEngine:
             raise ValueError("OCR timeout and concurrency must be positive")
         self._command = command
         self._languages = languages
+        if type(psm) is not int or not 0 <= psm <= 13:
+            raise ValueError("unsupported OCR PSM")
+        self._psm = psm
         self._timeout = timeout_seconds
         self._slots = asyncio.Semaphore(max_concurrency)
         self._limits = limits or OcrLimits()
@@ -189,7 +198,16 @@ class TesseractOcrEngine:
                         first[0][:100] if first and first[0].startswith("tesseract ") else "unknown"
                     )
                 status, output, stderr = await run_bounded(
-                    (*self._command, "stdin", "stdout", "-l", selected, "--psm", "3", "tsv"),
+                    (
+                        *self._command,
+                        "stdin",
+                        "stdout",
+                        "-l",
+                        selected,
+                        "--psm",
+                        str(self._psm),
+                        "tsv",
+                    ),
                     data,
                     timeout_seconds=self._timeout,
                     max_output_bytes=self._limits.max_output_bytes,
@@ -198,7 +216,7 @@ class TesseractOcrEngine:
                     raise OcrEngineUnavailable()
                 if status:
                     raise OcrFailed()
-        except (FileNotFoundError, PermissionError) as exc:
+        except (FileNotFoundError, PermissionError, ProcessSupervisionUnavailable) as exc:
             raise OcrEngineUnavailable() from exc
         except (TimeoutError, ProcessTimedOut) as exc:
             raise OcrTimedOut() from exc

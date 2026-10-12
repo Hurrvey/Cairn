@@ -10,20 +10,21 @@ which knowledge base a document belongs to before it can authorize anything.
 from __future__ import annotations
 
 import hashlib
+import json
 import tempfile
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from urllib.parse import quote
 from uuid import UUID
 
 import anyio
-from fastapi import APIRouter, Body, Depends, File, Query, Response, UploadFile, status
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Body, Depends, File, Form, Query, Response, UploadFile, status
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from cairn.authz.deps import current_principal, require_permission
-from cairn.authz.model import Principal
+from cairn.authz.model import KB_PERMISSIONS, Principal
 from cairn.catalog.dto import (
     CreateKbSpec,
     ReindexEstimate,
@@ -33,9 +34,11 @@ from cairn.catalog.dto import (
     UploadSpec,
 )
 from cairn.catalog.errors import UnsupportedFileType
+from cairn.catalog.parse_view import ParseVersionStale, preview_page, read_asset, read_parse
 from cairn.catalog.schemas import (
     BindingResponse,
     ChunkResponse,
+    CitedChunkResponse,
     CreateBindingRequest,
     CreateKbRequest,
     DocumentRegistrationResponse,
@@ -46,16 +49,21 @@ from cairn.catalog.schemas import (
     KnowledgeBaseOptionsResponse,
     KnowledgeBaseResponse,
     ModelChoiceResponse,
+    ParseElementsResponse,
+    ParseSummaryResponse,
     RegisterUploadRequest,
     ReindexEstimateResponse,
     ReindexRequest,
     SafeBindingResponse,
     SparseChoiceRequest,
+    StorageCredentials,
     UpdateKbRequest,
 )
 from cairn.catalog.service import CatalogService, get_catalog_service
 from cairn.core.config import get_settings
-from cairn.core.errors import ValidationFailed
+from cairn.core.document_ir import Element
+from cairn.core.document_metadata import check_document_metadata
+from cairn.core.errors import PayloadTooLarge, ValidationFailed
 from cairn.core.ids import decode_id
 from cairn.core.pagination import MAX_LIMIT, CursorPage, decode_cursor
 from cairn.core.tokenizer_config import configured_tokenizer_ids
@@ -232,7 +240,12 @@ async def list_knowledge_bases(
 ) -> CursorPage[KnowledgeBaseResponse]:
     # One extra row tells us whether another page exists without a COUNT.
     views = await service.list_kbs(actor, limit=limit + 1, cursor_id=_cursor_id("kb", cursor))
-    items = [KnowledgeBaseResponse.from_dto(view) for view in views]
+    items = [
+        KnowledgeBaseResponse.from_dto(view).model_copy(
+            update={"permissions": _kb_permissions(actor, view.id)}
+        )
+        for view in views
+    ]
     return CursorPage.build(
         items,
         limit=limit,
@@ -502,7 +515,18 @@ async def upload_document(
     actor: Annotated[Principal, Depends(require_permission("kb:write", "kb_id"))],
     service: Annotated[CatalogService, Depends(_service)],
     file: Annotated[UploadFile, File()],
+    metadata: Annotated[
+        str | None,
+        Form(
+            description=(
+                "Document metadata as a JSON object (FR-D-10), e.g. "
+                '`{"lang": "en", "tags": ["ops"]}`. Retrieval filters match it; at most '
+                "8 KB, 4 levels and 64 keys per object."
+            ),
+        ),
+    ] = None,
 ) -> DocumentRegistrationResponse:
+    document_metadata = _form_metadata(metadata)
     filename, content_type = _validated_upload_type(file.filename, file.content_type)
     spool: tempfile.SpooledTemporaryFile[bytes] | None = None
     try:
@@ -518,6 +542,7 @@ async def upload_document(
                 size_bytes=size,
                 mime_type=content_type,
                 object_key=ObjectKeys.original(actor.workspace_id, target, content_hash),
+                metadata=document_metadata,
             ),
             _spooled_chunks(spool),
         )
@@ -695,6 +720,56 @@ async def list_chunks(
     return [ChunkResponse.from_dto(view) for view in views]
 
 
+@router.get(
+    "/chunks/{chunk_id}",
+    response_model=CitedChunkResponse,
+    responses=PROBLEM,
+    summary="Resolve a cited chunk",
+    description=(
+        "Citation resolution after retrieval. Requires kb:read on the chunk's knowledge "
+        "base — more than kb:query, so a search-only key cannot walk the corpus. A chunk the "
+        "caller may not read is reported as not found."
+    ),
+)
+async def resolve_chunk(
+    chunk_id: str,
+    actor: Annotated[Principal, Depends(current_principal)],
+    service: Annotated[CatalogService, Depends(_service)],
+) -> CitedChunkResponse:
+    return CitedChunkResponse.from_view(
+        await service.resolve_chunk(actor, decode_id("chk", chunk_id))
+    )
+
+
+@router.get(
+    "/documents/{document_id}/content",
+    responses={
+        **PROBLEM,
+        200: {"content": {"text/markdown": {}}, "description": "The parsed text"},
+    },
+    response_class=PlainTextResponse,
+    summary="Read a document's parsed text",
+    description=(
+        "The Markdown text that was chunked and indexed for the current revision (at most "
+        "20 MB; larger documents answer 413). Requires kb:read on the document's knowledge base."
+    ),
+)
+async def document_content(
+    document_id: str,
+    actor: Annotated[Principal, Depends(current_principal)],
+    service: Annotated[CatalogService, Depends(_service)],
+) -> PlainTextResponse:
+    document, text = await service.document_content(actor, decode_id("doc", document_id))
+    return PlainTextResponse(
+        text,
+        media_type="text/markdown; charset=utf-8",
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "X-Document-Revision": str(document.revision),
+        },
+    )
+
+
 @router.patch(
     "/knowledge-bases/{kb_id}/chunks/{chunk_id}",
     response_model=ChunkResponse,
@@ -747,11 +822,17 @@ async def create_binding(
         name=body.name,
         config=body.config,
         is_default=body.is_default,
+        credentials=body.credentials.model_dump(exclude_none=True) if body.credentials else None,
     )
     return BindingResponse.from_dto(ref)
 
 
 def _validate_binding_config(body: CreateBindingRequest) -> None:
+    if body.kind == "object" and body.driver in {"s3", "minio", "oss", "cos"}:
+        from cairn.objectstore.s3 import validate_config
+
+        validate_config(body.config)
+        return
     expected_driver = "local" if body.kind == "object" else "qdrant"
     if body.driver != expected_driver:
         raise ValidationFailed(
@@ -807,7 +888,26 @@ async def test_binding(
     actor: Annotated[Principal, Depends(require_permission("platform:storage"))],
     service: Annotated[CatalogService, Depends(_service)],
 ) -> dict[str, bool]:
-    return {"healthy": await service.test_binding(decode_id("bind", binding_id))}
+    return {
+        "healthy": await service.test_binding(
+            decode_id("bind", binding_id), workspace_id=actor.workspace_id
+        )
+    }
+
+
+@router.put(
+    "/storage-bindings/{binding_id}/credentials", response_model=BindingResponse, responses=PROBLEM
+)
+async def rotate_binding_credentials(
+    binding_id: str,
+    body: StorageCredentials,
+    actor: Annotated[Principal, Depends(require_permission("platform:storage"))],
+    service: Annotated[CatalogService, Depends(_service)],
+) -> BindingResponse:
+    ref = await service.rotate_binding_credentials(
+        actor, decode_id("bind", binding_id), body.model_dump(exclude_none=True)
+    )
+    return BindingResponse.from_dto(ref)
 
 
 @router.delete(
@@ -824,3 +924,153 @@ async def delete_binding(
 ) -> Response:
     await service.delete_binding(actor, decode_id("bind", binding_id))
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _form_metadata(raw: str | None) -> dict[str, Any]:
+    """Parse the multipart ``metadata`` part: a JSON object within the document bounds."""
+    if raw is None or not raw.strip():
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except ValueError as exc:
+        raise ValidationFailed("metadata must be a JSON object.") from exc
+    if not isinstance(parsed, dict):
+        raise ValidationFailed("metadata must be a JSON object.")
+    return check_document_metadata(parsed)
+
+
+def _kb_permissions(actor: Principal, kb_id: UUID) -> list[str]:
+    """The knowledge-base permissions ``actor`` holds on ``kb_id``, implied ones included."""
+    return sorted(permission for permission in KB_PERMISSIONS if actor.can(permission, kb_id))
+
+
+@router.get(
+    "/documents/{document_id}/parse", response_model=ParseSummaryResponse, responses=PROBLEM
+)
+async def document_parse_summary(
+    document_id: str,
+    actor: Annotated[Principal, Depends(current_principal)],
+    view: Literal["active", "candidate"] = "active",
+) -> dict[str, Any]:
+    ir = await read_parse(actor, decode_id("doc", document_id), view=view)
+    return {
+        "parse_version": ir.parse_version,
+        "revision": ir.revision,
+        "pages": ir.pages,
+        "producer": ir.producer,
+        "engine": ir.metadata.get("pdf_engine"),
+        "warnings": ir.warnings,
+        "quality_status": ir.quality_status if ir.identity_version == 2 else "legacy",
+        "element_count": len(ir.elements),
+        "view": view,
+    }
+
+
+@router.get(
+    "/documents/{document_id}/parse/elements",
+    response_model=ParseElementsResponse,
+    responses=PROBLEM,
+)
+async def document_parse_elements(
+    document_id: str,
+    actor: Annotated[Principal, Depends(current_principal)],
+    view: Literal["active", "candidate"],
+    parse_version: Annotated[str, Query(pattern=r"^[a-f0-9]{64}$")],
+    page: Annotated[int | None, Query(ge=1)] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    cursor: str | None = None,
+) -> dict[str, Any]:
+    ir = await read_parse(
+        actor, decode_id("doc", document_id), view=view, parse_version=parse_version
+    )
+    offset = 0
+    if cursor:
+        decoded = decode_cursor(cursor)
+        if decoded.get("view") != view or decoded.get("parse_version") != parse_version:
+            raise ParseVersionStale()
+        offset = int(decoded["offset"])
+        if offset < 0 or offset > len(ir.elements) or decoded.get("page") != page:
+            raise ValidationFailed("The element pagination cursor is invalid.")
+    elements = [
+        item
+        for item in ir.elements
+        if page is None or any(loc.page == page for loc in item.locations)
+    ]
+    from cairn.core.pagination import encode_cursor
+
+    items = elements[offset : offset + limit]
+    next_cursor = (
+        encode_cursor(view=view, parse_version=parse_version, offset=offset + limit, page=page)
+        if offset + limit < len(elements)
+        else None
+    )
+    response = {
+        "items": [item.model_dump(mode="json") for item in items],
+        "next_cursor": next_cursor,
+    }
+    if len(json.dumps(response, ensure_ascii=False).encode()) > 8 * 1024**2:
+        raise PayloadTooLarge("The requested element page exceeds the response budget.")
+    return response
+
+
+@router.get(
+    "/documents/{document_id}/parse/elements/{element_id}",
+    response_model=Element,
+    responses=PROBLEM,
+)
+async def document_parse_element(
+    document_id: str,
+    element_id: str,
+    actor: Annotated[Principal, Depends(current_principal)],
+    view: Literal["active", "candidate"],
+    parse_version: Annotated[str, Query(pattern=r"^[a-f0-9]{64}$")],
+) -> Element:
+    ir = await read_parse(
+        actor, decode_id("doc", document_id), view=view, parse_version=parse_version
+    )
+    for item in ir.elements:
+        if item.element_id == element_id:
+            if len(item.model_dump_json().encode()) > 8 * 1024**2:
+                raise PayloadTooLarge("This element exceeds the response budget.")
+            return item
+    raise ParseVersionStale()
+
+
+@router.get("/documents/{document_id}/parse/pages/{page}/preview", responses=PROBLEM)
+async def document_parse_preview(
+    document_id: str,
+    page: int,
+    actor: Annotated[Principal, Depends(current_principal)],
+    view: Literal["active", "candidate"],
+    parse_version: Annotated[str, Query(pattern=r"^[a-f0-9]{64}$")],
+) -> Response:
+    output = await preview_page(
+        actor, decode_id("doc", document_id), view=view, parse_version=parse_version, page=page
+    )
+    return Response(
+        output,
+        media_type="image/png",
+        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"},
+    )
+
+
+@router.get("/documents/{document_id}/parse/assets/{asset_id}", responses=PROBLEM)
+async def document_parse_asset(
+    document_id: str,
+    asset_id: str,
+    actor: Annotated[Principal, Depends(current_principal)],
+    view: Literal["active", "candidate"],
+    parse_version: Annotated[str, Query(pattern=r"^[a-f0-9]{64}$")],
+) -> Response:
+    data, mime_type = await read_asset(
+        actor,
+        decode_id("doc", document_id),
+        view=view,
+        parse_version=parse_version,
+        asset_id=asset_id,
+    )
+    return Response(
+        data,
+        media_type=mime_type,
+        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"},
+    )

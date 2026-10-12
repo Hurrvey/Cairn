@@ -29,6 +29,8 @@ export interface Page<T> {
 }
 
 /** What the search console lets a person vary per query. */
+export type ExplainOutput = components["schemas"]["ExplainOutput"];
+
 export interface QueryOptions {
   mode: "hybrid" | "vector" | "fulltext";
   topK: number;
@@ -39,6 +41,47 @@ export interface QueryOptions {
   rerank: boolean;
   rerankModel: string;
   rerankTopN: number;
+  /** Document metadata filter as JSON text, e.g. `{"lang": "en"}`; blank for none. */
+  metadataFilter?: string;
+  documentIds?: string[];
+  /** `datetime-local` values, read in the browser's time zone. */
+  createdAfter?: string;
+  createdBefore?: string;
+  dedupe?: "none" | "by_document";
+  mmr?: boolean;
+  mmrLambda?: number;
+  highlights?: boolean;
+  explain?: boolean;
+}
+
+/** Thrown for a metadata filter that is not a JSON object; the form shows it inline. */
+export class FilterSyntaxError extends Error {}
+
+function isoFromLocal(value: string | undefined): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+export function buildFilters(options: QueryOptions): RetrievalRequest["filters"] {
+  const filters: NonNullable<RetrievalRequest["filters"]> = {};
+  const raw = options.metadataFilter?.trim();
+  if (raw) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new FilterSyntaxError("metadata");
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new FilterSyntaxError("metadata");
+    filters.metadata = parsed as Record<string, unknown>;
+  }
+  if (options.documentIds?.length) filters.document_ids = options.documentIds;
+  const after = isoFromLocal(options.createdAfter);
+  const before = isoFromLocal(options.createdBefore);
+  if (after) filters.created_after = after;
+  if (before) filters.created_before = before;
+  return Object.keys(filters).length ? filters : null;
 }
 
 const base = (id: string) => `/v1/knowledge-bases/${encodeURIComponent(id)}`;
@@ -56,12 +99,16 @@ export function buildQuery(id: string, query: string, options: QueryOptions): Re
     options: {
       expand_parent: options.expandParent,
       include_metadata: true,
-      include_highlights: false,
-      explain: false,
+      include_highlights: options.highlights ?? false,
+      explain: options.explain ?? false,
+      ...(options.dedupe ? { dedupe: options.dedupe } : {}),
+      ...(options.mmr !== undefined ? { mmr: { enabled: options.mmr, lambda: options.mmrLambda ?? 0.5 } } : {}),
     },
     rerank: { enabled: false, top_n: options.rerankTopN, timeout_s: 1.5 },
     strict: false,
   };
+  const filters = buildFilters(options);
+  if (filters) body.filters = filters;
   if (options.mode === "hybrid") {
     body.fusion = { method: options.fusion, k: 60 };
     if (options.fusion === "weighted") body.weights = { dense: options.dense, sparse: options.sparse };
@@ -70,6 +117,18 @@ export function buildQuery(id: string, query: string, options: QueryOptions): Re
     body.rerank = { enabled: true, model_id: options.rerankModel.trim(), top_n: options.rerankTopN, timeout_s: 1.5 };
   }
   return body;
+}
+
+/** The same request as a shell command, for reproducing a result outside the console. */
+export function curlFor(body: RetrievalRequest, origin: string): string {
+  // Single-quoted for POSIX shells; an embedded quote closes, escapes and reopens.
+  const json = JSON.stringify(body).replace(/'/g, "'\\''");
+  return [
+    `curl -sS -X POST '${origin}/v1/retrieval/query'`,
+    `  -H "Authorization: Bearer $CAIRN_API_KEY"`,
+    `  -H 'Content-Type: application/json'`,
+    `  -d '${json}'`,
+  ].join(" \\\n");
 }
 
 export const knowledge = {
@@ -96,9 +155,10 @@ export const knowledge = {
     ),
   document: (id: string, documentId: string, signal?: AbortSignal) =>
     api.get<DocumentRecord>(doc(id, documentId), { signal }),
-  upload: (id: string, file: File, signal?: AbortSignal) => {
+  upload: (id: string, file: File, signal?: AbortSignal, metadata?: Record<string, unknown>) => {
     const body = new FormData();
     body.append("file", file);
+    if (metadata && Object.keys(metadata).length) body.append("metadata", JSON.stringify(metadata));
     return request<DocumentRegistration>(`${base(id)}/documents/upload`, { method: "POST", body, signal });
   },
   retry: (id: string, documentId: string) => api.post<void>(`${doc(id, documentId)}/retry`),

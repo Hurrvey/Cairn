@@ -732,6 +732,17 @@ class DocumentChunker:
                 "page": source.block.page,
                 "bbox": list(source.block.bbox) if source.block.bbox is not None else None,
                 "source_url": source.block.source_url,
+                **(
+                    {
+                        "element_id": source.block.element_id,
+                        "parse_version": source.block.parse_version,
+                        "locations": [
+                            location.model_dump(mode="json") for location in source.block.locations
+                        ],
+                    }
+                    if source.block.element_id
+                    else {}
+                ),
             }
             for source in window.sources
         ]
@@ -758,6 +769,20 @@ class DocumentChunker:
                 "source_url": citations[0]["source_url"] if citations else None,
                 "ordinal": ordinal,
                 "citations": citations,
+                **(
+                    {
+                        "parse_version": window.sources[0].block.parse_version,
+                        "element_ids": list(
+                            dict.fromkeys(
+                                source.block.element_id
+                                for source in window.sources
+                                if source.block.element_id
+                            )
+                        ),
+                    }
+                    if window.sources and window.sources[0].block.parse_version
+                    else {}
+                ),
                 "oversized": tokens > budget,
                 "oversized_reason": "table" if tokens > budget else None,
             },

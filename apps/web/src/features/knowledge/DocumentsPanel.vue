@@ -15,9 +15,11 @@ import { knowledge, type DocumentRecord, type DocumentRegistration, type Knowled
 import Badge from "@/components/ui/Badge.vue";
 import Button from "@/components/ui/Button.vue";
 import EmptyState from "@/components/ui/EmptyState.vue";
+import Field from "@/components/ui/Field.vue";
 import Input from "@/components/ui/Input.vue";
 import SegmentedControl from "@/components/ui/SegmentedControl.vue";
 import StoneStack from "@/components/ui/StoneStack.vue";
+import Textarea from "@/components/ui/Textarea.vue";
 import DocumentDetail from "@/features/knowledge/DocumentDetail.vue";
 import { cn, formatBytes, formatRelative } from "@/lib/utils";
 import { useToasts } from "@/shared/composables/useToasts";
@@ -45,6 +47,21 @@ const fileInput = ref<HTMLInputElement>();
 const dragging = ref(false);
 const uploads = ref<{ name: string; status: "uploading" | DocumentRegistration["status"] | "error"; reason?: string }[]>([]);
 const uploading = ref(false);
+/** JSON object attached to every file in the next upload; filters match it. */
+const uploadMetadata = ref("");
+const metadataError = ref<string | null>(null);
+
+function parsedMetadata(): Record<string, unknown> | null {
+  const raw = uploadMetadata.value.trim();
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
+  } catch {
+    // Reported below.
+  }
+  return null;
+}
 
 const stateFilter = computed<StateFilter>({
   get: () => {
@@ -100,6 +117,9 @@ function openFilePicker(): void {
 
 async function uploadFiles(files: File[]): Promise<void> {
   if (!files.length || !props.canWrite) return;
+  const metadata = parsedMetadata();
+  metadataError.value = metadata === null ? t("knowledge.documents.metadataInvalid") : null;
+  if (metadata === null) return;
   uploading.value = true;
   uploads.value = files.map((file) => ({ name: file.name, status: "uploading" }));
   let accepted = 0;
@@ -111,7 +131,7 @@ async function uploadFiles(files: File[]): Promise<void> {
       continue;
     }
     try {
-      const result = await knowledge.upload(props.kb.id, file);
+      const result = await knowledge.upload(props.kb.id, file, undefined, metadata);
       entry.status = result.status;
       if (result.reason) entry.reason = result.reason;
       if (result.status === "accepted") accepted += 1;
@@ -178,6 +198,12 @@ defineExpose({ openFilePicker });
         </span>
         <input ref="fileInput" type="file" multiple class="sr-only" :accept="accept" data-test="document-upload" @change="onFileChange" />
       </div>
+      <details v-if="canWrite" class="mb-3 text-[12.5px]" :open="!!metadataError || undefined" data-test="upload-metadata">
+        <summary class="cursor-pointer text-ink-2">{{ t("knowledge.documents.metadata") }}</summary>
+        <Field :hint="t('knowledge.documents.metadataHint')" :error="metadataError ?? undefined" class="mt-2" v-slot="{ id }">
+          <Textarea :id="id" v-model="uploadMetadata" mono :invalid="!!metadataError" placeholder='{"lang": "en", "tags": ["ops"]}' data-test="upload-metadata-input" />
+        </Field>
+      </details>
 
       <ul v-if="uploads.length" class="mb-3 divide-y divide-line rounded-md border border-line text-[12.5px]" data-test="upload-queue">
         <li v-for="entry in uploads" :key="entry.name" class="flex items-center gap-2 px-3 py-1.5">

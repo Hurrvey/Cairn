@@ -21,7 +21,9 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 from cairn.catalog.config import ChunkConfig, RetrievalConfig
+from cairn.core.document_metadata import DocumentFacts
 from cairn.core.retrieval_runtime import BindingRefModel, KnowledgeBaseRuntime
+from cairn.core.secrets import SealedCredential
 from cairn.core.sparse import SparseSpec
 from cairn.modelgw.dto import ModelRef
 
@@ -72,6 +74,9 @@ class BindingRef:
     name: str
     config: dict[str, Any] = field(default_factory=dict)
     health_state: str = "unknown"
+    has_credentials: bool = False
+    credential: SealedCredential | None = field(default=None, repr=False)
+    workspace_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +123,9 @@ class IndexVersionConfig(BaseModel):
     #: Where this version's sparse vectors come from. Snapshots written before
     #: learned sparse vectors existed were built with BM25, the default.
     sparse: SparseSpec = SparseSpec()
+    #: Point payload layout this version was built with. Snapshots written before
+    #: document metadata reached the read model parse as ``1``.
+    payload_schema: int = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,6 +146,9 @@ class ChunkReembedTarget:
     metric: Literal["cosine", "dot", "l2"]
     vector_binding: BindingRef
     sparse: SparseSpec = field(default_factory=SparseSpec)
+    document: DocumentFacts | None = None
+    payload_schema: int = 1
+    ordinal: int = 0
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "metadata", deepcopy(self.metadata))
@@ -282,6 +293,8 @@ class DocumentView:
     chunk_count: int
     created_at: datetime
     indexed_at: datetime | None
+    #: What retrieval filters match (``filters.metadata``); fixed per document.
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

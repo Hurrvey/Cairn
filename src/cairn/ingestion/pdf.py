@@ -6,7 +6,8 @@ import asyncio
 import json
 import math
 import sys
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
+from hashlib import sha256
 from typing import Any, ClassVar, cast
 
 from pydantic import JsonValue
@@ -14,7 +15,13 @@ from pydantic import JsonValue
 from cairn.ingestion.base import Block, BlockKind, ParseContext, ParsedDocument
 from cairn.ingestion.errors import ParseEmptyContent, ParseError, ParseTooLarge
 from cairn.ingestion.ocr import OcrEngine, OcrResult
-from cairn.ingestion.process import ProcessOutputTooLarge, ProcessTimedOut, run_bounded
+from cairn.ingestion.ocr_cache import current_hooks
+from cairn.ingestion.process import (
+    ProcessOutputTooLarge,
+    ProcessSupervisionUnavailable,
+    ProcessTimedOut,
+    run_bounded,
+)
 
 
 class PdfError(ParseError):
@@ -65,6 +72,7 @@ class PdfLimits:
     max_page_chars: int = 2_000_000
     max_text_chars: int = 16_000_000
     max_page_objects: int = 100_000
+    max_raster_rectangles: int = 2_048
     max_layout_words: int = 100_000
     max_output_bytes: int = 64 * 1024 * 1024
     max_render_bytes: int = 32 * 1024 * 1024
@@ -72,8 +80,27 @@ class PdfLimits:
     timeout_seconds: float = 120.0
     render_scale: float = 2.0
     ocr_text_threshold: int = 8
+    max_elements: int = 100_000
+    max_table_cells: int = 100_000
+    max_assets: int = 500
+    max_asset_bytes: int = 8 * 1024**2
+    max_total_asset_bytes: int = 32 * 1024**2
 
     def __post_init__(self) -> None:
+        for name in (
+            "max_elements",
+            "max_table_cells",
+            "max_assets",
+            "max_asset_bytes",
+            "max_total_asset_bytes",
+        ):
+            value = getattr(self, name)
+            if (
+                type(value) is not int
+                or value < 0
+                or (name in ("max_elements", "max_table_cells") and value == 0)
+            ):
+                raise ValueError("PDF structural budgets must be nonnegative integers")
         positive = (
             self.max_input_bytes,
             self.max_pages,
@@ -83,6 +110,7 @@ class PdfLimits:
             self.max_page_chars,
             self.max_text_chars,
             self.max_page_objects,
+            self.max_raster_rectangles,
             self.max_layout_words,
             self.max_output_bytes,
             self.max_render_bytes,
@@ -105,6 +133,7 @@ class PdfLimits:
             self.max_page_chars,
             self.max_text_chars,
             self.max_page_objects,
+            self.max_raster_rectangles,
             self.max_layout_words,
             self.max_output_bytes,
             self.max_render_bytes,
@@ -136,13 +165,21 @@ class _Page:
     extracted_characters: int
     has_page_objects: bool
     has_raster_objects: bool
+    raster_coverage: float
+    largest_raster_coverage: float
+    native_text_coverage: float
+    native_text_band_coverage: float
     layout: tuple[_LayoutBlock, ...]
+    object_count: int | None = None
+    word_count: int | None = None
+    raster_count: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class _Extraction:
     worker_pid: int
     pages: tuple[_Page, ...]
+    output_bytes: int = 0
 
 
 class PdfParser:
@@ -168,28 +205,77 @@ class PdfParser:
             raise PdfTimedOut() from exc
         except ProcessOutputTooLarge as exc:
             raise PdfTooLarge() from exc
+        except ProcessSupervisionUnavailable as exc:
+            raise PdfEngineUnavailable() from exc
 
     async def _parse(self, data: bytes, ctx: ParseContext) -> ParsedDocument:
+        hooks = current_hooks.get()
+        if hooks:
+            await hooks.progress(None, None, "extracting")
         extraction = await self._extract(data)
         blocks: list[Block] = []
         ocr_pages: list[int] = []
+        ocr_layout_unavailable_pages: list[int] = []
+        ocr_layout_unavailable_reasons: dict[str, JsonValue] = {}
         text_characters = 0
+        resource_pages: list[JsonValue] = []
+        ocr_transcripts: dict[str, JsonValue] = {}
         for page in extraction.pages:
+            resource: dict[str, JsonValue] = {
+                "width": page.width,
+                "height": page.height,
+                "characters": page.char_count,
+                "words": page.word_count,
+                "objects": page.object_count,
+                "rasters": page.raster_count,
+                "layout_blocks": len(page.layout),
+                "render_pixels": 0,
+                "render_bytes": 0,
+            }
+            resource_pages.append(resource)
             if not page.has_page_objects:
+                if hooks:
+                    await hooks.progress(page.number, len(extraction.pages), "layout")
                 continue
-            needs_ocr = page.extracted_characters == 0 or (
-                page.extracted_characters < self._limits.ocr_text_threshold
-                and page.has_raster_objects
-            )
+            needs_ocr = self._needs_ocr(page)
             if needs_ocr:
                 if self._ocr is None:
                     raise PdfOcrRequired()
                 image = await self._render(data, page.number - 1)
-                result = await self._ocr.recognize(
-                    image,
-                    language=None if ctx.language == "und" else ctx.language,
+                image_sha = sha256(image).hexdigest()
+                result = await hooks.get(image_sha) if hooks else None
+                if result is not None:
+                    try:
+                        self._validate_ocr_result(result)
+                    except (PdfError, PdfTooLarge, ParseEmptyContent):
+                        result = None
+                if result is None:
+                    result = await self._ocr.recognize(
+                        image,
+                        language=None if ctx.language == "und" else ctx.language,
+                    )
+                    self._validate_ocr_result(result)
+                    if hooks:
+                        await hooks.put(image_sha, result)
+                self._validate_ocr_result(result)
+                resource.update(
+                    characters=len(result.text),
+                    words=len(result.words),
+                    render_pixels=max(
+                        result.width * result.height,
+                        math.ceil(page.width * self._limits.render_scale)
+                        * math.ceil(page.height * self._limits.render_scale),
+                    ),
+                    render_bytes=len(image),
                 )
-                page_blocks = [self._ocr_block(result, page, ctx, len(blocks))]
+                ocr_transcripts[str(page.number)] = result.text
+                fallback_reason = self._ocr_layout_fallback_reason(result)
+                if fallback_reason is None:
+                    page_blocks = await self._layout_ocr(result, page, ctx, len(blocks))
+                else:
+                    page_blocks = [self._ocr_block(result, page, ctx, len(blocks))]
+                    ocr_layout_unavailable_pages.append(page.number)
+                    ocr_layout_unavailable_reasons[str(page.number)] = fallback_reason
                 ocr_pages.append(page.number)
             else:
                 page_blocks = [
@@ -207,6 +293,11 @@ class PdfParser:
             if text_characters > self._limits.max_text_chars:
                 raise PdfTooLarge()
             blocks.extend(page_blocks)
+            if len(blocks) > self._limits.max_elements:
+                raise PdfTooLarge()
+            resource["layout_blocks"] = len(page_blocks)
+            if hooks:
+                await hooks.progress(page.number, len(extraction.pages), "layout")
 
         if not blocks:
             raise ParseEmptyContent()
@@ -220,6 +311,28 @@ class PdfParser:
             "pdf_worker_pid": extraction.worker_pid,
             "coordinate_space": "pdf_points_bottom_left",
             "ocr_pages": ocr_page_values,
+            "ocr_layout_unavailable_pages": list(ocr_layout_unavailable_pages),
+            "ocr_layout_unavailable_reasons": ocr_layout_unavailable_reasons,
+            "ocr_transcripts": ocr_transcripts,
+            "pdf_budget_facts": {
+                "schema": 1,
+                "pages": resource_pages,
+                "output_bytes": max(
+                    extraction.output_bytes,
+                    len(
+                        json.dumps([asdict(block) for block in blocks], ensure_ascii=False).encode()
+                    ),
+                ),
+            },
+            "pdf_pages": [
+                {
+                    "width": page.width,
+                    "height": page.height,
+                    "crop": list(page.bbox),
+                    "rotation": page.rotation,
+                }
+                for page in extraction.pages
+            ],
         }
         return ParsedDocument(
             markdown=markdown,
@@ -237,12 +350,16 @@ class PdfParser:
             data,
             timeout_seconds=self._limits.timeout_seconds,
             max_output_bytes=self._limits.max_output_bytes,
+            max_memory_bytes=self._limits.max_memory_bytes,
         )
         if return_code != 0:
             self._raise_worker_error(stderr)
         try:
-            raw: object = json.loads(stdout)
-            return self._decode_extraction(raw)
+            raw = json.loads(stdout)
+            return replace(
+                self._decode_extraction(raw),
+                output_bytes=len(stdout) - len(str(raw.get("worker_pid", 0))) + 20,
+            )
         except (json.JSONDecodeError, UnicodeError, TypeError, ValueError, KeyError) as exc:
             raise PdfCorruptFile() from exc
 
@@ -261,6 +378,7 @@ class PdfParser:
             data,
             timeout_seconds=self._limits.timeout_seconds,
             max_output_bytes=self._limits.max_render_bytes,
+            max_memory_bytes=self._limits.max_memory_bytes,
         )
         if return_code != 0:
             self._raise_worker_error(stderr)
@@ -277,9 +395,162 @@ class PdfParser:
             "max_page_chars": self._limits.max_page_chars,
             "max_text_chars": self._limits.max_text_chars,
             "max_page_objects": self._limits.max_page_objects,
+            "max_raster_rectangles": self._limits.max_raster_rectangles,
             "max_layout_words": self._limits.max_layout_words,
             "max_memory_bytes": self._limits.max_memory_bytes,
         }
+
+    @staticmethod
+    def _ocr_layout_fallback_reason(result: OcrResult) -> str | None:
+        if not result.words:
+            return "no_words"
+        word_text = "".join("".join(word.text.split()) for word in result.words)
+        full_text = "".join(result.text.split())
+        return None if word_text == full_text else "incomplete_words"
+
+    def _validate_ocr_result(self, result: OcrResult) -> None:
+        if not isinstance(result.text, str) or not result.text.strip():
+            raise ParseEmptyContent()
+        if len(result.text) > self._limits.max_page_chars:
+            raise PdfTooLarge()
+        if (
+            type(result.width) is not int
+            or type(result.height) is not int
+            or result.width <= 0
+            or result.height <= 0
+        ):
+            raise PdfCorruptFile()
+        if result.width * result.height > self._limits.max_page_pixels:
+            raise PdfTooLarge()
+        if len(result.words) > self._limits.max_layout_words:
+            raise PdfTooLarge()
+        word_characters = 0
+        for word in result.words:
+            if not isinstance(word.text, str) or not word.text.strip():
+                raise PdfCorruptFile()
+            word_characters += len(word.text)
+            if word_characters > self._limits.max_page_chars:
+                raise PdfTooLarge()
+            self._validate_ocr_word(word.bbox, result)
+
+    async def _layout_ocr(
+        self,
+        result: OcrResult,
+        page: _Page,
+        ctx: ParseContext,
+        ordinal_start: int,
+    ) -> list[Block]:
+        display_width, display_height = (
+            (page.height, page.width) if page.rotation in {90, 270} else (page.width, page.height)
+        )
+        words: list[dict[str, object]] = []
+        for word in result.words:
+            self._validate_ocr_word(word.bbox, result)
+            left, top, right, bottom = word.bbox
+            words.append(
+                {
+                    "text": word.text,
+                    "bbox": [
+                        left / result.width * display_width,
+                        (result.height - bottom) / result.height * display_height,
+                        right / result.width * display_width,
+                        (result.height - top) / result.height * display_height,
+                    ],
+                }
+            )
+        payload = json.dumps({"words": words}, separators=(",", ":"), allow_nan=False).encode()
+        if len(payload) > self._limits.max_output_bytes:
+            raise PdfTooLarge()
+        config = self._worker_config()
+        config.update(
+            {
+                "page_number": page.number,
+                "page_width": display_width,
+                "page_height": display_height,
+                "max_json_bytes": self._limits.max_output_bytes,
+            }
+        )
+        return_code, stdout, stderr = await run_bounded(
+            self._command("layout", config),
+            payload,
+            timeout_seconds=self._limits.timeout_seconds,
+            max_output_bytes=self._limits.max_output_bytes,
+            max_memory_bytes=self._limits.max_memory_bytes,
+        )
+        if return_code != 0:
+            self._raise_worker_error(stderr)
+        try:
+            decoded = json.loads(stdout)
+            if not isinstance(decoded, dict):
+                raise ValueError("invalid OCR layout")
+            raw_blocks = decoded["blocks"]
+            if (
+                not isinstance(raw_blocks, list)
+                or not raw_blocks
+                or len(raw_blocks) > len(result.words)
+            ):
+                raise ValueError("invalid OCR layout")
+            blocks: list[Block] = []
+            total_text = 0
+            for offset, raw in enumerate(raw_blocks):
+                if not isinstance(raw, dict):
+                    raise ValueError("invalid OCR layout")
+                kind = raw.get("kind")
+                text = raw.get("text")
+                bbox = raw.get("bbox")
+                if (
+                    kind not in {"paragraph", "table"}
+                    or not isinstance(text, str)
+                    or not text.strip()
+                ):
+                    raise ValueError("invalid OCR layout")
+                total_text += len(text)
+                if total_text > self._limits.max_page_chars:
+                    raise ValueError("invalid OCR layout")
+                if not isinstance(bbox, list) or len(bbox) != 4:
+                    raise ValueError("invalid OCR layout")
+                visual = tuple(_coordinate(item) for item in bbox)
+                if (
+                    visual[0] > visual[2]
+                    or visual[1] > visual[3]
+                    or visual[0] < 0
+                    or visual[1] < 0
+                    or visual[2] > display_width
+                    or visual[3] > display_height
+                ):
+                    raise ValueError("invalid OCR layout")
+                pixel_bbox = (
+                    visual[0] / display_width * result.width,
+                    (display_height - visual[3]) / display_height * result.height,
+                    visual[2] / display_width * result.width,
+                    (display_height - visual[1]) / display_height * result.height,
+                )
+                coordinates = _image_bbox_to_pdf(pixel_bbox, result.width, result.height, page)
+                blocks.append(
+                    Block(
+                        kind=cast("BlockKind", kind),
+                        text=text,
+                        ordinal=ordinal_start + offset,
+                        page=page.number,
+                        bbox=coordinates,
+                        source_url=ctx.source_url,
+                    )
+                )
+            return blocks
+        except (json.JSONDecodeError, TypeError, KeyError, ValueError) as exc:
+            raise PdfCorruptFile() from exc
+
+    @staticmethod
+    def _validate_ocr_word(bbox: tuple[float, float, float, float], result: OcrResult) -> None:
+        if not isinstance(bbox, tuple) or len(bbox) != 4:
+            raise PdfCorruptFile()
+        left, top, right, bottom = bbox
+        if any(isinstance(number, bool) or not isinstance(number, (int, float)) for number in bbox):
+            raise PdfCorruptFile()
+        if not all(math.isfinite(number) for number in bbox) or not (
+            0 <= left <= right <= result.width and 0 <= top <= bottom <= result.height
+        ):
+            raise PdfCorruptFile()
 
     @staticmethod
     def _command(action: str, config: dict[str, int | float]) -> tuple[str, ...]:
@@ -349,6 +620,10 @@ class PdfParser:
             has_raster_objects = value.get("has_raster_objects")
             if not isinstance(has_raster_objects, bool):
                 raise ValueError("invalid raster object flag")
+            raster_coverage = _ratio(value.get("raster_coverage"))
+            largest_raster_coverage = _ratio(value.get("largest_raster_coverage"))
+            native_text_coverage = _ratio(value.get("native_text_coverage"))
+            native_text_band_coverage = _ratio(value.get("native_text_band_coverage"))
             raw_blocks = value.get("blocks")
             if not isinstance(raw_blocks, list):
                 raise ValueError("invalid layout blocks")
@@ -380,26 +655,35 @@ class PdfParser:
                     extracted_characters,
                     has_page_objects,
                     has_raster_objects,
+                    raster_coverage,
+                    largest_raster_coverage,
+                    native_text_coverage,
+                    native_text_band_coverage,
                     tuple(layout),
+                    value.get("object_count"),
+                    value.get("word_count"),
+                    value.get("raster_count"),
                 )
             )
         return _Extraction(worker_pid, tuple(pages))
 
+    def _needs_ocr(self, page: _Page) -> bool:
+        if page.extracted_characters == 0:
+            return True
+        if page.extracted_characters < self._limits.ocr_text_threshold and page.has_raster_objects:
+            return True
+        return (
+            page.raster_coverage >= 0.5
+            and page.largest_raster_coverage >= 0.35
+            and page.native_text_coverage <= 0.15
+            and page.native_text_band_coverage <= 0.375
+        )
+
     def _ocr_block(self, result: OcrResult, page: _Page, ctx: ParseContext, ordinal: int) -> Block:
         text = result.text.strip()
-        if not text:
-            raise ParseEmptyContent()
-        if len(text) > self._limits.max_page_chars:
-            raise PdfTooLarge()
-        if result.width <= 0 or result.height <= 0:
-            raise PdfCorruptFile()
         boxes: list[tuple[float, float, float, float]] = []
         for word in result.words:
-            left, top, right, bottom = word.bbox
-            if not all(math.isfinite(number) for number in word.bbox) or not (
-                0 <= left <= right <= result.width and 0 <= top <= bottom <= result.height
-            ):
-                raise PdfCorruptFile()
+            self._validate_ocr_word(word.bbox, result)
             boxes.append(_image_bbox_to_pdf(word.bbox, result.width, result.height, page))
         bbox = _union_bbox(boxes) if boxes else page.bbox
         return Block(
@@ -428,6 +712,15 @@ def _coordinate(value: Any) -> float:
     if not math.isfinite(number):
         raise ValueError("invalid coordinate")
     return number
+
+
+def _ratio(value: Any) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("ratio required")
+    ratio = float(value)
+    if not math.isfinite(ratio) or not 0 <= ratio <= 1:
+        raise ValueError("invalid ratio")
+    return ratio
 
 
 def _integer(value: Any, *, minimum: int, maximum: int | None = None) -> int:

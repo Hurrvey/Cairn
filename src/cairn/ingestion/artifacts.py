@@ -11,6 +11,8 @@ from typing import Any
 from uuid import UUID
 
 from cairn.catalog.dto import ChunkSpec
+from cairn.core.document_ir import DocumentIR
+from cairn.core.parse_artifact import decode_payload, encode_payload
 from cairn.ingestion.base import Asset, Block, ParsedDocument
 from cairn.vectorstore.base import SparseVector
 
@@ -22,6 +24,8 @@ class ParseManifest:
     index_version: int
     source_content_hash: str
     parsed: ParsedDocument
+    parser_fingerprint: str | None = None
+    context_fingerprint: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,7 +82,23 @@ def _decode(raw: bytes) -> dict[str, Any]:
 
 def encode_parse_manifest(manifest: ParseManifest) -> bytes:
     parsed = manifest.parsed
-    return _encode(
+    if parsed.ir is not None:
+        snapshot = parsed.ir.model_dump(mode="json")
+        DocumentIR.model_validate(snapshot)
+        return encode_payload(
+            {
+                "document_id": str(manifest.document_id),
+                "index_version": manifest.index_version,
+                "revision": manifest.revision,
+                "source_content_hash": manifest.source_content_hash,
+                "parser_fingerprint": manifest.parser_fingerprint,
+                "context_fingerprint": manifest.context_fingerprint,
+                "ir": snapshot,
+                "type": "parse",
+            },
+            version=2,
+        )
+    return encode_payload(
         {
             "document_id": str(manifest.document_id),
             "index_version": manifest.index_version,
@@ -100,21 +120,49 @@ def encode_parse_manifest(manifest: ParseManifest) -> bytes:
             },
             "revision": manifest.revision,
             "source_content_hash": manifest.source_content_hash,
+            "parser_fingerprint": manifest.parser_fingerprint,
+            "context_fingerprint": manifest.context_fingerprint,
+            "ir": parsed.ir.model_dump(mode="json") if parsed.ir is not None else None,
             "type": "parse",
-        }
+        },
+        version=2 if parsed.ir is not None else 1,
     )
 
 
 def decode_parse_manifest(raw: bytes) -> ParseManifest:
-    payload = _decode(raw)
+    payload = decode_payload(raw)
     if payload.get("type") != "parse":
         raise ValueError("artifact is not a parse manifest")
+    ir = DocumentIR.model_validate(payload["ir"]) if payload.get("ir") is not None else None
+    if ir is not None:
+        if (
+            str(ir.document_id) != payload["document_id"]
+            or ir.revision != payload["revision"]
+            or ir.source_sha256 != payload["source_content_hash"]
+            or ir.parser_fingerprint != payload.get("parser_fingerprint")
+            or ir.context_fingerprint != payload.get("context_fingerprint")
+        ):
+            raise ValueError("parse IR identity mismatch")
+        from cairn.ingestion.ir import project_document
+
+        projection = project_document(ir)
+        return ParseManifest(
+            document_id=ir.document_id,
+            revision=ir.revision,
+            index_version=int(payload["index_version"]),
+            source_content_hash=ir.source_sha256,
+            parsed=projection,
+            parser_fingerprint=payload.get("parser_fingerprint"),
+            context_fingerprint=payload.get("context_fingerprint"),
+        )
     parsed = payload["parsed"]
     return ParseManifest(
         document_id=UUID(payload["document_id"]),
         revision=int(payload["revision"]),
         index_version=int(payload["index_version"]),
         source_content_hash=str(payload["source_content_hash"]),
+        parser_fingerprint=payload.get("parser_fingerprint"),
+        context_fingerprint=payload.get("context_fingerprint"),
         parsed=ParsedDocument(
             markdown=str(parsed["markdown"]),
             blocks=[

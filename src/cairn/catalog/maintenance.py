@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cairn.catalog.ingestion import source_key_in_scope
 from cairn.catalog.repository import CatalogRepository
 from cairn.catalog.service import CatalogService
+from cairn.catalog.storage import object_binding as make_object_binding
 from cairn.core.config import get_settings
 from cairn.core.db import get_engine, session_scope, transaction
 from cairn.core.logging import get_logger
@@ -22,7 +23,7 @@ from cairn.core.time import utcnow
 from cairn.modelgw.catalog import ModelCatalog, get_model_catalog
 from cairn.objectstore.base import ObjectStore
 from cairn.objectstore.keys import ObjectKeys
-from cairn.objectstore.registry import ObjectBindingRef, get_object_registry
+from cairn.objectstore.registry import get_object_registry
 from cairn.tasks.dto import TaskContext, TaskResult
 from cairn.tasks.service import TaskLeaseLostError, get_task_service
 from cairn.tasks.worker import TaskWorker
@@ -251,6 +252,14 @@ async def _delete_key(
 
 
 async def handle_document_purge(context: TaskContext) -> TaskResult:
+    result = await _purge_document(context)
+    if result.ok and context.kb_id is not None:
+        # Also repairs a publication failure after a committed purge on retry.
+        await CatalogService().publish_runtime(context.kb_id)
+    return result
+
+
+async def _purge_document(context: TaskContext) -> TaskResult:
     document_id = _document_id(context)
     if document_id is None or context.kb_id is None:
         return TaskResult.skipped("invalid document purge identity")
@@ -287,9 +296,7 @@ async def handle_document_purge(context: TaskContext) -> TaskResult:
             )
         )
         object_store: ObjectStore = await get_object_registry().for_binding(
-            ObjectBindingRef(
-                object_binding.id, object_binding.driver, dict(object_binding.config or {})
-            )
+            await make_object_binding(session, object_binding)
         )
         document_filter = Compare("document_id", "$eq", str(document_id))
         namespaces = await _external(session, context, partial(vector_store.list_namespaces, kb.id))
@@ -397,9 +404,7 @@ async def handle_kb_purge(context: TaskContext) -> TaskResult:
             )
         )
         object_store = await get_object_registry().for_binding(
-            ObjectBindingRef(
-                object_binding.id, object_binding.driver, dict(object_binding.config or {})
-            )
+            await make_object_binding(session, object_binding)
         )
         namespaces = await _external(session, context, partial(vector_store.list_namespaces, kb.id))
         for namespace in namespaces:
