@@ -7,7 +7,7 @@
  * the page only chooses sensible defaults.
  */
 
-export type Family = "tei" | "infinity" | "bge_m3" | "dashscope" | "volcengine" | "openai_compatible";
+export type Family = "tei" | "infinity" | "bge_m3" | "dashscope" | "volcengine" | "openai_compatible" | "openai" | "anthropic" | "google" | "deepseek" | "ollama" | "vllm";
 
 export interface FamilySpec {
   baseUrl: string;
@@ -21,6 +21,12 @@ export interface FamilySpec {
 }
 
 export const FAMILIES: Record<Family, FamilySpec> = {
+  openai: { baseUrl: "https://api.openai.com/v1", batch: 16, key: "required", local: false, sparse: false, sendsDimension: false },
+  anthropic: { baseUrl: "https://api.anthropic.com/v1", batch: 16, key: "required", local: false, sparse: false, sendsDimension: false },
+  google: { baseUrl: "https://generativelanguage.googleapis.com/v1beta", batch: 16, key: "required", local: false, sparse: false, sendsDimension: false },
+  deepseek: { baseUrl: "https://api.deepseek.com/v1", batch: 16, key: "required", local: false, sparse: false, sendsDimension: false },
+  ollama: { baseUrl: "http://host.docker.internal:11434", batch: 16, key: "optional", local: true, sparse: false, sendsDimension: false },
+  vllm: { baseUrl: "http://host.docker.internal:8000/v1", batch: 16, key: "optional", local: true, sparse: false, sendsDimension: false },
   tei: { baseUrl: "http://embedding:80", batch: 16, key: "hidden", local: true, sparse: false, sendsDimension: false },
   bge_m3: { baseUrl: "http://bge-m3:8000", batch: 16, key: "optional", local: true, sparse: true, sendsDimension: false },
   dashscope: {

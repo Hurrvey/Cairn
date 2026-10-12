@@ -1,8 +1,10 @@
 """Model gateway.
 
-**Phase 2 ships only the registry** — providers, models, and encrypted
-credentials. The invocation layer (LiteLLM adapters, streaming, circuit
-breaking, usage accounting) lands with M10 in Phase 3.
+The registry — providers, models, envelope-encrypted credentials and their
+Redis projections. Embedding calls are made by ``cairn.embedding`` through the
+provider families registered here (TEI, Infinity, bge-m3, DashScope, Volcengine
+Ark, OpenAI-compatible). General chat invocation (streaming, fallback chains,
+usage accounting) is the remaining M10 work.
 
 Pulled forward because ``M03`` cannot validate a knowledge base's embedding
 configuration without somewhere to look models up, and a stub would have to be

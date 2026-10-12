@@ -39,6 +39,7 @@ from cairn.modelgw.dto import (
     ProviderView,
     RegisterModelSpec,
 )
+from cairn.modelgw.invocation import InvocationSnapshot
 from cairn.modelgw.models import Model, ModelProvider, Secret
 
 __all__ = ["SUPPORTED_FAMILIES", "ModelCatalog", "get_model_catalog"]
@@ -276,6 +277,21 @@ class ModelCatalog:
             provider = await session.get(ModelProvider, spec.provider_id)
             if provider is None or provider.workspace_id != workspace_id:
                 raise NotFound("Provider not found.")
+            from cairn.modelgw.chat_protocols import CHAT_FAMILIES, RERANK_FAMILIES
+
+            if spec.capability == "chat" and provider.family not in CHAT_FAMILIES:
+                raise ValidationFailed("This provider does not support chat.")
+            if spec.capability == "rerank" and provider.family not in RERANK_FAMILIES:
+                raise ValidationFailed("This provider does not support registered reranking.")
+            if spec.capability == "embedding" and provider.family not in {
+                "tei",
+                "infinity",
+                "bge_m3",
+                "dashscope",
+                "volcengine",
+                "openai_compatible",
+            }:
+                raise ValidationFailed("Use an embedding-capable provider family for this model.")
 
             if spec.sparse and provider.family not in SPARSE_FAMILIES:
                 raise ValidationFailed(
@@ -306,6 +322,8 @@ class ModelCatalog:
                 tokenizer_id=spec.tokenizer_id,
                 sparse=spec.sparse,
                 send_dimension=spec.send_dimension,
+                cost_per_1k_input=spec.cost_per_1k_input,
+                cost_per_1k_output=spec.cost_per_1k_output,
             )
             session.add(model)
             await session.flush()
@@ -344,6 +362,52 @@ class ModelCatalog:
                 await session.delete(model)
         except IntegrityError as exc:
             raise Conflict("The model is still referenced by a knowledge base.") from exc
+
+    async def invocation_snapshot(
+        self, workspace_id: UUID, model_id: UUID, *, principal_id: UUID | None, request_id: str
+    ) -> InvocationSnapshot:
+        async with session_scope() as session:
+            row = (
+                await session.execute(
+                    select(Model, ModelProvider, Secret)
+                    .join(ModelProvider, ModelProvider.id == Model.provider_id)
+                    .outerjoin(Secret, Secret.id == ModelProvider.secret_ref)
+                    .where(
+                        Model.id == model_id,
+                        Model.workspace_id == workspace_id,
+                        ModelProvider.workspace_id == workspace_id,
+                    )
+                )
+            ).one_or_none()
+            if row is None:
+                raise NotFound("Model not found.")
+            model, provider, secret = row
+            if not model.is_enabled or not provider.is_enabled:
+                raise ValidationFailed("The model or provider is disabled.")
+            if provider.secret_ref is not None and (
+                secret is None
+                or secret.workspace_id != workspace_id
+                or secret.purpose != PROVIDER_SECRET_PURPOSE
+            ):
+                raise ValidationFailed("The provider credential is unavailable.")
+            return InvocationSnapshot(
+                model=ModelRef(
+                    id=model.id,
+                    provider_id=provider.id,
+                    provider_family=provider.family,
+                    model_key=model.model_key,
+                    capability=model.capability,
+                    max_input_tokens=model.max_input_tokens,
+                    dimension=model.dimension,
+                    normalize=model.normalize,
+                ),
+                provider=_provider_runtime_projection(provider, secret),
+                workspace_id=workspace_id,
+                principal_id=principal_id,
+                request_id=request_id[:128],
+                input_price_per_1k=model.cost_per_1k_input,
+                output_price_per_1k=model.cost_per_1k_output,
+            )
 
     async def get_ref(self, model_id: UUID) -> ModelRef:
         """The facade other modules call. Never returns credentials."""

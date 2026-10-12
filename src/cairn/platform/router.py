@@ -23,6 +23,7 @@ from cairn.platform.settings import (
     WorkspaceSettings,
     get_settings_service,
 )
+from cairn.platform.usage import usage_summary
 
 __all__ = ["router"]
 
@@ -49,6 +50,19 @@ class SettingsResponse(BaseModel):
 
 def _query() -> AuditQuery:
     return AuditQuery()
+
+
+@router.get("/usage", responses=PROBLEM)
+async def get_usage(
+    actor: Annotated[Principal, Depends(require_permission("platform:settings"))],
+    model_id: str | None = None,
+    principal_id: str | None = None,
+) -> dict[str, Any]:
+    return await usage_summary(
+        actor.workspace_id,
+        model_id=decode_id("mdl", model_id) if model_id else None,
+        principal_id=decode_id("usr", principal_id) if principal_id else None,
+    )
 
 
 def _settings() -> SettingsService:

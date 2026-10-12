@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
@@ -83,14 +84,25 @@ class CreateModelRequest(BaseModel):
     provider_id: str
     model_key: str = Field(min_length=1, max_length=255)
     display_name: str = Field(min_length=1, max_length=255)
-    capability: Literal["embedding"] = "embedding"
+    capability: Literal["embedding", "chat", "rerank"] = "embedding"
     #: Omit to detect it from the provider with one probe request.
     dimension: int | None = Field(default=None, ge=1, le=65536)
-    max_input_tokens: int = Field(ge=1, le=32768)
+    max_input_tokens: int = Field(default=4096, ge=1, le=1_000_000)
     normalize: bool = True
     query_prefix: str | None = Field(default=None, max_length=1000)
     optimal_batch_size: int = Field(default=16, ge=1, le=1024)
-    tokenizer_id: str = Field(min_length=1, max_length=255)
+    tokenizer_id: str | None = Field(default=None, min_length=1, max_length=255)
+    cost_per_1k_input: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=6)
+    cost_per_1k_output: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=6)
+
+    @model_validator(mode="after")
+    def capability_fields(self) -> CreateModelRequest:
+        if self.capability == "embedding" and self.tokenizer_id is None:
+            raise ValueError("Embedding models require a tokenizer.")
+        if self.capability != "embedding" and (self.sparse or self.send_dimension):
+            raise ValueError("Sparse and dimension options only apply to embedding models.")
+        return self
+
     #: The model returns learned sparse vectors (bge-m3, DashScope v3/v4).
     sparse: bool = False
     #: Send ``dimension`` to the provider (DashScope v3/v4, OpenAI text-embedding-3).

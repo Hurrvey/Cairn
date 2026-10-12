@@ -30,10 +30,27 @@ __all__ = [
 PROVIDER_RUNTIME_TTL = 300
 
 ProviderFamily = Literal[
-    "tei", "infinity", "bge_m3", "dashscope", "volcengine", "openai_compatible"
+    "tei",
+    "infinity",
+    "bge_m3",
+    "dashscope",
+    "volcengine",
+    "openai_compatible",
+    "openai",
+    "anthropic",
+    "google",
+    "deepseek",
+    "ollama",
+    "vllm",
 ]
 #: Families with a runtime adapter, in the order the UI presents them.
 PROVIDER_FAMILIES: tuple[ProviderFamily, ...] = (
+    "openai",
+    "anthropic",
+    "google",
+    "deepseek",
+    "ollama",
+    "vllm",
     "tei",
     "infinity",
     "bge_m3",
@@ -44,9 +61,16 @@ PROVIDER_FAMILIES: tuple[ProviderFamily, ...] = (
 #: Families whose models can return learned sparse weights.
 SPARSE_FAMILIES: frozenset[str] = frozenset({"bge_m3", "dashscope"})
 #: Public vendor endpoints: an API key is mandatory and private addresses are never allowed.
-HOSTED_FAMILIES: frozenset[str] = frozenset({"dashscope", "volcengine"})
+HOSTED_FAMILIES: frozenset[str] = frozenset(
+    {"dashscope", "volcengine", "openai", "anthropic", "google", "deepseek"}
+)
 #: Where a family lives unless the administrator says otherwise.
 DEFAULT_BASE_URLS: dict[str, str] = {
+    "openai": "https://api.openai.com/v1",
+    "anthropic": "https://api.anthropic.com/v1",
+    "google": "https://generativelanguage.googleapis.com/v1beta",
+    "deepseek": "https://api.deepseek.com/v1",
+    "ollama": "http://localhost:11434",
     "bge_m3": "http://bge-m3:8000",
     "dashscope": "https://dashscope.aliyuncs.com/api/v1",
     "volcengine": "https://ark.cn-beijing.volces.com/api/v3",

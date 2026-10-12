@@ -8,18 +8,31 @@ from typing import Protocol
 from uuid import UUID
 
 from cairn.core.config import Settings, get_settings
-from cairn.core.errors import Conflict, ValidationFailed
+from cairn.core.errors import Conflict, PermissionDenied, ValidationFailed
 from cairn.core.logging import get_logger
 from cairn.core.modelref import ModelRef
 from cairn.core.provider_runtime import ProviderRuntimeProjection
 from cairn.core.tokenizer_config import configured_tokenizer_ids
 from cairn.modelgw.catalog import ModelCatalog, get_model_catalog
 from cairn.modelgw.dto import ModelView, ProviderView, RegisterModelSpec
+from cairn.modelgw.invocation import ChatRequest, InvocationSnapshot, RerankRequest
+from cairn.modelgw.runtime import GatewayRuntime
 from cairn.modelgw.schemas import (
     CreateModelRequest,
     CreateProviderRequest,
     ProviderCredentialsRequest,
 )
+
+
+class InvocationActor(Protocol):
+    @property
+    def type(self) -> str: ...
+    @property
+    def id(self) -> UUID: ...
+    @property
+    def workspace_id(self) -> UUID: ...
+    def can(self, permission: str, resource_id: UUID | None = None) -> bool: ...
+
 
 __all__ = ["ModelManagementService", "ModelProbe", "ModelTestResult", "ModelUsage"]
 
@@ -68,11 +81,27 @@ class ModelManagementService:
         usage: ModelUsage | None = None,
         probe: ModelProbe | None = None,
         settings: Settings | None = None,
+        gateway: GatewayRuntime | None = None,
     ) -> None:
         self._catalog = catalog or get_model_catalog()
         self._usage = usage
         self._probe = probe
         self._settings = settings or get_settings()
+        self.gateway = gateway or GatewayRuntime()
+
+    async def invocation(
+        self, actor: InvocationActor, model_id: UUID, capability: str, *, request_id: str
+    ) -> InvocationSnapshot:
+        if actor.type != "user" or not (
+            actor.can("platform:models") or actor.can("model:use", model_id)
+        ):
+            raise PermissionDenied("A user session with model access is required.")
+        snapshot: InvocationSnapshot = await self._catalog.invocation_snapshot(
+            actor.workspace_id, model_id, principal_id=actor.id, request_id=request_id
+        )
+        if snapshot.model.capability != capability:
+            raise ValidationFailed("The model capability does not match the requested operation.")
+        return snapshot
 
     async def create_provider(
         self, workspace_id: UUID, request: CreateProviderRequest
@@ -106,13 +135,13 @@ class ModelManagementService:
 
     async def create_model(self, workspace_id: UUID, request: CreateModelRequest) -> ModelView:
         tokenizers = configured_tokenizer_ids(self._settings.retrieval)
-        if request.tokenizer_id not in tokenizers:
+        if request.capability == "embedding" and request.tokenizer_id not in tokenizers:
             raise ValidationFailed("The selected tokenizer is not configured in this deployment.")
         from cairn.core.ids import decode_id
 
         provider_id = decode_id("prov", request.provider_id)
         dimension = request.dimension
-        if dimension is None:
+        if dimension is None and request.capability == "embedding":
             dimension = await self._detect_dimension(workspace_id, provider_id, request)
         model = await self._catalog.register_model(
             workspace_id,
@@ -129,6 +158,8 @@ class ModelManagementService:
                 tokenizer_id=request.tokenizer_id,
                 sparse=request.sparse,
                 send_dimension=request.send_dimension,
+                cost_per_1k_input=request.cost_per_1k_input,
+                cost_per_1k_output=request.cost_per_1k_output,
             ),
         )
         await self._publish_safely(model.provider_id)
@@ -172,6 +203,18 @@ class ModelManagementService:
     async def list_models(self, workspace_id: UUID) -> list[ModelView]:
         return await self._catalog.list_models(workspace_id)
 
+    async def usable_models(self, actor: InvocationActor) -> list[ModelView]:
+        if actor.type != "user":
+            raise PermissionDenied("Model testing requires a user session.")
+        models = await self._catalog.list_models(actor.workspace_id)
+        return [
+            model
+            for model in models
+            if model.is_enabled
+            and model.capability == "chat"
+            and (actor.can("platform:models") or actor.can("model:use", model.id))
+        ]
+
     async def delete_model(self, workspace_id: UUID, model_id: UUID) -> None:
         if self._usage is not None and await self._usage.model_is_referenced(
             workspace_id, model_id
@@ -180,6 +223,29 @@ class ModelManagementService:
         await self._catalog.delete_model(workspace_id, model_id)
 
     async def test_model(self, workspace_id: UUID, model_id: UUID) -> ModelTestResult:
+        snapshot = await self._catalog.invocation_snapshot(
+            workspace_id, model_id, principal_id=None, request_id="model-probe"
+        )
+        if snapshot.model.capability != "embedding":
+            try:
+                if snapshot.model.capability == "chat":
+                    response = await self.gateway.chat(
+                        snapshot,
+                        ChatRequest(
+                            messages=[{"role": "user", "content": "Reply with OK."}], max_tokens=16
+                        ),
+                    )
+                    tokens = (response.input_tokens or 0) + (response.output_tokens or 0)
+                else:
+                    await self.gateway.rerank(
+                        snapshot, RerankRequest(query="test", documents=["test document"])
+                    )
+                    tokens = 0
+                await self._catalog.set_model_health(workspace_id, model_id, healthy=True)
+                return ModelTestResult(healthy=True, dimensions=0, tokens=tokens)
+            except Exception:
+                await self._catalog.set_model_health(workspace_id, model_id, healthy=False)
+                raise
         runtime = await self._catalog.get_embedding_runtime(model_id, workspace_id=workspace_id)
         model = runtime.model
         if (

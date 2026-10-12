@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -81,3 +82,5 @@ class RegisterModelSpec:
     tokenizer_id: str | None = None
     sparse: bool = False
     send_dimension: bool = False
+    cost_per_1k_input: Decimal | None = None
+    cost_per_1k_output: Decimal | None = None

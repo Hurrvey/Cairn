@@ -3,19 +3,25 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
+    UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import INET, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PgUUID  # noqa: N811 — dialect type
@@ -24,7 +30,33 @@ from sqlalchemy.orm import Mapped, mapped_column
 from cairn.core.db import Base
 from cairn.core.ids import new_uuid
 
-__all__ = ["AuditLog", "Workspace"]
+__all__ = ["AuditLog", "QuotaAccount", "QuotaAllocation", "Workspace"]
+
+CAPACITY_PERIOD = "capacity"
+QUOTA_KINDS = ("knowledge_bases", "documents", "storage_bytes", "retrieval_rpm")
+QUOTA_ALLOCATION_KINDS = ("knowledge_bases", "documents", "storage_bytes")
+
+
+class UsageRecord(Base):
+    __tablename__ = "usage_record"
+    __table_args__ = (Index("ix_usage_workspace_at", "workspace_id", "at"),)
+
+    id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True)
+    workspace_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("workspace.id", ondelete="CASCADE"), nullable=False
+    )
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    model_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), nullable=False)
+    principal_id: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True))
+    knowledge_base_id: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True))
+    operation: Mapped[str] = mapped_column(String(16), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    input_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    output_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    cost: Mapped[Decimal | None] = mapped_column(Numeric(24, 12))
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    estimated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    event: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
 
 
 class Workspace(Base):
@@ -43,6 +75,117 @@ class Workspace(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
+
+
+class QuotaAccount(Base):
+    """Authoritative durable occupancy and configuration for one quota kind."""
+
+    __tablename__ = "quota_account"
+    __table_args__ = (
+        CheckConstraint(f"kind IN {QUOTA_KINDS}", name="kind"),
+        CheckConstraint(f"period = '{CAPACITY_PERIOD}'", name="period"),
+        CheckConstraint("used >= 0", name="used_nonnegative"),
+        CheckConstraint("reserved = 0", name="reserved_zero_first_slice"),
+        CheckConstraint('"limit" IS NULL OR "limit" >= 0', name="limit_nonnegative"),
+        CheckConstraint("unknown_count >= 0", name="unknown_count_nonnegative"),
+        CheckConstraint("version >= 1", name="version_positive"),
+    )
+
+    workspace_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True),
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    kind: Mapped[str] = mapped_column(String(32), primary_key=True)
+    period: Mapped[str] = mapped_column(
+        String(16), primary_key=True, default=CAPACITY_PERIOD, server_default=CAPACITY_PERIOD
+    )
+    used: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
+    reserved: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
+    limit: Mapped[int | None] = mapped_column("limit", BigInteger, nullable=True)
+    unknown_count: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default="0"
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class QuotaAllocation(Base):
+    """Idempotent resource charge retained as a tombstone after release."""
+
+    __tablename__ = "quota_allocation"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "kind",
+            "period",
+            "resource_kind",
+            "resource_id",
+            name="uq_quota_allocation_resource",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "kind", "period"],
+            ["quota_account.workspace_id", "quota_account.kind", "quota_account.period"],
+            name="fk_quota_allocation_account",
+        ),
+        CheckConstraint(f"kind IN {QUOTA_ALLOCATION_KINDS}", name="kind"),
+        CheckConstraint(f"period = '{CAPACITY_PERIOD}'", name="period"),
+        CheckConstraint("resource_kind IN ('knowledge_base','document')", name="resource_kind"),
+        CheckConstraint("state IN ('active','released')", name="state"),
+        CheckConstraint("revision >= 1", name="revision_positive"),
+        CheckConstraint(
+            "(is_unknown AND quantity IS NULL) OR "
+            "(NOT is_unknown AND quantity IS NOT NULL AND quantity >= 0)",
+            name="quantity_known_or_unknown",
+        ),
+        CheckConstraint(
+            "(state = 'active' AND released_at IS NULL) OR "
+            "(state = 'released' AND released_at IS NOT NULL)",
+            name="released_tombstone",
+        ),
+        CheckConstraint(
+            "(resource_kind = 'knowledge_base' AND knowledge_base_id = resource_id "
+            "AND kind = 'knowledge_bases' AND quantity = 1 AND NOT is_unknown) OR "
+            "(resource_kind = 'document' AND knowledge_base_id <> resource_id "
+            "AND ((kind = 'documents' AND quantity = 1 AND NOT is_unknown) "
+            "OR kind = 'storage_bytes'))",
+            name="resource_kind_matches_account",
+        ),
+        Index(
+            "ix_quota_allocation_kb_active",
+            "workspace_id",
+            "knowledge_base_id",
+            postgresql_where=text("state = 'active'"),
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True, default=new_uuid)
+    workspace_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    period: Mapped[str] = mapped_column(
+        String(16), nullable=False, default=CAPACITY_PERIOD, server_default=CAPACITY_PERIOD
+    )
+    resource_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    resource_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), nullable=False)
+    knowledge_base_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), nullable=False)
+    quantity: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    is_unknown: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class AuditLog(Base):

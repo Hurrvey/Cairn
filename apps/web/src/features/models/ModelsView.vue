@@ -31,6 +31,8 @@ import { useToasts } from "@/shared/composables/useToasts";
 import { describeError, isAbort } from "@/shared/errors";
 import { healthTone } from "@/shared/pipeline";
 import { FAMILIES, MODEL_PRESETS, type Family } from "@/features/models/families";
+import ChatConsole from "@/features/models/ChatConsole.vue";
+import UsagePanel from "@/features/models/UsagePanel.vue";
 
 const { t } = useI18n();
 const toasts = useToasts();
@@ -44,6 +46,8 @@ const controller = new AbortController();
 
 const providerOpen = ref(false);
 const modelOpen = ref(false);
+const chatOpen = ref(false);
+const chatModel = ref<Model | null>(null);
 const keyOpen = ref(false);
 const submitting = ref(false);
 const formError = ref<string | null>(null);
@@ -61,6 +65,9 @@ const providerForm = reactive({
   max_batch_size: FAMILIES.tei.batch,
 });
 const modelForm = reactive({
+  capability: "embedding" as "embedding" | "chat" | "rerank",
+  cost_per_1k_input: "",
+  cost_per_1k_output: "",
   provider_id: "",
   preset: "",
   model_key: "sentence-transformers/all-MiniLM-L6-v2",
@@ -229,15 +236,17 @@ async function saveModel(): Promise<void> {
       provider_id: modelForm.provider_id,
       model_key: modelForm.model_key.trim(),
       display_name: modelForm.display_name.trim(),
-      capability: "embedding",
-      dimension: dimension ? Number(dimension) : null,
+      capability: modelForm.capability,
+      dimension: modelForm.capability === "embedding" && dimension ? Number(dimension) : null,
       max_input_tokens: Number(modelForm.max_input_tokens),
       optimal_batch_size: Number(modelForm.optimal_batch_size),
-      tokenizer_id: modelForm.tokenizer_id,
+      tokenizer_id: modelForm.capability === "embedding" ? modelForm.tokenizer_id : null,
+      cost_per_1k_input: modelForm.cost_per_1k_input || null,
+      cost_per_1k_output: modelForm.cost_per_1k_output || null,
       normalize: modelForm.normalize,
       query_prefix: modelForm.query_prefix.trim() ? modelForm.query_prefix : null,
-      sparse: familyCanSparse.value && modelForm.sparse,
-      send_dimension: familySendsDimension.value && modelForm.send_dimension && !!dimension,
+      sparse: modelForm.capability === "embedding" && familyCanSparse.value && modelForm.sparse,
+      send_dimension: modelForm.capability === "embedding" && familySendsDimension.value && modelForm.send_dimension && !!dimension,
     });
     modelOpen.value = false;
     toasts.success(t("models.model.created"));
@@ -256,6 +265,7 @@ async function test(model: Model): Promise<void> {
     const result: ModelTestResponse = await modelApi.test(model.id);
     const text = !result.healthy
       ? t("models.model.testFailed")
+      : model.capability !== "embedding" ? t("models.model.testOkChat")
       : result.sparse_terms != null
         ? t("models.model.testOkSparse", { dims: result.dimensions, tokens: result.tokens, terms: result.sparse_terms })
         : t("models.model.testOk", { dims: result.dimensions, tokens: result.tokens });
@@ -371,12 +381,13 @@ onBeforeUnmount(() => controller.abort());
             </p>
             <p class="truncate font-mono text-[12px] text-ink-3">{{ model.model_key }}</p>
             <p class="tnum mt-0.5 text-[12px] text-ink-2">
-              {{ providerName.get(model.provider_id) ?? model.provider_id }} · {{ model.dimension }}d · {{ t("models.model.tokenLimit", { n: model.max_input_tokens }) }} · {{ model.tokenizer_id }}
+              {{ providerName.get(model.provider_id) ?? model.provider_id }} · {{ model.capability }} <template v-if="model.capability === 'embedding'">· {{ model.dimension }}d · {{ model.tokenizer_id }}</template>
             </p>
             <p v-if="testResults[model.id]" :class="['mt-1 text-[12px]', testResults[model.id]!.ok ? 'text-ok' : 'text-bad']" data-test="model-test-result">
               {{ testResults[model.id]!.text }}
             </p>
           </div>
+          <Button v-if="model.capability === 'chat'" size="sm" variant="secondary" data-test="open-chat" @click="chatModel = model; chatOpen = true">{{ t("models.chat.open") }}</Button>
           <Button size="sm" variant="secondary" :loading="testing === model.id" data-test="test-model" @click="test(model)">{{ t("models.model.test") }}</Button>
           <DropdownMenu>
             <template #trigger>
@@ -387,6 +398,9 @@ onBeforeUnmount(() => controller.abort());
         </li>
       </ul>
     </Section>
+
+    <UsagePanel />
+    <ChatConsole v-model:open="chatOpen" :model="chatModel" />
 
     <Sheet v-model:open="providerOpen" :title="t('models.provider.add')" :description="t('models.provider.addHint')" test-id="provider-sheet">
       <form class="grid gap-3" autocomplete="off" @submit.prevent="saveProvider">
@@ -447,12 +461,15 @@ onBeforeUnmount(() => controller.abort());
       <form class="grid gap-3" @submit.prevent="saveModel">
         <Notice v-if="formError" tone="bad">{{ formError }}</Notice>
         <div class="grid gap-3 sm:grid-cols-2">
+          <Field :label="t('models.model.capability')" required v-slot="{ id }">
+            <NativeSelect :id="id" v-model="modelForm.capability" data-test="model-capability"><option value="embedding">{{ t('models.capabilities.embedding') }}</option><option value="chat">{{ t('models.capabilities.chat') }}</option><option value="rerank">{{ t('models.capabilities.rerank') }}</option></NativeSelect>
+          </Field>
           <Field :label="t('models.provider.one')" required v-slot="{ id }">
             <NativeSelect :id="id" v-model="modelForm.provider_id" data-test="model-provider">
               <option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.name }}</option>
             </NativeSelect>
           </Field>
-          <Field :label="t('models.model.preset')" :hint="t('models.model.presetHint')" v-slot="{ id }">
+          <Field v-if="modelForm.capability === 'embedding'" :label="t('models.model.preset')" :hint="t('models.model.presetHint')" v-slot="{ id }">
             <NativeSelect :id="id" :model-value="modelForm.preset" data-test="model-preset" :disabled="!presets.length" @update:model-value="applyPreset(String($event))">
               <option v-if="!presets.length" value="">{{ t("models.model.presetNone") }}</option>
               <option v-for="preset in presets" :key="preset.id" :value="preset.id">{{ preset.label }}</option>
@@ -466,33 +483,37 @@ onBeforeUnmount(() => controller.abort());
           <Field :label="t('models.model.key')" required :hint="selectedFamily === 'volcengine' ? t('models.model.keyHintArk') : undefined" :error="fieldErrors.model_key" v-slot="{ id }">
             <Input :id="id" v-model="modelForm.model_key" data-test="model-key" />
           </Field>
-          <Field :label="t('models.model.dimension')" :hint="t('models.model.dimensionHint')" :error="fieldErrors.dimension" v-slot="{ id }">
+          <Field v-if="modelForm.capability === 'embedding'" :label="t('models.model.dimension')" :hint="t('models.model.dimensionHint')" :error="fieldErrors.dimension" v-slot="{ id }">
             <Input :id="id" v-model="modelForm.dimension" type="number" min="1" max="65536" :placeholder="t('models.model.dimensionAuto')" data-test="model-dimension" />
           </Field>
           <Field :label="t('models.model.maxTokens')" required :error="fieldErrors.max_input_tokens" v-slot="{ id }">
             <Input :id="id" v-model="modelForm.max_input_tokens" type="number" min="1" max="32768" />
           </Field>
-          <Field :label="t('models.model.tokenizer')" required :hint="t('models.model.tokenizerHint')" v-slot="{ id }">
+          <Field v-if="modelForm.capability === 'embedding'" :label="t('models.model.tokenizer')" required :hint="t('models.model.tokenizerHint')" v-slot="{ id }">
             <NativeSelect v-if="tokenizers.length" :id="id" v-model="modelForm.tokenizer_id">
               <option v-for="tokenizer in tokenizers" :key="tokenizer" :value="tokenizer">{{ tokenizer }}</option>
             </NativeSelect>
             <Input v-else :id="id" v-model="modelForm.tokenizer_id" />
           </Field>
-          <Field :label="t('models.model.batchSize')" v-slot="{ id }">
+          <Field v-if="modelForm.capability === 'embedding'" :label="t('models.model.batchSize')" v-slot="{ id }">
             <Input :id="id" v-model="modelForm.optimal_batch_size" type="number" min="1" max="1024" />
           </Field>
         </div>
-        <Field :label="t('models.model.queryPrefix')" :hint="t('models.model.queryPrefixHint')" v-slot="{ id }">
+        <Field v-if="modelForm.capability === 'embedding'" :label="t('models.model.queryPrefix')" :hint="t('models.model.queryPrefixHint')" v-slot="{ id }">
           <Input :id="id" v-model="modelForm.query_prefix" maxlength="1000" />
         </Field>
-        <Checkbox v-model="modelForm.normalize">{{ t("models.model.normalize") }}</Checkbox>
-        <Checkbox v-if="familyCanSparse" v-model="modelForm.sparse" data-test="model-sparse-toggle">{{ t("models.model.sparse") }}</Checkbox>
-        <Checkbox v-if="familySendsDimension" v-model="modelForm.send_dimension">{{ t("models.model.sendDimension") }}</Checkbox>
+        <Checkbox v-if="modelForm.capability === 'embedding'" v-model="modelForm.normalize">{{ t("models.model.normalize") }}</Checkbox>
+        <div class="grid grid-cols-2 gap-3">
+          <Field :label="t('models.model.inputPrice')" v-slot="{ id }"><Input :id="id" v-model="modelForm.cost_per_1k_input" type="number" min="0" step="0.000001" /></Field>
+          <Field :label="t('models.model.outputPrice')" v-slot="{ id }"><Input :id="id" v-model="modelForm.cost_per_1k_output" type="number" min="0" step="0.000001" /></Field>
+        </div>
+        <Checkbox v-if="modelForm.capability === 'embedding' && familyCanSparse" v-model="modelForm.sparse" data-test="model-sparse-toggle">{{ t("models.model.sparse") }}</Checkbox>
+        <Checkbox v-if="modelForm.capability === 'embedding' && familySendsDimension" v-model="modelForm.send_dimension">{{ t("models.model.sendDimension") }}</Checkbox>
         <button type="submit" class="hidden" aria-hidden="true" tabindex="-1" />
       </form>
       <template #footer>
         <Button variant="ghost" @click="modelOpen = false">{{ t("common.cancel") }}</Button>
-        <Button variant="primary" :loading="submitting" :disabled="!modelForm.provider_id || !modelForm.tokenizer_id || !modelForm.model_key.trim()" data-test="model-submit" @click="saveModel">{{ t("models.model.register") }}</Button>
+        <Button variant="primary" :loading="submitting" :disabled="!modelForm.provider_id || (modelForm.capability === 'embedding' && !modelForm.tokenizer_id) || !modelForm.model_key.trim()" data-test="model-submit" @click="saveModel">{{ t("models.model.register") }}</Button>
       </template>
     </Sheet>
   </div>

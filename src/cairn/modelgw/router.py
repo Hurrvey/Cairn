@@ -2,13 +2,23 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request, Response, status
+from fastapi.responses import StreamingResponse
 
-from cairn.authz.deps import require_permission
+from cairn.authz.deps import current_principal, require_permission
 from cairn.authz.model import Principal
-from cairn.core.ids import decode_id
+from cairn.core.errors import CairnError
+from cairn.core.ids import decode_id, new_public_id
+from cairn.modelgw.invocation import (
+    ChatChunk,
+    ChatRequest,
+    ChatResponse,
+    RerankRequest,
+    RerankResponse,
+)
 from cairn.modelgw.schemas import (
     CreateModelRequest,
     CreateProviderRequest,
@@ -103,6 +113,14 @@ async def create_model(
     return ModelResponse.from_dto(await service.create_model(actor.workspace_id, body))
 
 
+@router.get("/models/usable", response_model=list[ModelResponse], responses=PROBLEM)
+async def usable_models(
+    actor: Annotated[Principal, Depends(current_principal)],
+    service: Annotated[ModelManagementService, Depends(_service)],
+) -> list[ModelResponse]:
+    return [ModelResponse.from_dto(model) for model in await service.usable_models(actor)]
+
+
 @router.get("/models", response_model=list[ModelResponse], responses=PROBLEM)
 async def list_models(
     actor: Annotated[Principal, Depends(require_permission("platform:models"))],
@@ -134,3 +152,55 @@ async def test_model(
         tokens=result.tokens,
         sparse_terms=result.sparse_terms,
     )
+
+
+@router.post("/models/{model_id}/chat", responses=PROBLEM, response_model=None)
+async def chat_model(
+    model_id: str,
+    body: ChatRequest,
+    request: Request,
+    actor: Annotated[Principal, Depends(current_principal)],
+    service: Annotated[ModelManagementService, Depends(_service)],
+) -> ChatResponse | StreamingResponse:
+    snapshot = await service.invocation(
+        actor,
+        decode_id("mdl", model_id),
+        "chat",
+        request_id=str(getattr(request.state, "request_id", None) or new_public_id("req")),
+    )
+    if not body.stream:
+        return await service.gateway.chat(snapshot, body)
+
+    async def events() -> AsyncIterator[str]:
+        source = service.gateway.stream(snapshot, body)
+        try:
+            async for event in source:
+                yield f"event: {event.type}\ndata: {event.model_dump_json()}\n\n"
+        except CairnError as exc:
+            event = ChatChunk(type="error", code=exc.code)
+            yield f"event: error\ndata: {event.model_dump_json()}\n\n"
+        finally:
+            await source.aclose()
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/models/{model_id}/rerank", response_model=RerankResponse, responses=PROBLEM)
+async def rerank_model(
+    model_id: str,
+    body: RerankRequest,
+    request: Request,
+    actor: Annotated[Principal, Depends(current_principal)],
+    service: Annotated[ModelManagementService, Depends(_service)],
+) -> RerankResponse:
+    snapshot = await service.invocation(
+        actor,
+        decode_id("mdl", model_id),
+        "rerank",
+        request_id=str(getattr(request.state, "request_id", None) or new_public_id("req")),
+    )
+    return await service.gateway.rerank(snapshot, body)
