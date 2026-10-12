@@ -41,6 +41,24 @@ x-worker: &worker
     disable: true
 
 services:
+  minio:
+    profiles: [s3]
+    build:
+      context: .
+      dockerfile: deploy/minio/Dockerfile
+    image: cairn-minio:2025-04-22
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-cairn-admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-}
+    volumes: ["miniodata:/data"]
+    ports: ["127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   postgres:
     image: postgres:16-bookworm
     restart: unless-stopped
@@ -98,8 +116,11 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
 
-  # Learned sparse vectors (and dense bge-m3 embeddings) for keyword search.
+  # Optional, started on demand: learned sparse vectors (and dense bge-m3 embeddings) for
+  # keyword search. Not needed for BM25. About 3 GB of memory while running.
   # Prepare weights first: uv run python scripts/prepare_embedding_model.py --model bge-m3
+  # Start: docker compose --profile local-model --profile bge-m3 up -d --build bge-m3
+  # Stop:  docker compose stop bge-m3   (see docs/06-ops/08-embedding-providers.md)
   bge-m3:
     build:
       context: .
@@ -178,12 +199,47 @@ services:
       CAIRN_ROLE: worker
       CAIRN_TASKS__QUEUE: maintain
 
+  # PDF parsing runs Docling (the product default). The parse worker layers the pinned
+  # Docling CPU environment on cairn:local; build the model base image first:
+  #   docker build -f deploy/pdf-worker/Dockerfile -t cairn-pdf-worker:2.135.0 .
+  # Prepare the model assets and manifest once (docs/06-ops/11-pdf-parsing.md), then set
+  # CAIRN_PDF_MODELS_DIR and CAIRN_PDF_MANIFEST in .env. The Docling child is limited to
+  # 4 GiB; the container limit leaves room for the worker process itself.
   worker-parse:
     <<: *worker
+    build:
+      context: .
+      dockerfile: deploy/pdf-worker/Dockerfile.parse
+    image: cairn-pdf-parse:local
+    mem_limit: 6g
+    cpus: 2
     environment:
       <<: *app-environment
       CAIRN_ROLE: worker
       CAIRN_TASKS__QUEUE: parse
+      CAIRN_TASKS__CONCURRENCY: 1
+      CAIRN_INGESTION__PDF_ENGINE: ${CAIRN_PDF_ENGINE:-docling}
+      CAIRN_INGESTION__DOCLING_PYTHON: /usr/local/bin/python
+      CAIRN_INGESTION__DOCLING_ASSETS_PATH: /pdf-models
+      CAIRN_INGESTION__DOCLING_MANIFEST_PATH: /pdf-manifest.json
+      CAIRN_INGESTION__DOCLING_MEMORY_BYTES: 4294967296
+      CAIRN_INGESTION__DOCLING_TIMEOUT_S: 600
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    volumes:
+      - objects:/var/lib/cairn/objects
+      - type: bind
+        source: ${CAIRN_MODELS_ROOT:-./data/models}
+        target: /models
+        read_only: true
+      - type: bind
+        source: ${CAIRN_PDF_MODELS_DIR:?prepare the Docling model assets and set CAIRN_PDF_MODELS_DIR in .env}
+        target: /pdf-models
+        read_only: true
+      - type: bind
+        source: ${CAIRN_PDF_MANIFEST:?prepare the Docling manifest and set CAIRN_PDF_MANIFEST in .env}
+        target: /pdf-manifest.json
+        read_only: true
 
   worker-chunk:
     <<: *worker
@@ -225,6 +281,7 @@ services:
       retries: 10
 
 volumes:
+  miniodata:
   pgdata:
   qdrantdata:
   redisdata:

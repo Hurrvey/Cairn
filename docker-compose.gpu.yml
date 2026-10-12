@@ -1,6 +1,6 @@
 # NVIDIA GPU for the bge-m3 sidecar (fp16, CUDA torch):
 #
-#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile bge-m3 up -d --build
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile bge-m3 up -d --build bge-m3
 #
 # Needs the NVIDIA container runtime (Docker Desktop with WSL 2 on Windows, or
 # nvidia-container-toolkit on Linux). The CUDA image is several gigabytes.

@@ -111,6 +111,7 @@ jobs:
       - name: pytest with service-backed contracts and combined coverage
         env:
           CAIRN_TEST_USE_EXTERNAL_SERVICES: "1"
+          CAIRN_TEST_QDRANT_CLEANUP: "1"
         run: uv run pytest tests -v --cov --cov-report=xml
 
       # NFR-M-03: coverage is a floor. A decrease fails the build.

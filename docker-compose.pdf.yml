@@ -1,0 +1,4 @@
+# Superseded. The Docling parse worker is now the default worker-parse service in
+# docker-compose.yml (see docs/06-ops/11-pdf-parsing.md). This overlay is kept only
+# so existing commands that pass "-f docker-compose.pdf.yml" keep working; it adds nothing.
+services: {}

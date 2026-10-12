@@ -165,3 +165,21 @@ forbidden_modules =
     cairn.platform.models
     cairn.tasks.models
 allow_indirect_imports = True
+
+[importlinter:contract:model_runtime_is_pure]
+name = Model invocation runtime does not import management or persistence
+type = forbidden
+source_modules =
+    cairn.modelgw.runtime
+    cairn.modelgw.invocation
+    cairn.modelgw.chat_protocols
+forbidden_modules =
+    cairn.modelgw.catalog
+    cairn.modelgw.service
+    cairn.modelgw.models
+    cairn.catalog
+    cairn.identity
+    cairn.platform
+    cairn.core.db
+    sqlalchemy
+    asyncpg
