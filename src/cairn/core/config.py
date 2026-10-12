@@ -138,6 +138,11 @@ class RetrievalSettings(BaseModel):
     runtime_timeout_s: float = Field(default=0.25, gt=0, le=5)
     search_timeout_s: float = Field(default=2, gt=0, le=10)
     rerank_endpoints: dict[str, RerankEndpointSettings] = Field(default_factory=dict)
+    #: Explain mode is diagnostic and costs more; it has its own per-key budget.
+    explain_rpm: int = Field(default=30, ge=1, le=10_000)
+    #: Latency objective the load shedder protects (NFR-P-01: p95 < 150 ms hybrid,
+    #: no rerank). ``0`` turns shedding off.
+    slo_p95_ms: float = Field(default=150, ge=0, le=60_000)
 
 
 class MCPSettings(BaseModel):

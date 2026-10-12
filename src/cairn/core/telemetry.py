@@ -100,6 +100,28 @@ task_running = Gauge(
     registry=REGISTRY,
 )
 
+retrieval_stage_seconds = Histogram(
+    "cairn_retrieval_stage_seconds",
+    "Retrieval latency by stage (embed, search, rerank, assemble, total).",
+    labelnames=("stage",),
+    buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.15, 0.25, 0.4, 0.75, 1.5, 3, 5),
+    registry=REGISTRY,
+)
+
+retrieval_load_shed_total = Counter(
+    "cairn_retrieval_load_shed_total",
+    "Queries degraded by load shedding, by what was shed.",
+    labelnames=("level",),
+    registry=REGISTRY,
+)
+
+dify_degraded_total = Counter(
+    "cairn_dify_degraded_total",
+    "Dify requests returning an explicit degraded stage.",
+    labelnames=("stage", "reason"),
+    registry=REGISTRY,
+)
+
 task_duration_seconds = Histogram(
     "cairn_task_duration_seconds",
     "Task execution duration.",

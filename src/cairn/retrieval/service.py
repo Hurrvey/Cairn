@@ -6,19 +6,39 @@ import asyncio
 import math
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass
-from typing import Protocol
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Any, Protocol
 from uuid import UUID
 
 from cairn.authz.model import Principal
 from cairn.core.config import get_settings
-from cairn.core.errors import InvalidId, PermissionDenied, UpstreamUnavailable, ValidationFailed
+from cairn.core.document_metadata import READ_MODEL_SCHEMA
+from cairn.core.errors import (
+    CairnError,
+    InvalidId,
+    PermissionDenied,
+    UpstreamUnavailable,
+    ValidationFailed,
+)
 from cairn.core.ids import InvalidIdError, decode_id, encode_id
+from cairn.core.logging import get_logger
 from cairn.core.modelref import ModelRef
-from cairn.core.retrieval_runtime import BindingRefModel, KnowledgeBaseRuntime
-from cairn.embedding.sparse import encode_query
+from cairn.core.retrieval_runtime import (
+    BindingRefModel,
+    FusionSpec,
+    KnowledgeBaseRuntime,
+    MmrSpec,
+)
+from cairn.core.telemetry import retrieval_load_shed_total, retrieval_stage_seconds
+from cairn.embedding.sparse import encode_query, tokenize
+from cairn.retrieval.diversify import mmr_order, mmr_pool_size
 from cairn.retrieval.dto import (
+    BatchRequest,
+    BatchResponse,
+    BatchUsage,
     DegradationNotice,
+    ExplainOutput,
     RetrievalHit,
     RetrievalRequest,
     RetrievalResponse,
@@ -27,15 +47,44 @@ from cairn.retrieval.dto import (
     UsageInfo,
 )
 from cairn.retrieval.errors import (
+    FilterRequiresRebuild,
     KbRuntimeCorrupt,
+    KbRuntimeNotPublished,
     RetrievalReadModelInvalid,
     RetrievalUnsupported,
 )
+from cairn.retrieval.explain import RANK_CHANGES as RANK_CHANGE_ENTRIES
+from cairn.retrieval.explain import ExplainRecorder
 from cairn.retrieval.fusion import FusedHit, rrf_fuse, weighted_fuse
+from cairn.retrieval.highlight import highlight_spans, query_terms
+from cairn.retrieval.load import LoadMonitor
 from cairn.retrieval.rerank import RerankUnavailable, RuntimeReranker
 from cairn.retrieval.runtime import KnowledgeBaseRuntimeLoader
 from cairn.vectorstore.base import Hit, Namespace, SparseVector, VectorQuery
+from cairn.vectorstore.errors import DimensionMismatch, NamespaceNotFound
+from cairn.vectorstore.filters import (
+    And,
+    Compare,
+    FilterNode,
+    check_filter_bounds,
+    check_portable,
+    parse_filter,
+    with_prefix,
+)
 from cairn.vectorstore.registry import VectorBindingRef, VectorStoreRegistry, get_vector_registry
+
+#: Encodings shared by the queries of one batch: (workspace, model, text, dense,
+#: sparse) -> the running encode.
+EncodeMemo = dict[tuple[object, ...], "asyncio.Future[Any]"]
+
+log = get_logger(__name__)
+
+MAX_FILTER_DOCUMENTS = 1000
+#: Candidate pool per search while shedding load (M09 §4.10).
+_SHED_CANDIDATE_K = 50
+_BATCH_CONCURRENCY = 4
+#: Point payload fields that describe the document (read model v2).
+_DOCUMENT_KEYS = ("meta", "created_at", "doc_title", "doc_type", "doc_updated_at")
 
 
 @dataclass(slots=True)
@@ -50,6 +99,25 @@ class _Encodings:
     cached: bool | None
     failed: list[UUID]
     notices: list[DegradationNotice]
+
+
+@dataclass(slots=True)
+class PreparedQuery:
+    """A request whose targets are authorized, loaded and fully planned."""
+
+    request: RetrievalRequest
+    target_count: int
+    active: list[tuple[KnowledgeBaseRuntime, float]]
+    failures: list[TargetFailure]
+    degraded: list[DegradationNotice]
+    filter: FilterNode | None
+    dedupe: str
+    mmr: MmrSpec | None
+    rerank: _RerankPlan | None
+    top_k: int
+    started: float = field(default_factory=time.perf_counter)
+    #: Upper bound on candidates per search while shedding load.
+    candidate_cap: int | None = None
 
 
 _MAX_PARENT_SNAPSHOT_CHARACTERS = 1_000_000
@@ -104,6 +172,8 @@ class RetrievalService:
         reranker: Reranker | None = None,
         search_timeout_s: float = 2.0,
         request_timeout_s: float = 5.0,
+        slo_p95_ms: float | None = None,
+        load_monitor: LoadMonitor | None = None,
     ) -> None:
         self._runtime_loader = runtime_loader or KnowledgeBaseRuntimeLoader()
         self._vectors = vectors or get_vector_registry()
@@ -111,19 +181,50 @@ class RetrievalService:
         self._reranker = reranker
         self._search_timeout_s = search_timeout_s
         self._request_timeout_s = request_timeout_s
+        #: ``None`` disables load shedding (M09 §4.10).
+        self._slo_p95_ms = slo_p95_ms
+        self.load = load_monitor or LoadMonitor()
 
     async def query(
         self, principal: Principal, request: RetrievalRequest, *, request_id: str
     ) -> RetrievalResponse:
         try:
             async with asyncio.timeout(self._request_timeout_s):
-                return await self._query(principal, request, request_id=request_id)
+                prepared = await self.prepare(principal, request)
+                return await self.execute(prepared, request_id=request_id)
+        except TimeoutError as exc:
+            # A timeout is the strongest overload signal there is.
+            self.load.record(self._request_timeout_s * 1000)
+            raise UpstreamUnavailable("The retrieval request exceeded its time limit.") from exc
+
+    async def query_external(
+        self,
+        principal: Principal,
+        request: RetrievalRequest,
+        *,
+        request_id: str,
+    ) -> RetrievalResponse:
+        """Dify's single-target scores, using the same authorized ACTIVE snapshot."""
+        try:
+            async with asyncio.timeout(self._request_timeout_s):
+                prepared = await self.prepare(principal, request, preserve_missing=True)
+                return await self.execute(prepared, request_id=request_id, external_scores=True)
         except TimeoutError as exc:
             raise UpstreamUnavailable("The retrieval request exceeded its time limit.") from exc
 
-    async def _query(
-        self, principal: Principal, request: RetrievalRequest, *, request_id: str
-    ) -> RetrievalResponse:
+    async def prepare(
+        self,
+        principal: Principal,
+        request: RetrievalRequest,
+        *,
+        preserve_missing: bool = False,
+    ) -> PreparedQuery:
+        """Authorize, load ACTIVE runtimes and resolve every option.
+
+        Everything that makes the request itself invalid (400/403) is raised
+        here, before any encoding or search, which is what lets a batch reject a
+        malformed query without having run the others.
+        """
         started = time.perf_counter()
         targets = self._authorize_targets(principal, request)
         runtime_outcomes = await asyncio.gather(
@@ -136,6 +237,8 @@ class RetrievalService:
         active: list[tuple[KnowledgeBaseRuntime, float]] = []
         failures: list[TargetFailure] = []
         for (kb_id, weight), outcome in zip(targets, runtime_outcomes, strict=True):
+            if preserve_missing and isinstance(outcome, KbRuntimeNotPublished):
+                raise outcome
             if isinstance(outcome, (PermissionDenied, KbRuntimeCorrupt)):
                 raise outcome
             if isinstance(outcome, BaseException):
@@ -149,17 +252,100 @@ class RetrievalService:
 
         runtimes = [runtime for runtime, _weight in active]
         degraded = self._validate_supported(request, runtimes)
+        search_filter = self._build_filter(request, runtimes)
+        dedupe, mmr = self._post_stages(request, runtimes)
         rerank_plan = self._resolve_rerank(request, runtimes, degraded)
-        encodings = await self._query_encodings(request, runtimes)
-        embedding_tokens = encodings.tokens
-        cached_embedding = encodings.cached
-        embedding_failures = encodings.failed
+        self._check_query_vector(request, runtimes)
+        if request.query is None and any(
+            self._mode(request, runtime) == "fulltext" for runtime in runtimes
+        ):
+            raise ValidationFailed("Full-text retrieval requires query text.")
+        rerank_plan, candidate_cap = self._shed_load(rerank_plan, degraded)
+        top_k = request.top_k or min(runtime.retrieval_config.top_k for runtime in runtimes)
+        return PreparedQuery(
+            request=request,
+            target_count=len(targets),
+            active=active,
+            failures=failures,
+            degraded=degraded,
+            filter=search_filter,
+            dedupe=dedupe,
+            mmr=mmr,
+            rerank=rerank_plan,
+            top_k=top_k,
+            started=started,
+            candidate_cap=candidate_cap,
+        )
+
+    def _shed_load(
+        self, rerank: _RerankPlan | None, degraded: list[DegradationNotice]
+    ) -> tuple[_RerankPlan | None, int | None]:
+        """Trade quality for latency when this process is falling behind (M09 §4.10)."""
+        p95 = self.load.p95()
+        if self._slo_p95_ms is None or p95 is None:
+            return rerank, None
+        cap: int | None = None
+        shed_rerank = False
+        if p95 > self._slo_p95_ms * 0.8 and rerank is not None:
+            shed_rerank = True
+            rerank = None
+            degraded.append(
+                DegradationNotice(
+                    stage="rerank",
+                    reason="load_shed",
+                    detail="Reranking was skipped because the service is under load; "
+                    "fused ranking is returned.",
+                )
+            )
+        if p95 > self._slo_p95_ms * 1.5:
+            cap = _SHED_CANDIDATE_K
+            degraded.append(
+                DegradationNotice(
+                    stage="search",
+                    reason="load_shed",
+                    detail=f"The candidate pool was limited to {_SHED_CANDIDATE_K} per search "
+                    "because the service is under load.",
+                )
+            )
+        if shed_rerank or cap is not None:
+            retrieval_load_shed_total.labels(
+                level="candidates" if cap is not None else "rerank"
+            ).inc()
+        return rerank, cap
+
+    async def execute(
+        self,
+        prepared: PreparedQuery,
+        *,
+        request_id: str,
+        encode_memo: EncodeMemo | None = None,
+        external_scores: bool = False,
+    ) -> RetrievalResponse:
+        request = prepared.request
+        active = list(prepared.active)
+        failures = list(prepared.failures)
+        degraded = list(prepared.degraded)
+        runtimes = [runtime for runtime, _weight in active]
+        explain = ExplainRecorder(request.options.explain)
+        latency: dict[str, int] = {}
+        explain.plan = self._explain_plan(prepared)
+
+        stage_started = time.perf_counter()
+        encodings = await self._query_encodings(request, runtimes, encode_memo)
+        latency["embed"] = _ms(stage_started)
+        explain.stage(
+            "embed",
+            latency["embed"],
+            cache_hit=encodings.cached,
+            tokens=encodings.tokens,
+            dims=sorted({runtime.embedding_model.dimension or 0 for runtime in runtimes}),
+        )
         degraded.extend(encodings.notices)
-        if embedding_failures:
-            failed_ids = set(embedding_failures)
+        if encodings.failed:
+            failed_ids = set(encodings.failed)
             failures.extend(
                 self._target_failure(kb_id, "EMBEDDING_PROVIDER_UNAVAILABLE")
-                for kb_id in embedding_failures
+                for kb_id in encodings.failed
             )
             active = [
                 (runtime, weight) for runtime, weight in active if runtime.id not in failed_ids
@@ -169,6 +355,8 @@ class RetrievalService:
             if not active:
                 raise UpstreamUnavailable("Retrieval failed for every knowledge base.")
 
+        stage_started = time.perf_counter()
+        explain_terms = set(tokenize(request.query)) if request.query and explain.enabled else None
         tasks = [
             self._search_target(
                 runtime,
@@ -177,6 +365,11 @@ class RetrievalService:
                 encodings.dense.get(runtime.id),
                 encodings.sparse.get(runtime.id),
                 sparse_stage=runtime.id in encodings.sparse,
+                search_filter=prepared.filter,
+                candidate_cap=prepared.candidate_cap,
+                explain=explain,
+                # Learned sparse weights have no readable terms to report.
+                explain_terms=explain_terms if runtime.sparse.model is None else None,
             )
             for runtime, weight in active
         ]
@@ -184,53 +377,311 @@ class RetrievalService:
         fused: list[FusedHit] = []
         for (runtime, _weight), outcome in zip(active, outcomes, strict=True):
             if isinstance(outcome, BaseException):
+                # Never the query text: only which target failed and how.
+                log.warning(
+                    "retrieval.target_search_failed",
+                    kb_id=str(runtime.id),
+                    error=type(outcome).__name__,
+                )
                 failures.append(self._target_failure(runtime.id, "STORAGE_BINDING_UNAVAILABLE"))
             else:
                 fused.extend(outcome)
+        latency["search"] = _ms(stage_started)
 
         if failures and request.strict:
             raise UpstreamUnavailable("Retrieval failed for one or more knowledge bases.")
-        if not fused and len(failures) == len(targets):
+        if not fused and len(failures) == prepared.target_count:
             raise UpstreamUnavailable("Retrieval failed for every knowledge base.")
 
         fused.sort(key=lambda item: (-item.score, item.kb_id.int, item.hit.id.int))
+        stage_started = time.perf_counter()
         threshold = request.score_threshold
         if threshold is not None:
+            before = len(fused)
             fused = [item for item in fused if item.score >= threshold]
+            explain.stage("filter", _ms(stage_started), removed_by_threshold=before - len(fused))
         rerank_units = 0
-        rerank_top_n: int | None = None
-        if rerank_plan is not None:
+        top_k = prepared.top_k
+        reranked = False
+        if prepared.rerank is not None:
+            stage_started = time.perf_counter()
+            before_ids = [encode_id("chk", item.hit.id) for item in fused]
             fused, rerank_units, rerank_top_n = await self._rerank_fused(
                 fused,
                 request,
                 runtimes[0].workspace_id,
-                rerank_plan,
+                prepared.rerank,
                 degraded,
             )
-        top_k = request.top_k or min(runtime.retrieval_config.top_k for runtime in runtimes)
-        if rerank_top_n is not None:
-            top_k = min(top_k, rerank_top_n)
+            latency["rerank"] = _ms(stage_started)
+            if rerank_top_n is not None:
+                top_k = min(top_k, rerank_top_n)
+                reranked = True
+            explain.stage(
+                "rerank",
+                latency["rerank"],
+                model=prepared.rerank.model_id,
+                scored=rerank_units,
+                applied=reranked,
+                rank_changes=(
+                    explain.rank_changes(
+                        before_ids,
+                        [encode_id("chk", item.hit.id) for item in fused],
+                        score={
+                            encode_id("chk", item.hit.id): item.score
+                            for item in fused[:rerank_units]
+                        },
+                    )
+                    if explain.enabled and reranked
+                    else []
+                ),
+            )
+
+        stage_started = time.perf_counter()
+        assembly_started = stage_started
+        children = len(fused)
         hits, expansion_notices = self._assemble_results(fused, request, runtimes)
         degraded.extend(expansion_notices)
+        explain.stage(
+            "expand",
+            _ms(stage_started),
+            children_collapsed=children - len(hits),
+            parents_returned=sum(1 for hit in hits if hit.matched_child_ids),
+        )
+        if prepared.dedupe != "none":
+            stage_started = time.perf_counter()
+            before = len(hits)
+            hits = _dedupe(hits, prepared.dedupe)
+            explain.stage(
+                "dedupe", _ms(stage_started), mode=prepared.dedupe, removed=before - len(hits)
+            )
+        if prepared.mmr is not None:
+            stage_started = time.perf_counter()
+            # After a rerank, only reranked candidates compete: mixing in the
+            # fused-score tail would quietly undo the rerank.
+            pool = [hit for hit in hits if not reranked or "rerank" in hit.scores]
+            pool = pool[: mmr_pool_size(top_k)]
+            before_ids = [hit.chunk_id for hit in pool]
+            hits = await asyncio.to_thread(_diversify, pool, prepared.mmr.lambda_, top_k)
+            explain.stage(
+                "mmr",
+                _ms(stage_started),
+                **{"lambda": prepared.mmr.lambda_},
+                pool=len(pool),
+                rank_changes=(
+                    explain.rank_changes(before_ids, [hit.chunk_id for hit in hits])
+                    if explain.enabled
+                    else []
+                ),
+            )
         hits = hits[:top_k]
+        stage_started = time.perf_counter()
         hits, truncated = self._apply_token_budget(hits, request.options.max_context_tokens)
-        total_ms = round((time.perf_counter() - started) * 1000)
+        explain.stage(
+            "budget",
+            _ms(stage_started),
+            budget=request.options.max_context_tokens,
+            truncated=truncated,
+            total_tokens=sum(hit.token_count or 0 for hit in hits),
+        )
+        if request.options.include_highlights and request.query:
+            terms = query_terms(request.query)
+            for hit in hits:
+                hit.highlights = highlight_spans(terms, hit.content)
+        if external_scores and hits:
+            if len(runtimes) != 1:
+                raise ValidationFailed("External retrieval requires exactly one knowledge base.")
+            try:
+                await self._external_scores(hits, prepared, runtimes[0], encodings)
+            except (DimensionMismatch, NamespaceNotFound) as exc:
+                raise UpstreamUnavailable(
+                    "The index changed during external relevance scoring."
+                ) from exc
+        latency.update(explain.latency)
+        latency["assemble"] = _ms(assembly_started)
+        latency["total"] = _ms(prepared.started)
+        self.load.record(latency["total"])
+        for stage, value in latency.items():
+            retrieval_stage_seconds.labels(stage=stage).observe(value / 1000)
+        output = explain.output()
         return RetrievalResponse(
             request_id=request_id,
             results=hits,
             usage=UsageInfo(
-                embedding_tokens=embedding_tokens,
+                embedding_tokens=encodings.tokens,
                 rerank_units=rerank_units,
-                cached_embedding=cached_embedding,
+                cached_embedding=encodings.cached,
                 index_versions={
-                    encode_id("kb", runtime.id): runtime.index_version for runtime in runtimes
+                    encode_id("kb", runtime.id): runtime.index_version
+                    for runtime, _weight in prepared.active
                 },
-                latency_ms={"total": total_ms},
+                latency_ms=latency,
             ),
             degraded=degraded,
             partial_failures=failures,
             truncated_to_token_budget=truncated,
+            explain=ExplainOutput.model_validate(output) if output is not None else None,
         )
+
+    async def _external_scores(
+        self,
+        hits: list[RetrievalHit],
+        prepared: PreparedQuery,
+        runtime: KnowledgeBaseRuntime,
+        encodings: _Encodings,
+    ) -> None:
+        missing = [hit for hit in hits if "rerank" not in hit.scores and "dense" not in hit.scores]
+        dense_needed = any("rerank" not in hit.scores for hit in hits)
+        if dense_needed and runtime.metric != "cosine" and not runtime.embedding_model.normalize:
+            raise ValidationFailed(
+                "Dify scoring needs cosine distance or normalized embeddings; rebuild this index."
+            )
+        fetched: dict[str, float] = {}
+        if missing:
+            ids = sorted(
+                {
+                    decode_id("chk", id_)
+                    for hit in missing
+                    for id_ in (hit.matched_child_ids or [hit.chunk_id])
+                },
+                key=lambda id_: id_.int,
+            )
+            if len(ids) > 1000:
+                raise ValidationFailed("Too many child passages for external scoring.")
+            dense = encodings.dense.get(runtime.id)
+            if dense is None:
+                assert prepared.request.query is not None
+                dense, tokens, cached = await self._embed_query(
+                    runtime.workspace_id,
+                    runtime.embedding_model,
+                    prepared.request.query,
+                )
+                encodings.tokens += tokens
+                encodings.cached = cached
+            binding = runtime.vector_binding
+            store = await self._vectors.for_binding(  # type: ignore[attr-defined]
+                VectorBindingRef(binding.id, binding.driver, binding.config)
+            )
+            scored = await self._bounded_search(
+                store,
+                Namespace(runtime.id, runtime.index_version),
+                VectorQuery(dense=dense, ids=ids, top_k=len(ids), with_payload=False),
+            )
+            fetched = {encode_id("chk", hit.id): hit.score for hit in scored}
+        for hit in hits:
+            if "rerank" in hit.scores:
+                relevance = hit.scores["rerank"]
+            else:
+                score = hit.scores.get("dense")
+                if score is None:
+                    child_scores = [
+                        fetched[id_]
+                        for id_ in (hit.matched_child_ids or [hit.chunk_id])
+                        if id_ in fetched
+                    ]
+                    if not child_scores:
+                        raise UpstreamUnavailable(
+                            "An indexed passage changed during external scoring."
+                        )
+                    score = max(child_scores)
+                relevance = 1 - score * score / 2 if runtime.metric == "l2" else score
+            if not math.isfinite(relevance):
+                raise RetrievalReadModelInvalid("External scoring returned a non-finite value.")
+            hit.scores["relevance"] = max(0.0, min(1.0, relevance))
+
+    async def batch(
+        self, principal: Principal, batch: BatchRequest, *, request_id: str
+    ) -> BatchResponse:
+        """Up to 20 queries; one malformed query rejects the batch, a failing one does not.
+
+        Every query is planned first, so authorization and validation errors
+        surface before any search runs. Queries then execute at most
+        ``_BATCH_CONCURRENCY`` at a time and share identical encodings. A query
+        that fails at run time is returned with no results and one partial
+        failure per target.
+        """
+        started = time.perf_counter()
+        deadline = self._request_timeout_s * 2
+        memo: EncodeMemo = {}
+        try:
+            async with asyncio.timeout(deadline):
+                plans: list[PreparedQuery | CairnError] = []
+                for query in batch.queries:
+                    try:
+                        plans.append(await self.prepare(principal, query))
+                    except UpstreamUnavailable as exc:
+                        plans.append(exc)
+                gate = asyncio.Semaphore(_BATCH_CONCURRENCY)
+
+                async def run(index: int, plan: PreparedQuery | CairnError) -> RetrievalResponse:
+                    query = batch.queries[index]
+                    entry_id = f"{request_id}.{index}"
+                    if isinstance(plan, CairnError):
+                        return _failed_response(entry_id, query, plan.code, plan.detail)
+                    async with gate:
+                        try:
+                            async with asyncio.timeout(self._request_timeout_s):
+                                return await self.execute(
+                                    plan, request_id=entry_id, encode_memo=memo
+                                )
+                        except UpstreamUnavailable as exc:
+                            return _failed_response(entry_id, query, exc.code, exc.detail)
+                        except TimeoutError:
+                            return _failed_response(
+                                entry_id,
+                                query,
+                                UpstreamUnavailable.code,
+                                "The retrieval query exceeded its time limit.",
+                            )
+
+                responses = await asyncio.gather(
+                    *(run(index, plan) for index, plan in enumerate(plans))
+                )
+        except TimeoutError as exc:
+            raise UpstreamUnavailable("The retrieval batch exceeded its time limit.") from exc
+        finally:
+            for task in memo.values():
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*memo.values(), return_exceptions=True)
+        return BatchResponse(
+            request_id=request_id,
+            responses=list(responses),
+            usage=BatchUsage(
+                embedding_tokens=sum(response.usage.embedding_tokens for response in responses),
+                latency_ms={"total": _ms(started)},
+            ),
+        )
+
+    def _explain_plan(self, prepared: PreparedQuery) -> dict[str, object]:
+        request = prepared.request
+        if not request.options.explain:
+            return {}
+        return {
+            "top_k": prepared.top_k,
+            "score_threshold": request.score_threshold,
+            "rerank_model": prepared.rerank.model_id if prepared.rerank else None,
+            "dedupe": prepared.dedupe,
+            "mmr": {"lambda": prepared.mmr.lambda_} if prepared.mmr else None,
+            "expand_parent": request.options.expand_parent,
+            "filter": (
+                request.filters.model_dump(mode="json", exclude_none=True)
+                if request.filters
+                else None
+            ),
+            "targets": [
+                {
+                    "kb": encode_id("kb", runtime.id),
+                    "weight": weight,
+                    "index_version": runtime.index_version,
+                    "mode": self._mode(request, runtime),
+                    "fusion": _fusion_label(request.fusion or runtime.retrieval_config.fusion),
+                    "candidate_k": request.candidate_k or runtime.retrieval_config.candidate_k,
+                    "sparse": runtime.sparse.kind,
+                }
+                for runtime, weight in prepared.active
+            ],
+        }
 
     def _target_failure(self, kb_id: UUID, code: str) -> TargetFailure:
         details = {
@@ -268,8 +719,6 @@ class RetrievalService:
     def _validate_supported(
         self, request: RetrievalRequest, runtimes: Sequence[KnowledgeBaseRuntime]
     ) -> list[DegradationNotice]:
-        if request.filters is not None:
-            raise RetrievalUnsupported("Filters are not supported by the first retrieval endpoint.")
         for runtime in runtimes:
             fusion = request.fusion or runtime.retrieval_config.fusion
             weights = request.weights or runtime.retrieval_config.weights
@@ -277,23 +726,13 @@ class RetrievalService:
                 raise ValidationFailed("Search weights are incompatible with RRF fusion.")
             if fusion.method == "weighted" and weights.dense == 0 and weights.sparse == 0:
                 raise ValidationFailed("Weighted fusion requires at least one non-zero weight.")
-        options = request.options
-        if options.include_highlights:
-            raise RetrievalUnsupported("Highlights are not supported by this endpoint.")
-        if options.dedupe not in {None, "none", "by_chunk"}:
-            raise RetrievalUnsupported("Document deduplication is not supported by this endpoint.")
-        if options.mmr is not None and options.mmr.enabled:
-            raise RetrievalUnsupported("MMR is not supported by this endpoint.")
-        if options.explain:
-            raise RetrievalUnsupported("Explain mode is not supported by this endpoint.")
 
         notices: dict[str, DegradationNotice] = {}
         for runtime in runtimes:
-            config = runtime.retrieval_config
             if (
                 request.search_mode is None
                 and request.query_vector is not None
-                and config.search_mode == "hybrid"
+                and runtime.retrieval_config.search_mode == "hybrid"
             ):
                 notices["sparse"] = DegradationNotice(
                     stage="sparse",
@@ -303,19 +742,111 @@ class RetrievalService:
                         "was supplied."
                     ),
                 )
-            if options.mmr is None and config.mmr.enabled:
-                notices["mmr"] = DegradationNotice(
-                    stage="mmr",
-                    reason="unsupported",
-                    detail="Configured MMR is unavailable; fused ranking is returned.",
-                )
-            if options.dedupe is None and config.dedupe not in {"none", "by_chunk"}:
-                notices["dedupe"] = DegradationNotice(
-                    stage="dedupe",
-                    reason="unsupported",
-                    detail="Configured document deduplication is unavailable; chunks are returned.",
-                )
         return list(notices.values())
+
+    def _build_filter(
+        self, request: RetrievalRequest, runtimes: Sequence[KnowledgeBaseRuntime]
+    ) -> FilterNode | None:
+        """Compile ``filters`` into one condition pushed down to every search.
+
+        ``metadata`` addresses the document's metadata (``meta.*`` in the read
+        model); chunk fields such as ``page`` are not filterable. Metadata and
+        date conditions need an ACTIVE version built with the v2 payload layout;
+        an older one is refused by name rather than silently matching nothing.
+        """
+        spec = request.filters
+        if spec is None:
+            return None
+        clauses: list[FilterNode] = []
+        needs_documents = False
+        if spec.metadata:
+            check_filter_bounds(spec.metadata)
+            parsed = parse_filter(spec.metadata)
+            if parsed is not None:
+                scoped = with_prefix(parsed, "meta")
+                check_portable(scoped)
+                clauses.append(scoped)
+                needs_documents = True
+        for bound, op in ((spec.created_after, "$gte"), (spec.created_before, "$lt")):
+            if bound is None:
+                continue
+            if bound.tzinfo is None:
+                raise ValidationFailed(
+                    "Date filters need a timezone, for example 2026-01-01T00:00Z."
+                )
+            clauses.append(Compare("created_at", op, int(bound.timestamp())))  # type: ignore[arg-type]
+            needs_documents = True
+        if spec.document_ids is not None:
+            if len(spec.document_ids) > MAX_FILTER_DOCUMENTS:
+                raise ValidationFailed(
+                    f"A filter may name at most {MAX_FILTER_DOCUMENTS} documents."
+                )
+            try:
+                ids = sorted({str(decode_id("doc", value)) for value in spec.document_ids})
+            except InvalidIdError as exc:
+                raise InvalidId("A document filter has an invalid document ID.") from exc
+            clauses.append(Compare("document_id", "$in", ids))
+        if needs_documents:
+            stale = [
+                encode_id("kb", runtime.id)
+                for runtime in runtimes
+                if runtime.payload_schema < READ_MODEL_SCHEMA
+            ]
+            if stale:
+                raise FilterRequiresRebuild(
+                    "Metadata and date filters need a rebuilt index for: "
+                    + ", ".join(stale)
+                    + ". Rebuild these knowledge bases to enable them."
+                )
+        if not clauses:
+            return None
+        return clauses[0] if len(clauses) == 1 else And(tuple(clauses))
+
+    def _post_stages(
+        self, request: RetrievalRequest, runtimes: Sequence[KnowledgeBaseRuntime]
+    ) -> tuple[str, MmrSpec | None]:
+        """Resolve dedupe and MMR: the request's choice, else one shared KB default."""
+        options = request.options
+        if options.dedupe is not None:
+            dedupe = options.dedupe
+        else:
+            configured = {runtime.retrieval_config.dedupe for runtime in runtimes}
+            if len(configured) > 1:
+                raise ValidationFailed(
+                    "Configured deduplication differs across targets; set options.dedupe."
+                )
+            dedupe = configured.pop()
+        if options.mmr is not None:
+            mmr = options.mmr
+        else:
+            configured_mmr = {
+                (runtime.retrieval_config.mmr.enabled, runtime.retrieval_config.mmr.lambda_)
+                for runtime in runtimes
+            }
+            if len(configured_mmr) > 1:
+                raise ValidationFailed("Configured MMR differs across targets; set options.mmr.")
+            enabled, lambda_ = configured_mmr.pop()
+            mmr = MmrSpec(enabled=enabled, lambda_=lambda_)
+        return dedupe, mmr if mmr.enabled else None
+
+    def _check_query_vector(
+        self, request: RetrievalRequest, runtimes: Sequence[KnowledgeBaseRuntime]
+    ) -> None:
+        supplied = request.query_vector
+        dense_runtimes = [
+            runtime for runtime in runtimes if self._mode(request, runtime) in {"vector", "hybrid"}
+        ]
+        if supplied is None or not dense_runtimes:
+            return
+        if len({runtime.embedding_model for runtime in dense_runtimes}) != 1:
+            raise ValidationFailed(
+                "A supplied query vector requires one embedding identity across all targets."
+            )
+        expected = dense_runtimes[0].embedding_model.dimension
+        if expected is None or len(supplied) != expected:
+            raise ValidationFailed(
+                f"The query vector dimension does not match the ACTIVE model dimension {expected}."
+            )
 
     def _runtime_reranker(self) -> Reranker:
         if self._reranker is None:
@@ -378,7 +909,10 @@ class RetrievalService:
         return _RerankPlan(model_id, timeout_s, top_n, candidate_limit)
 
     async def _query_encodings(
-        self, request: RetrievalRequest, runtimes: Sequence[KnowledgeBaseRuntime]
+        self,
+        request: RetrievalRequest,
+        runtimes: Sequence[KnowledgeBaseRuntime],
+        memo: EncodeMemo | None = None,
     ) -> _Encodings:
         """Encode the query once per model across all targets.
 
@@ -440,7 +974,8 @@ class RetrievalService:
         groups = list(plan.items())
         outcomes = await asyncio.gather(
             *(
-                self._encode_with(
+                self._encode_shared(
+                    memo,
                     (dense_targets or sparse_targets)[0].workspace_id,
                     model,
                     query,
@@ -500,6 +1035,36 @@ class RetrievalService:
         )
         return encodings
 
+    async def _encode_shared(
+        self,
+        memo: EncodeMemo | None,
+        workspace_id: UUID,
+        model: ModelRef,
+        query: str,
+        *,
+        dense: bool,
+        sparse: bool,
+    ) -> tuple[Sequence[float] | None, SparseVector | None, int, bool | None]:
+        """Encode once per distinct (model, text, outputs) across a batch.
+
+        Later users of a shared encoding report no tokens and a cache hit, so a
+        batch's usage counts each provider call once.
+        """
+        if memo is None:
+            return await self._encode_with(workspace_id, model, query, dense=dense, sparse=sparse)
+        key = (workspace_id, model, query, dense, sparse)
+        task = memo.get(key)
+        if task is None:
+            memo[key] = asyncio.ensure_future(
+                self._encode_with(workspace_id, model, query, dense=dense, sparse=sparse)
+            )
+            first: tuple[
+                Sequence[float] | None, SparseVector | None, int, bool | None
+            ] = await asyncio.shield(memo[key])
+            return first
+        dense_vector, sparse_vector, _tokens, _cached = await asyncio.shield(task)
+        return dense_vector, sparse_vector, 0, True
+
     async def _encode_with(
         self,
         workspace_id: UUID,
@@ -538,17 +1103,24 @@ class RetrievalService:
         sparse: SparseVector | None = None,
         *,
         sparse_stage: bool = False,
+        search_filter: FilterNode | None = None,
+        candidate_cap: int | None = None,
+        explain: ExplainRecorder | None = None,
+        explain_terms: set[str] | None = None,
     ) -> list[FusedHit]:
+        explain = explain or ExplainRecorder(False)
         mode = self._mode(request, runtime)
         candidate_k = request.candidate_k or runtime.retrieval_config.candidate_k
         top_k = request.top_k or runtime.retrieval_config.top_k
         candidate_k = max(candidate_k, top_k)
+        if candidate_cap is not None:
+            candidate_k = max(min(candidate_k, candidate_cap), top_k)
         binding = BindingRefModel.model_validate(runtime.vector_binding)
         store = await self._vectors.for_binding(  # type: ignore[attr-defined]
             VectorBindingRef(binding.id, binding.driver, binding.config)
         )
         namespace = Namespace(runtime.id, runtime.index_version)
-        searches: list[tuple[str, asyncio.Task[list[Hit]], float]] = []
+        searches: list[tuple[str, asyncio.Task[tuple[list[Hit], float]], float]] = []
         if mode in {"vector", "hybrid"}:
             if dense is None:
                 raise ValidationFailed("Dense retrieval has no query vector.")
@@ -556,10 +1128,15 @@ class RetrievalService:
                 (
                     "dense",
                     asyncio.create_task(
-                        self._bounded_search(
+                        self._timed_search(
                             store,
                             namespace,
-                            VectorQuery(top_k=candidate_k, dense=dense, with_payload=True),
+                            VectorQuery(
+                                top_k=candidate_k,
+                                dense=dense,
+                                filter=search_filter,
+                                with_payload=True,
+                            ),
                         )
                     ),
                     target_weight,
@@ -572,10 +1149,15 @@ class RetrievalService:
                 (
                     "sparse",
                     asyncio.create_task(
-                        self._bounded_search(
+                        self._timed_search(
                             store,
                             namespace,
-                            VectorQuery(top_k=candidate_k, sparse=sparse, with_payload=True),
+                            VectorQuery(
+                                top_k=candidate_k,
+                                sparse=sparse,
+                                filter=search_filter,
+                                with_payload=True,
+                            ),
                         )
                     ),
                     target_weight,
@@ -592,8 +1174,18 @@ class RetrievalService:
             raise
         ranked = [
             (stage, self._validate_driver_hits(runtime, hits), weight)
-            for (stage, _task, weight), hits in zip(searches, results, strict=True)
+            for (stage, _task, weight), (hits, _elapsed) in zip(searches, results, strict=True)
         ]
+        kb = encode_id("kb", runtime.id)
+        for (stage, hits, _weight), (_hits, elapsed) in zip(ranked, results, strict=True):
+            explain.stage(
+                stage,
+                elapsed,
+                knowledge_base_id=kb,
+                returned=len(hits),
+                top=explain.top_hits(hits, terms=explain_terms if stage == "sparse" else None),
+            )
+        fusion_started = time.perf_counter()
         fusion = request.fusion or runtime.retrieval_config.fusion
         if fusion.method == "weighted":
             weights = request.weights or runtime.retrieval_config.weights
@@ -615,12 +1207,52 @@ class RetrievalService:
             ]
         else:
             fused = rrf_fuse(runtime.id, ranked, k=fusion.k)
+        changes: list[dict[str, object]] = []
+        if explain.enabled and len(ranked) > 1:
+            stage_ranks = {
+                stage: {encode_id("chk", hit.id): rank for rank, hit in enumerate(hits, 1)}
+                for stage, hits, _weight in ranked
+            }
+            for rank, item in enumerate(fused[:RANK_CHANGE_ENTRIES], start=1):
+                chunk_id = encode_id("chk", item.hit.id)
+                changes.append(
+                    {
+                        "chunk_id": chunk_id,
+                        "dense_rank": stage_ranks.get("dense", {}).get(chunk_id),
+                        "sparse_rank": stage_ranks.get("sparse", {}).get(chunk_id),
+                        "fused_rank": rank,
+                    }
+                )
+        explain.stage(
+            "fuse",
+            _ms(fusion_started),
+            applied=len(ranked) > 1,
+            knowledge_base_id=kb,
+            method=_fusion_label(fusion),
+            unique=len(fused),
+            rank_changes=changes,
+        )
+        filter_started = time.perf_counter()
         threshold = (
             request.score_threshold
             if request.score_threshold is not None
             else runtime.retrieval_config.score_threshold
         )
-        return [item for item in fused if item.score >= threshold]
+        kept = [item for item in fused if item.score >= threshold]
+        explain.stage(
+            "filter",
+            _ms(filter_started),
+            knowledge_base_id=kb,
+            removed_by_threshold=len(fused) - len(kept),
+        )
+        return kept
+
+    async def _timed_search(
+        self, store: object, namespace: Namespace, query: VectorQuery
+    ) -> tuple[list[Hit], float]:
+        started = time.perf_counter()
+        hits = await self._bounded_search(store, namespace, query)
+        return hits, (time.perf_counter() - started) * 1000
 
     async def _rerank_fused(
         self,
@@ -658,10 +1290,14 @@ class RetrievalService:
         for item, score in zip(candidates, scores, strict=True):
             item.scores["rerank"] = score
             rescored.append((score, item))
+        # The reranker's judgement is the final score (API contract); the fused
+        # score stays available as scores["fused"].
+        for score, item in rescored:
+            item.score = score
         rescored.sort(
             key=lambda pair: (
                 -pair[0],
-                -pair[1].score,
+                -pair[1].scores["fused"],
                 pair[1].kb_id.int,
                 pair[1].hit.id.int,
             )
@@ -800,7 +1436,13 @@ class RetrievalService:
                 )
                 results.append(child)
                 continue
-            parent = self._parent_result(item, child, parent_id, snapshot)
+            parent = self._parent_result(
+                item,
+                child,
+                parent_id,
+                snapshot,
+                include_metadata=request.options.include_metadata,
+            )
             key = (item.kb_id, parent_id)
             previous = expanded.get(key)
             if previous is None:
@@ -824,6 +1466,8 @@ class RetrievalService:
         child: RetrievalHit,
         parent_id: UUID,
         snapshot: object,
+        *,
+        include_metadata: bool = True,
     ) -> RetrievalHit:
         if not isinstance(snapshot, dict):
             raise RetrievalReadModelInvalid("A parent snapshot is malformed.")
@@ -858,6 +1502,9 @@ class RetrievalService:
                 "A parent snapshot does not match its ACTIVE child scope."
             )
         metadata = self._parent_metadata(raw_metadata)
+        if include_metadata:
+            # Document metadata is the same for every chunk of a document.
+            metadata = {**_document_metadata(payload), **metadata}
         source_url = metadata.get("source_url")
         return RetrievalHit(
             chunk_id=encode_id("chk", parent_id),
@@ -869,7 +1516,7 @@ class RetrievalService:
             scores=dict(child.scores),
             matched_child_ids=[child.chunk_id],
             metadata=metadata,
-            source=SourceInfo(url=source_url) if isinstance(source_url, str) else None,
+            source=_source(payload, url=source_url if isinstance(source_url, str) else None),
         )
 
     @staticmethod
@@ -950,14 +1597,17 @@ class RetrievalService:
             "_parent_snapshot",
             "_manual_edit_preserved",
             "manual_edit_generation",
+            *_DOCUMENT_KEYS,
         }
         metadata = (
-            {key: value for key, value in payload.items() if key not in internal}
+            {
+                **_document_metadata(payload),
+                **{key: value for key, value in payload.items() if key not in internal},
+            }
             if request.options.include_metadata
             else {}
         )
-        source_url = payload.get("source_url")
-        source = SourceInfo(url=source_url) if isinstance(source_url, str) else None
+        source = _source(payload)
         return RetrievalHit(
             chunk_id=encode_id("chk", chunk_id),
             document_id=encode_id("doc", document_id),
@@ -988,3 +1638,74 @@ class RetrievalService:
             kept.append(hit)
             used += hit.token_count
         return kept, False
+
+
+def _ms(started: float) -> int:
+    return round((time.perf_counter() - started) * 1000)
+
+
+def _fusion_label(fusion: FusionSpec) -> str:
+    return f"rrf(k={fusion.k})" if fusion.method == "rrf" else "weighted"
+
+
+def _dedupe(hits: list[RetrievalHit], mode: str) -> list[RetrievalHit]:
+    """Keep the first hit per chunk (``by_chunk``) or per document, in ranking order."""
+    seen: set[str] = set()
+    kept: list[RetrievalHit] = []
+    for hit in hits:
+        key = hit.document_id if mode == "by_document" else hit.chunk_id
+        if key in seen:
+            continue
+        seen.add(key)
+        kept.append(hit)
+    return kept
+
+
+def _diversify(pool: list[RetrievalHit], lambda_: float, top_k: int) -> list[RetrievalHit]:
+    order = mmr_order(
+        [hit.score for hit in pool], [hit.content for hit in pool], lambda_=lambda_, k=top_k
+    )
+    selected: list[RetrievalHit] = []
+    for index, objective in order:
+        hit = pool[index]
+        hit.scores["mmr"] = objective
+        selected.append(hit)
+    return selected
+
+
+def _document_metadata(payload: Any) -> dict[str, Any]:
+    meta = payload.get("meta")
+    return dict(meta) if isinstance(meta, dict) else {}
+
+
+def _source(payload: Any, *, url: str | None = None) -> SourceInfo | None:
+    source_url = url if url is not None else payload.get("source_url")
+    title = payload.get("doc_title")
+    kind = payload.get("doc_type")
+    revised = payload.get("doc_updated_at")
+    updated_at = (
+        datetime.fromtimestamp(revised, UTC)
+        if type(revised) is int and 0 <= revised < 32_503_680_000
+        else None
+    )
+    source = SourceInfo(
+        title=title if isinstance(title, str) else None,
+        url=source_url if isinstance(source_url, str) else None,
+        type=kind if isinstance(kind, str) else None,
+        updated_at=updated_at,
+    )
+    return source if any(source.model_dump().values()) else None
+
+
+def _failed_response(
+    request_id: str, query: RetrievalRequest, code: str, detail: str
+) -> RetrievalResponse:
+    return RetrievalResponse(
+        request_id=request_id,
+        results=[],
+        usage=UsageInfo(),
+        partial_failures=[
+            TargetFailure(knowledge_base_id=target.knowledge_base_id, code=code, detail=detail)
+            for target in query.targets
+        ],
+    )

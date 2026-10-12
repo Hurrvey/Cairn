@@ -12,7 +12,7 @@ from uuid import UUID
 
 from cairn.core.logging import get_logger
 from cairn.vectorstore.base import VectorStore
-from cairn.vectorstore.errors import VectorStoreUnavailable
+from cairn.vectorstore.errors import VectorStoreTransient, VectorStoreUnavailable
 
 __all__ = ["VectorBindingRef", "VectorStoreRegistry", "get_vector_registry"]
 
@@ -51,7 +51,8 @@ class VectorStoreRegistry:
         status = await store.health()
         if not status.healthy:
             await store.close()
-            raise VectorStoreUnavailable(
+            # Down, not misconfigured: the same binding may work on a retry.
+            raise VectorStoreTransient(
                 f"The {binding.driver} vector store is not reachable: {status.detail}"
             )
         self._instances[binding.id] = store

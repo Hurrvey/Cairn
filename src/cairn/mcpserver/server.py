@@ -3,23 +3,52 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, cast
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from mcp.server.lowlevel import Server
+from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.server.transport_security import TransportSecurityMiddleware, TransportSecuritySettings
+from mcp.shared.exceptions import McpError
+from pydantic import AnyUrl
 from starlette.responses import JSONResponse
 from starlette.types import Message, Receive, Scope, Send
 
 from cairn.authz.dataplane import current_dataplane_principal
 from cairn.authz.model import Principal
 from cairn.core.config import MCPSettings
+from cairn.core.errors import CairnError, NotFound
+from cairn.mcpserver.documents import KnowledgeDocuments
 from cairn.mcpserver.tools import KnowledgeSearchTools
 from cairn.retrieval.service import RetrievalService
 from mcp import types
+
+
+def bounded_resource(uri: str, payload: dict[str, Any]) -> list[ReadResourceContents]:
+    """Check the actual double-encoded resource envelope before returning text."""
+    content = json.dumps(payload, ensure_ascii=False)
+    envelope = types.ReadResourceResult(
+        contents=[
+            types.TextResourceContents(
+                uri=AnyUrl(uri),
+                mimeType="application/json",
+                text=content,
+            )
+        ]
+    )
+    if len(envelope.model_dump_json(by_alias=True).encode("utf-8")) > 512 * 1024 - 1024:
+        raise McpError(
+            types.ErrorData(
+                code=-32002,
+                message="OUTPUT_TOO_LARGE: resource exceeds output limit.",
+            )
+        )
+    return [ReadResourceContents(content, "application/json")]
 
 
 def current_mcp_principal(request: Request) -> Principal:
@@ -49,7 +78,8 @@ class MCPServer:
             allowed_origins=settings.allowed_origins,
         )
         self._security = TransportSecurityMiddleware(self._transport_security)
-        self._tools = KnowledgeSearchTools(retrieval)
+        self._documents = KnowledgeDocuments()
+        self._tools = KnowledgeSearchTools(retrieval, documents=self._documents)
         self._server: Server[Any, Request] = Server(
             "Cairn",
             version="0.1.0",
@@ -77,6 +107,64 @@ class MCPServer:
 
         cast("Callable[..., Any]", self._server.list_tools)()(list_tools)
         self._server.call_tool(validate_input=False)(call_tool)
+
+        async def list_resources() -> list[types.Resource]:
+            principal = current_mcp_principal(self._request())
+            directory = await self._documents.directory(principal, permission="kb:read")
+            return [
+                types.Resource(
+                    uri=AnyUrl(f"cairn://kb/{item['id']}"),
+                    name=item["name"],
+                    description="Authorized knowledge base directory entry.",
+                    mimeType="application/json",
+                )
+                for item in directory["knowledge_bases"]
+            ]
+
+        async def resource_templates() -> list[types.ResourceTemplate]:
+            current_mcp_principal(self._request())
+            return [
+                types.ResourceTemplate(
+                    uriTemplate="cairn://kb/{knowledge_base_id}/documents/{document_id}",
+                    name="Indexed document passages",
+                    mimeType="application/json",
+                    description="Ordered indexed passages; requires kb:read. Passages may overlap.",
+                )
+            ]
+
+        async def read_resource(uri: AnyUrl) -> list[ReadResourceContents]:
+            principal = current_mcp_principal(self._request())
+            try:
+                parts = urlsplit(str(uri))
+                path = parts.path.strip("/").split("/")
+                if parts.scheme != "cairn" or parts.netloc != "kb" or parts.query or parts.fragment:
+                    raise NotFound("Resource not available.")
+                if len(path) == 3 and path[1] == "documents":
+                    payload = await self._documents.document(principal, path[2], path[0])
+                elif len(path) == 1:
+                    directory = await self._documents.directory(principal, permission="kb:read")
+                    found = next(
+                        (item for item in directory["knowledge_bases"] if item["id"] == path[0]),
+                        None,
+                    )
+                    if found is None:
+                        raise NotFound("Resource not available.")
+                    payload = found
+                else:
+                    raise NotFound("Resource not available.")
+                return bounded_resource(str(uri), payload)
+            except CairnError as exc:
+                raise McpError(
+                    types.ErrorData(code=-32002, message=exc.detail or exc.title)
+                ) from exc
+            except TimeoutError as exc:
+                raise McpError(
+                    types.ErrorData(code=-32603, message="Resource reading timed out.")
+                ) from exc
+
+        cast("Callable[..., Any]", self._server.list_resources)()(list_resources)
+        cast("Callable[..., Any]", self._server.list_resource_templates)()(resource_templates)
+        cast("Callable[..., Any]", self._server.read_resource)()(read_resource)
         self._manager: StreamableHTTPSessionManager | None = None
 
     def _request(self) -> Request:

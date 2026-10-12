@@ -15,6 +15,11 @@ class ObjectNotFound(NotFound):
 class ObjectStoreUnavailable(UpstreamUnavailable):
     code = "STORAGE_BINDING_UNAVAILABLE"
     title = "Object store unavailable"
+    retryable = False
+
+
+class ObjectStoreTransient(ObjectStoreUnavailable):
+    retryable = True
 
 
 class ObjectTooLarge(ValidationFailed):

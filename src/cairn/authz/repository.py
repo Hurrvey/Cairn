@@ -160,6 +160,25 @@ class AuthzRepository:
             stmt = stmt.where(ApiKey.owner_user_id == owner_user_id)
         return list((await session.scalars(stmt.order_by(ApiKey.created_at.desc()))).all())
 
+    async def active_key_hash_page_for_owner(
+        self,
+        session: AsyncSession,
+        workspace_id: UUID,
+        owner_user_id: UUID,
+        *,
+        after_id: UUID | None = None,
+        limit: int = 200,
+    ) -> list[tuple[UUID, str]]:
+        stmt = select(ApiKey.id, ApiKey.key_hash).where(
+            ApiKey.workspace_id == workspace_id,
+            ApiKey.owner_user_id == owner_user_id,
+            ApiKey.revoked_at.is_(None),
+        )
+        if after_id is not None:
+            stmt = stmt.where(ApiKey.id > after_id)
+        rows = (await session.execute(stmt.order_by(ApiKey.id).limit(limit))).all()
+        return [(row.id, row.key_hash) for row in rows]
+
     async def revoke_key(self, session: AsyncSession, key_id: UUID) -> bool:
         result = await session.execute(
             update(ApiKey)

@@ -2,7 +2,7 @@
 
 One image, two roles (ADR-0002). ``CAIRN_ROLE`` selects which routers mount:
 
-* ``data``    — retrieval, MCP. SLO-bound, read-only. (Phase 2+)
+* ``data``    — retrieval, MCP. SLO-bound, read-only.
 * ``control`` — identity, catalog, admin. Transactional, latency-tolerant.
 * ``all``     — both; for development and the ``small`` deployment preset.
 
@@ -47,8 +47,10 @@ Cairn is a knowledge base platform and RAG infrastructure server.
 Agents are clients: point at this URL, present an API key, send a query and a
 knowledge base ID, and receive ranked, cited passages.
 
-**Phase 0** ships authentication only. Knowledge base, ingestion, and retrieval
-endpoints arrive in Phase 2.
+The control plane manages knowledge bases, documents, models, storage, keys and
+grants; the data plane serves `/v1/retrieval/query`, `/v1/retrieval/batch` and MCP.
+Every retrieval response states any reduction in quality in `degraded` or
+`partial_failures`.
 """
 
 
@@ -63,7 +65,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     configure_tracing(settings, app)
     retrieval_runtime = getattr(app.state, "retrieval_runtime", None)
+    usage_publisher = getattr(app.state, "usage_publisher", None)
     try:
+        if usage_publisher is not None:
+            usage_publisher.start()
         if retrieval_runtime is not None:
             await retrieval_runtime.start()
         if settings.serves_data_plane:
@@ -78,8 +83,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 await stack.enter_async_context(mcp_server.run())
             yield
     finally:
+        if usage_publisher is not None:
+            await usage_publisher.close()
         if retrieval_runtime is not None:
             await retrieval_runtime.close()
+        if settings.serves_control_plane:
+            from cairn.objectstore.registry import get_object_registry, reset_object_registry
+
+            await get_object_registry().close()
+            reset_object_registry()
         from cairn.core.cache import close_cache
 
         await close_cache()
@@ -138,16 +150,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         from cairn.authz.router import router as authz_router
         from cairn.catalog.router import router as catalog_router
         from cairn.catalog.service import CatalogModelUsage
+        from cairn.core.usage import UsagePublisher
         from cairn.embedding.probe import EmbeddingModelProbe
         from cairn.identity.router import router as auth_router
         from cairn.identity.users_router import router as users_router
         from cairn.modelgw.router import router as model_router
+        from cairn.modelgw.runtime import GatewayRuntime
         from cairn.modelgw.service import ModelManagementService
         from cairn.platform.mcp_router import router as mcp_management_router
         from cairn.platform.router import router as platform_router
 
+        app.state.usage_publisher = UsagePublisher(cfg.redis_url)
         app.state.model_management_service = ModelManagementService(
-            usage=CatalogModelUsage(), probe=EmbeddingModelProbe(master_key=cfg.master_key)
+            usage=CatalogModelUsage(),
+            probe=EmbeddingModelProbe(master_key=cfg.master_key),
+            gateway=GatewayRuntime(usage=app.state.usage_publisher),
         )
         app.include_router(auth_router)
         app.include_router(users_router)
@@ -159,6 +176,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         log.info("app.routers_mounted", plane="control")
 
     if cfg.serves_data_plane:
+        from cairn.retrieval.dify import router as dify_router
         from cairn.retrieval.router import router as retrieval_router
         from cairn.retrieval.runtime import KnowledgeBaseRuntimeLoader, QueryEmbeddingRuntime
         from cairn.retrieval.service import RetrievalService
@@ -171,8 +189,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             embeddings=app.state.retrieval_runtime,
             search_timeout_s=cfg.retrieval.search_timeout_s,
             request_timeout_s=cfg.retrieval.request_timeout_s,
+            slo_p95_ms=cfg.retrieval.slo_p95_ms or None,
         )
         app.include_router(retrieval_router)
+        app.include_router(dify_router)
         from cairn.mcpserver.server import MCPServer
         from cairn.mcpserver.server import router as mcp_router
 

@@ -48,20 +48,31 @@ class RateLimiter:
     def cache(self) -> Cache:
         return self._cache or get_cache()
 
-    async def check(self, principal: Principal) -> RateLimitState:
+    async def check(self, principal: Principal, *, cost: int = 1) -> RateLimitState:
         limit = principal.rate_limit_rpm or self._default_rpm
-        return await self._consume(f"rl:principal:{principal.id}", limit, principal.type)
+        return await self._consume(f"rl:principal:{principal.id}", limit, principal.type, cost=cost)
+
+    async def check_scoped(
+        self, principal: Principal, scope: str, *, limit: int, cost: int = 1
+    ) -> RateLimitState:
+        """A separate per-principal budget, e.g. ``explain`` queries."""
+        return await self._consume(f"rl:{scope}:{principal.id}", limit, principal.type, cost=cost)
 
     async def check_ip(self, ip: str, *, limit: int) -> RateLimitState:
         return await self._consume(f"rl:ip:{ip}", limit, "anonymous")
 
-    async def _consume(self, key: str, limit: int, principal_type: str) -> RateLimitState:
+    async def _consume(
+        self, key: str, limit: int, principal_type: str, *, cost: int = 1
+    ) -> RateLimitState:
         now = int(utcnow().timestamp())
         window = now // _WINDOW_SECONDS
         reset = (window + 1) * _WINDOW_SECONDS - now
 
         try:
-            count = await self.cache.incr(f"{key}:{window}", _WINDOW_SECONDS * 2)
+            # One increment per unit keeps the Cache protocol unchanged; costs are
+            # small (a batch counts each of its at most 20 queries).
+            for _ in range(max(1, cost)):
+                count = await self.cache.incr(f"{key}:{window}", _WINDOW_SECONDS * 2)
         except Exception as exc:
             # Fail OPEN. A rate limiter is a protection, not a gate: an
             # unavailable Redis must not take down every authenticated request.

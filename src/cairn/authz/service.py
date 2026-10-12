@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 import string
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from uuid import UUID
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from cairn.authz.dataplane import KEY_PREFIX, get_dataplane_authz, hash_api_key
 from cairn.authz.errors import (
@@ -36,6 +39,7 @@ log = get_logger(__name__)
 _ALPHABET = string.ascii_letters + string.digits
 _KEY_RANDOM_CHARS = 32  # ~190 bits
 MIN_BREAK_GLASS_REASON = 20
+OWNER_KEY_INVALIDATION_TIMEOUT_S = 2.0
 
 
 def generate_api_key(environment: str = "live") -> str:
@@ -140,6 +144,88 @@ class AuthzService:
                 after=grant.snapshot(),
             )
         return grant
+
+    async def bootstrap_created_kb_owner(
+        self, session: AsyncSession, actor: Principal, kb_id: UUID
+    ) -> UUID:
+        """Atomically make the creating account the new knowledge base owner.
+
+        API keys remain first-class actors in the audit trail, while ownership
+        and the initial access grant belong to the active user who owns the key.
+        This is intentionally narrower than ``grant``: the resource is being
+        created in the caller's transaction and cannot yet appear in the
+        actor's resolved permissions.
+        """
+        if not actor.can("kb:create"):
+            raise PermissionDenied("You may not create knowledge bases.")
+        owner_user_id = actor.id if actor.type == "user" else actor.owner_user_id
+        if owner_user_id is None:
+            raise PermissionDenied("The API key owner is unavailable.")
+        owner = await self._repo.user_summary(session, owner_user_id)
+        if owner is None or not owner["is_active"] or owner["workspace_id"] != actor.workspace_id:
+            raise PermissionDenied("The knowledge base owner is unavailable.")
+        grant = await self._repo.add_grant(
+            session,
+            ResourceGrant(
+                workspace_id=actor.workspace_id,
+                subject_type="user",
+                subject_id=owner_user_id,
+                resource_type="knowledge_base",
+                resource_id=kb_id,
+                permissions=["kb:read", "kb:query", "kb:write", "kb:manage"],
+                granted_by=actor.id,
+                reason="Initial owner access for a newly created knowledge base.",
+            ),
+        )
+        await self._repo.bump_perm_version(session, owner_user_id)
+        await self._audit.record(
+            session,
+            workspace_id=actor.workspace_id,
+            action="grant.create",
+            actor_id=actor.id,
+            actor_type=actor.type,
+            actor_label=actor.username,
+            resource_type="knowledge_base",
+            resource_id=kb_id,
+            after=grant.snapshot(),
+        )
+        return owner_user_id
+
+    async def invalidate_owner_key_caches(self, workspace_id: UUID, owner_user_id: UUID) -> None:
+        """Best-effort refresh of every live key after owner permission growth."""
+        try:
+            failed = 0
+            after_id: UUID | None = None
+            async with asyncio.timeout(OWNER_KEY_INVALIDATION_TIMEOUT_S):
+                async with session_scope() as session:
+                    while True:
+                        page = await self._repo.active_key_hash_page_for_owner(
+                            session,
+                            workspace_id,
+                            owner_user_id,
+                            after_id=after_id,
+                        )
+                        if not page:
+                            break
+                        dataplane = get_dataplane_authz()
+                        for _, key_hash in page:
+                            if not await dataplane.invalidate_key(key_hash):
+                                failed += 1
+                        after_id = page[-1][0]
+            if failed:
+                log.warning(
+                    "authz.owner_key_cache_invalidation_degraded",
+                    owner_user_id=str(owner_user_id),
+                    failed=failed,
+                )
+        except Exception as exc:
+            # The KB and owner grant have committed. Returning an error here
+            # invites a duplicate create; the 60 s cache TTL is the safe fallback.
+            log.warning(
+                "authz.owner_key_cache_invalidation_failed",
+                owner_user_id=str(owner_user_id),
+                error=type(exc).__name__,
+            )
 
     async def revoke_grant(self, actor: Principal, grant_id: UUID) -> None:
         async with transaction() as session:

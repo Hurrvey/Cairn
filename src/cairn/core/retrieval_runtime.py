@@ -91,6 +91,16 @@ class BindingRefModel(BaseModel):
     config: dict[str, Any] = Field(default_factory=dict)
 
 
+class KnowledgeDirectory(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    name: str = ""
+    description: str | None = None
+    doc_count: int = 0
+    chunk_count: int = 0
+    last_indexed_at: str | None = None
+
+
 class KnowledgeBaseRuntime(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -107,3 +117,7 @@ class KnowledgeBaseRuntime(BaseModel):
     parent_snapshots_safe: bool = False
     #: Where the ACTIVE version's sparse vectors came from; queries must match it.
     sparse: SparseSpec = SparseSpec()
+    #: Payload layout of the ACTIVE version (``cairn.core.document_metadata``).
+    #: Projections cached before it existed read as ``1``: no metadata filters.
+    payload_schema: int = 1
+    directory: KnowledgeDirectory = Field(default_factory=KnowledgeDirectory)

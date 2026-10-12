@@ -10,7 +10,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from cairn.core.retrieval_runtime import FusionSpec, MmrSpec, SearchMode, SearchWeights
 
 __all__ = [
+    "MAX_BATCH_QUERIES",
+    "BatchRequest",
+    "BatchResponse",
+    "BatchUsage",
     "DegradationNotice",
+    "ExplainOutput",
     "FilterSpec",
     "RerankRequest",
     "RetrievalHit",
@@ -183,6 +188,15 @@ class TargetFailure(BaseModel):
     detail: str
 
 
+class ExplainOutput(BaseModel):
+    """Query plan and per-stage trace (FR-H-08); present only when requested."""
+
+    model_config = _STRICT
+
+    plan: dict[str, Any] = Field(default_factory=dict)
+    stages: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class RetrievalResponse(BaseModel):
     model_config = _STRICT
 
@@ -192,4 +206,34 @@ class RetrievalResponse(BaseModel):
     degraded: list[DegradationNotice] = Field(default_factory=list)
     partial_failures: list[TargetFailure] = Field(default_factory=list)
     truncated_to_token_budget: bool = False
-    explain: None = None
+    explain: ExplainOutput | None = None
+
+
+MAX_BATCH_QUERIES = 20
+
+
+class BatchRequest(BaseModel):
+    model_config = _STRICT
+
+    queries: list[RetrievalRequest] = Field(min_length=1, max_length=MAX_BATCH_QUERIES)
+
+    @model_validator(mode="after")
+    def _no_explain(self) -> BatchRequest:
+        if any(query.options.explain for query in self.queries):
+            raise ValueError("explain is not available in a batch; use /v1/retrieval/query")
+        return self
+
+
+class BatchUsage(BaseModel):
+    model_config = _STRICT
+
+    embedding_tokens: int = 0
+    latency_ms: dict[str, int] = Field(default_factory=dict)
+
+
+class BatchResponse(BaseModel):
+    model_config = _STRICT
+
+    request_id: str
+    responses: list[RetrievalResponse]
+    usage: BatchUsage

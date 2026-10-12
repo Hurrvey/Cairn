@@ -156,7 +156,7 @@ class RetrievalDeadlineMiddleware(BaseHTTPMiddleware):
         self._timeout_s = timeout_s
 
     async def dispatch(self, request: Request, call_next: Handler) -> Response:
-        if request.url.path != "/v1/retrieval/query":
+        if request.url.path not in {"/v1/retrieval/query", "/retrieval"}:
             return await call_next(request)
         try:
             async with asyncio.timeout(self._timeout_s):
@@ -235,6 +235,10 @@ class ErrorHandlingMiddleware(BaseHTTPMiddleware):
 
 
 def _problem_response(request: Request, exc: CairnError) -> JSONResponse:
+    if request.url.path == "/retrieval":
+        from cairn.retrieval.dify import error_response
+
+        return error_response(request, exc)
     request_id = getattr(request.state, "request_id", None) or new_public_id("req")
     headers = {REQUEST_ID_HEADER: request_id}
     retry_after = getattr(exc, "retry_after", None)

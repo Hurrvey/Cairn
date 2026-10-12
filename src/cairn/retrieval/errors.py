@@ -14,6 +14,10 @@ class KbRuntimeCorrupt(KbRuntimeUnavailable):
     title = "Knowledge base runtime invalid"
 
 
+class KbRuntimeNotPublished(KbRuntimeUnavailable):
+    """An authorized knowledge base has no usable ACTIVE projection yet."""
+
+
 class RetrievalReadModelInvalid(UpstreamUnavailable):
     code = "RETRIEVAL_READ_MODEL_INVALID"
     title = "Retrieval read model invalid"
@@ -22,3 +26,8 @@ class RetrievalReadModelInvalid(UpstreamUnavailable):
 class RetrievalUnsupported(ValidationFailed):
     code = "RETRIEVAL_OPTION_UNSUPPORTED"
     title = "Retrieval option unsupported"
+
+
+class FilterRequiresRebuild(ValidationFailed):
+    code = "FILTER_REQUIRES_REBUILD"
+    title = "Filter requires an index rebuild"

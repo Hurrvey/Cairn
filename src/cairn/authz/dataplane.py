@@ -227,19 +227,27 @@ class DataPlaneAuthz:
 
     # --- invalidation -------------------------------------------------------
 
-    async def invalidate_key(self, key_hash: str) -> None:
+    async def invalidate_key(self, key_hash: str) -> bool:
         """Revocation must be immediate, not eventually consistent.
 
         The 60 s TTL bounds staleness for ordinary permission drift, but a
         revoked key has to stop working now — so this deletes locally and
         publishes to every other `api-data` replica.
         """
+        success = True
         for suffix in ("key", "ip"):
-            with contextlib.suppress(Exception):
+            try:
                 await self.cache.delete(f"authz:{suffix}:{key_hash}")
-        await self._publish(key_hash)
+            except Exception as exc:
+                success = False
+                log.warning(
+                    "authz.invalidation_delete_failed",
+                    cache_kind=suffix,
+                    error=type(exc).__name__,
+                )
+        return await self._publish(key_hash) and success
 
-    async def _publish(self, key_hash: str) -> None:
+    async def _publish(self, key_hash: str) -> bool:
         try:
             from redis.asyncio import Redis
 
@@ -250,8 +258,10 @@ class DataPlaneAuthz:
                 await client.publish(_INVALIDATION_CHANNEL, key_hash)
             finally:
                 await client.aclose()
+            return True
         except Exception as exc:
             log.warning("authz.invalidation_publish_failed", error=type(exc).__name__)
+            return False
 
 
 _authz: DataPlaneAuthz | None = None

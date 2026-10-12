@@ -45,6 +45,7 @@ Field paths
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -61,9 +62,12 @@ __all__ = [
     "FilterNode",
     "Not",
     "Or",
+    "check_filter_bounds",
+    "check_portable",
     "matches",
     "parse_filter",
     "resolve_path",
+    "with_prefix",
 ]
 
 Operator = Literal["$eq", "$ne", "$in", "$nin", "$gt", "$gte", "$lt", "$lte"]
@@ -156,15 +160,20 @@ def _eq(stored: Any, wanted: Any) -> bool:
     if stored is MISSING:
         return False
     if isinstance(stored, (list, tuple, set)):
-        return wanted in _as_set(stored)
-    return bool(stored == wanted)
+        return any(_scalar_eq(item, wanted) for item in stored)
+    return _scalar_eq(stored, wanted)
+
+
+def _scalar_eq(stored: Any, wanted: Any) -> bool:
+    if stored is None or wanted is None:
+        return stored is wanted
+    return _comparable(stored, wanted) and bool(stored == wanted)
 
 
 def _in(stored: Any, wanted: Sequence[Any]) -> bool:
     if stored is MISSING:
         return False
-    candidates = set(_as_set(stored))
-    return any(item in candidates for item in wanted)
+    return any(_scalar_eq(candidate, item) for candidate in _as_set(stored) for item in wanted)
 
 
 def _ordered(stored: Any, wanted: Any, op: str) -> bool:
@@ -229,8 +238,10 @@ def parse_filter(spec: Mapping[str, Any] | None) -> FilterNode | None:
           "$or": [ {...}, {...} ]
         }
     """
-    if not spec:
+    if spec is None:
         return None
+    if not isinstance(spec, Mapping):
+        raise ValidationFailed("Expected a filter object.")
 
     clauses: list[FilterNode] = []
     for key, value in spec.items():
@@ -239,6 +250,8 @@ def parse_filter(spec: Mapping[str, Any] | None) -> FilterNode | None:
         elif key == "$or":
             clauses.append(Or(tuple(_parse_each(value))))
         elif key == "$not":
+            if not isinstance(value, Mapping):
+                raise ValidationFailed("$not takes a filter object.")
             inner = parse_filter(value)
             if inner is not None:
                 clauses.append(Not(inner))
@@ -248,13 +261,15 @@ def parse_filter(spec: Mapping[str, Any] | None) -> FilterNode | None:
             clauses.extend(_parse_field(key, value))
 
     if not clauses:
-        return None
+        return And(())
     return clauses[0] if len(clauses) == 1 else And(tuple(clauses))
 
 
 def _parse_each(value: Any) -> list[FilterNode]:
     if not isinstance(value, (list, tuple)):
         raise ValidationFailed("$and and $or take a list of filter objects.")
+    if any(not isinstance(item, Mapping) for item in value):
+        raise ValidationFailed("Every logical clause must be a filter object.")
     parsed = [parse_filter(item) for item in value]
     return [node for node in parsed if node is not None]
 
@@ -295,3 +310,87 @@ def fields_referenced(node: FilterNode | None) -> set[str]:
     for clause in node.clauses:
         referenced |= fields_referenced(clause)
     return referenced
+
+
+# --- public request bounds ---------------------------------------------------
+
+#: Limits on a caller-supplied filter, checked on the raw JSON before parsing
+#: (``parse_filter`` recurses, and every leaf becomes a store condition).
+MAX_FILTER_BYTES = 16 * 1024
+MAX_FILTER_DEPTH = 8
+MAX_FILTER_CONDITIONS = 256
+
+
+def check_filter_bounds(spec: Mapping[str, Any]) -> None:
+    """Reject an oversized or over-deep filter before it is parsed."""
+    try:
+        encoded = json.dumps(spec, allow_nan=False, default=str)
+    except (TypeError, ValueError) as exc:
+        raise ValidationFailed("The filter must be plain JSON.") from exc
+    if len(encoded.encode("utf-8")) > MAX_FILTER_BYTES:
+        raise ValidationFailed(f"The filter exceeds {MAX_FILTER_BYTES} bytes.")
+    leaves = 0
+    stack: list[tuple[Any, int]] = [(spec, 1)]
+    while stack:
+        value, depth = stack.pop()
+        if depth > MAX_FILTER_DEPTH:
+            raise ValidationFailed(f"The filter nests deeper than {MAX_FILTER_DEPTH} levels.")
+        if isinstance(value, Mapping):
+            stack.extend((item, depth + 1) for item in value.values())
+        elif isinstance(value, (list, tuple)):
+            stack.extend((item, depth + 1) for item in value)
+        else:
+            leaves += 1
+    if leaves > MAX_FILTER_CONDITIONS:
+        raise ValidationFailed(f"The filter has more than {MAX_FILTER_CONDITIONS} values.")
+
+
+def with_prefix(node: FilterNode, prefix: str) -> FilterNode:
+    """Scope every field path under ``prefix`` (``lang`` -> ``meta.lang``).
+
+    Path segments must be non-empty and free of ``[``, ``]`` and ``"``, which
+    stores treat as key syntax.
+    """
+    if isinstance(node, And):
+        return And(tuple(with_prefix(clause, prefix) for clause in node.clauses))
+    if isinstance(node, Or):
+        return Or(tuple(with_prefix(clause, prefix) for clause in node.clauses))
+    if isinstance(node, Not):
+        return Not(with_prefix(node.clause, prefix))
+    segments = node.field.split(".")
+    if any(not segment or any(char in segment for char in '[]"') for segment in segments):
+        raise ValidationFailed(f"Invalid filter field path {node.field!r}.")
+    if isinstance(node, Exists):
+        return Exists(f"{prefix}.{node.field}", present=node.present)
+    return Compare(f"{prefix}.{node.field}", node.op, node.value)
+
+
+def check_portable(node: FilterNode) -> None:
+    """Reject conditions the storage drivers cannot express.
+
+    Ordered comparisons need a number; equality needs a string, number, boolean
+    or null; ``$in``/``$nin`` take lists of those. Checked before any search so
+    a caller error is a 400, not a storage failure.
+    """
+    if isinstance(node, (And, Or)):
+        for clause in node.clauses:
+            check_portable(clause)
+        return
+    if isinstance(node, Not):
+        check_portable(node.clause)
+        return
+    if isinstance(node, Exists):
+        return
+    if node.op in _ORDERED:
+        if isinstance(node.value, bool) or not isinstance(node.value, (int, float)):
+            raise ValidationFailed(
+                f"{node.op} on {node.field!r} needs a number; strings, booleans and dates "
+                "cannot be range-filtered."
+            )
+        return
+    values = node.value if node.op in ("$in", "$nin") else [node.value]
+    for value in values:
+        if value is not None and not isinstance(value, (str, int, float, bool)):
+            raise ValidationFailed(
+                f"{node.op} on {node.field!r} needs a string, number, boolean or null."
+            )

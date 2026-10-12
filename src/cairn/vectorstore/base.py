@@ -131,6 +131,8 @@ class VectorQuery:
     #: Accuracy/latency knob. Higher searches more of the graph.
     ef_search: int | None = None
     score_threshold: float | None = None
+    #: Optional point subset, used to score previously selected sparse-only hits.
+    ids: Sequence[UUID] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,6 +205,15 @@ class VectorStore(Protocol):
     # --- reads ---
     async def search(self, ns: Namespace, query: VectorQuery) -> list[Hit]: ...
     async def fetch(self, ns: Namespace, ids: Sequence[UUID]) -> list[Hit]: ...
+    async def scroll(
+        self,
+        ns: Namespace,
+        filter: FilterNode | None,
+        *,
+        limit: int = 64,
+        cursor: UUID | None = None,
+        payload_fields: Sequence[str] | None = None,
+    ) -> tuple[list[Hit], UUID | None]: ...
     async def count(self, ns: Namespace, filter: FilterNode | None = None) -> int: ...
 
     async def health(self) -> HealthStatus: ...

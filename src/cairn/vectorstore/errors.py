@@ -10,6 +10,7 @@ __all__ = [
     "NamespaceSpecMismatch",
     "UnsupportedCapability",
     "UnsupportedFilter",
+    "VectorStoreTransient",
     "VectorStoreUnavailable",
 ]
 
@@ -40,8 +41,23 @@ class NamespaceSpecMismatch(ValidationFailed):
 
 
 class VectorStoreUnavailable(UpstreamUnavailable):
+    """The vector store cannot serve the request as configured.
+
+    Terminal by default: an unknown driver, a rejected request or bad
+    credentials fail the same way on every retry.
+    """
+
     code = "STORAGE_BINDING_UNAVAILABLE"
     title = "Vector store unavailable"
+    retryable = False
+
+
+class VectorStoreTransient(VectorStoreUnavailable):
+    """A failure the same request may not hit again: the store was unreachable,
+    overloaded (HTTP 5xx) or rate limiting (429). Ingestion retries these with
+    backoff instead of failing the document."""
+
+    retryable = True
 
 
 class UnsupportedCapability(ValidationFailed):

@@ -51,6 +51,7 @@ from cairn.vectorstore.errors import (
     NamespaceSpecMismatch,
     UnsupportedCapability,
     UnsupportedFilter,
+    VectorStoreTransient,
     VectorStoreUnavailable,
 )
 from cairn.vectorstore.filters import OPERATORS, And, Compare, Exists, FilterNode, Not, Or
@@ -95,17 +96,27 @@ async def _backend(namespace: str) -> AsyncIterator[None]:
     except UnexpectedResponse as exc:
         if exc.status_code == 404:
             raise NamespaceNotFound(f"Vector namespace {namespace} does not exist.") from exc
-        raise VectorStoreUnavailable(
-            f"Qdrant rejected the request (HTTP {exc.status_code})."
-        ) from exc
+        log.warning(
+            "vectorstore.qdrant_rejected",
+            namespace=namespace,
+            status=exc.status_code,
+            reason=(exc.content or b"")[:300].decode("utf-8", "replace"),
+        )
+        status = exc.status_code or 0
+        transient = status == 429 or status >= 500
+        error = VectorStoreTransient if transient else VectorStoreUnavailable
+        raise error(f"Qdrant rejected the request (HTTP {exc.status_code}).") from exc
     except (ResponseHandlingException, httpx.TransportError, OSError) as exc:
-        raise VectorStoreUnavailable("Qdrant is not reachable.") from exc
+        log.warning("vectorstore.qdrant_unreachable", namespace=namespace, error=repr(exc)[:300])
+        raise VectorStoreTransient("Qdrant is not reachable.") from exc
 
 
 class QdrantVectorStore:
     def __init__(self, client: AsyncQdrantClient) -> None:
         self._client = client
         self._specs: dict[str, NamespaceSpec] = {}
+        #: Namespaces whose payload indexes this instance has verified.
+        self._indexed: set[str] = set()
 
     def capabilities(self) -> Capabilities:
         return QDRANT_CAPABILITIES
@@ -159,10 +170,7 @@ class QdrantVectorStore:
                     # losing the race is success, anything else is not.
                     if not await self._client.collection_exists(name):
                         raise
-                for field in ("document_id", PATHS):
-                    await self._client.create_payload_index(
-                        name, field, field_schema=models.PayloadSchemaType.KEYWORD, wait=True
-                    )
+            await self._ensure_payload_indexes(name)
         self._specs[name] = spec
         log.info(
             "vectorstore.namespace_ready",
@@ -171,6 +179,23 @@ class QdrantVectorStore:
             dim=spec.dim,
             metric=spec.metric,
         )
+
+    async def _ensure_payload_indexes(self, name: str) -> None:
+        """Create any missing payload index.
+
+        Checked on every first use of a namespace, not only when this process
+        created it: an index request that failed after the collection was made
+        would otherwise never be retried, and filters, counts and deletes would
+        silently scan every point.
+        """
+        if name in self._indexed:
+            return
+        info = await self._client.get_collection(name)
+        present = set((info.payload_schema or {}).keys())
+        for field, schema in _PAYLOAD_INDEXES.items():
+            if field not in present:
+                await self._client.create_payload_index(name, field, field_schema=schema, wait=True)
+        self._indexed.add(name)
 
     async def namespace_exists(self, ns: Namespace) -> bool:
         async with _backend(ns.key()):
@@ -195,6 +220,7 @@ class QdrantVectorStore:
             if await self._client.collection_exists(name):
                 await self._client.delete_collection(name)
         self._specs.pop(name, None)
+        self._indexed.discard(name)
         log.info("vectorstore.namespace_dropped", driver="qdrant", namespace=name)
 
     async def _spec_for(self, ns: Namespace) -> NamespaceSpec:
@@ -262,6 +288,8 @@ class QdrantVectorStore:
     # --- reads --------------------------------------------------------------
 
     async def search(self, ns: Namespace, query: VectorQuery) -> list[Hit]:
+        if query.ids is not None and not query.ids:
+            return []
         if (query.dense is None) == (query.sparse is None):
             raise ValueError("search takes exactly one of a dense or a sparse query vector")
         name = ns.key()
@@ -285,12 +313,20 @@ class QdrantVectorStore:
                     namespace=name,
                 )
             using = DENSE
+        query_filter = translate(query.filter) if query.filter is not None else None
+        if query.ids is not None:
+            restrictions: list[Any] = [
+                models.HasIdCondition(has_id=[str(id_) for id_ in query.ids])
+            ]
+            if query_filter is not None:
+                restrictions.append(query_filter)
+            query_filter = models.Filter(must=restrictions)
         async with _backend(name):
             response = await self._client.query_points(
                 name,
                 query=vector,
                 using=using,
-                query_filter=translate(query.filter) if query.filter is not None else None,
+                query_filter=query_filter,
                 search_params=(
                     models.SearchParams(hnsw_ef=query.ef_search)
                     if query.ef_search is not None
@@ -313,6 +349,35 @@ class QdrantVectorStore:
         if query.score_threshold is not None:
             hits = [hit for hit in hits if hit.score >= query.score_threshold]
         return hits
+
+    async def scroll(
+        self,
+        ns: Namespace,
+        filter: FilterNode | None,
+        *,
+        limit: int = 64,
+        cursor: UUID | None = None,
+        payload_fields: Sequence[str] | None = None,
+    ) -> tuple[list[Hit], UUID | None]:
+        if not 1 <= limit <= 256:
+            raise ValueError("Scroll limit must be between 1 and 256.")
+        async with _backend(ns.key()):
+            records, next_cursor = await self._client.scroll(
+                collection_name=ns.key(),
+                scroll_filter=translate(filter) if filter is not None else None,
+                limit=limit,
+                offset=str(cursor) if cursor else None,
+                with_vectors=False,
+                with_payload=list(payload_fields) if payload_fields is not None else True,
+            )
+        return [
+            Hit(
+                id=UUID(str(row.id)),
+                score=0.0,
+                payload={key: value for key, value in (row.payload or {}).items() if key != PATHS},
+            )
+            for row in records
+        ], UUID(str(next_cursor)) if next_cursor is not None else None
 
     async def fetch(self, ns: Namespace, ids: Sequence[UUID]) -> list[Hit]:
         if not ids:
@@ -347,6 +412,15 @@ class QdrantVectorStore:
 
     async def close(self) -> None:
         await self._client.close()
+
+
+#: Payload indexes every namespace carries. Date filters range over
+#: ``created_at``; without an index Qdrant reads each candidate's payload.
+_PAYLOAD_INDEXES: dict[str, models.PayloadSchemaType] = {
+    "document_id": models.PayloadSchemaType.KEYWORD,
+    PATHS: models.PayloadSchemaType.KEYWORD,
+    "created_at": models.PayloadSchemaType.INTEGER,
+}
 
 
 # --- points ------------------------------------------------------------------

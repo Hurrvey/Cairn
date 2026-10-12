@@ -29,7 +29,7 @@ from cairn.core.logging import configure_logging
 from cairn.core.mcp_management import ManagedMCPConfig
 from cairn.mcpserver.server import MCPServer, router
 from cairn.platform.mcp import MCPManagement
-from cairn.retrieval.runtime import QueryEmbeddingRuntime
+from cairn.retrieval.runtime import KnowledgeBaseRuntimeLoader, QueryEmbeddingRuntime
 from cairn.retrieval.service import RetrievalService
 
 
@@ -109,7 +109,14 @@ async def run() -> None:
         settings.retrieval, master_key=settings.master_key, embedding=settings.embedding
     )
     await embeddings.start()
-    retrieval = RetrievalService(embeddings=embeddings)
+    # The same limits as the HTTP data plane: an MCP query is the same hot path.
+    retrieval = RetrievalService(
+        runtime_loader=KnowledgeBaseRuntimeLoader(timeout_s=settings.retrieval.runtime_timeout_s),
+        embeddings=embeddings,
+        search_timeout_s=settings.retrieval.search_timeout_s,
+        request_timeout_s=settings.retrieval.request_timeout_s,
+        slo_p95_ms=settings.retrieval.slo_p95_ms or None,
+    )
 
     async def factory(config: ManagedMCPConfig) -> ManagedListener:
         app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)

@@ -33,7 +33,12 @@ from cairn.embedding.providers import (
 )
 from cairn.embedding.service import EmbeddingService
 from cairn.embedding.tokenizers import HuggingFaceTokenizer, Tokenizer, TokenizerRegistry
-from cairn.retrieval.errors import KbRuntimeCorrupt, KbRuntimeUnavailable, RetrievalUnsupported
+from cairn.retrieval.errors import (
+    KbRuntimeCorrupt,
+    KbRuntimeNotPublished,
+    KbRuntimeUnavailable,
+    RetrievalUnsupported,
+)
 from cairn.vectorstore.base import SparseVector
 
 log = get_logger(__name__)
@@ -90,7 +95,7 @@ class KnowledgeBaseRuntimeLoader:
         values = await self._read([kb_id])
         raw = values[0]
         if raw is None:
-            raise KbRuntimeUnavailable("The knowledge base has no published ACTIVE runtime.")
+            raise KbRuntimeNotPublished("The knowledge base has no published ACTIVE runtime.")
         try:
             runtime = KnowledgeBaseRuntime.model_validate_json(raw)
         except (ValidationError, ValueError, TypeError) as exc:
@@ -100,7 +105,7 @@ class KnowledgeBaseRuntimeLoader:
         if runtime.id != kb_id:
             raise KbRuntimeCorrupt("The published knowledge base identity is invalid.")
         if runtime.status not in {"active", "indexing"} or runtime.index_version <= 0:
-            raise KbRuntimeUnavailable("The knowledge base is not ready for retrieval.")
+            raise KbRuntimeNotPublished("The knowledge base is not ready for retrieval.")
         model = runtime.embedding_model
         if (
             model.capability != "embedding"

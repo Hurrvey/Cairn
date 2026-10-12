@@ -71,7 +71,7 @@ def is_blocked_address(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -
     # IPv4-mapped IPv6 (::ffff:127.0.0.1) would otherwise slip past the v4 rules.
     if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
         address = address.ipv4_mapped
-    return any(address in network for network in BLOCKED_NETWORKS)
+    return address.is_unspecified or any(address in network for network in BLOCKED_NETWORKS)
 
 
 async def _resolve(host: str, port: int) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:

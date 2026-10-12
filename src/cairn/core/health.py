@@ -86,13 +86,17 @@ async def meta(request: Request) -> dict[str, Any]:
         "api_version": "v1",
         "role": settings.role,
         "capabilities": {
-            # Phase 0: only identity exists. Each lands with its module.
+            # A capability is true only where this process serves it; features
+            # that have not shipped (Dify, pipelines, functions) stay false.
             "mcp": settings.serves_data_plane,
-            "dify_compat": False,
+            "dify_compat": settings.serves_data_plane,
             "retrieval_query": retrieval_available,
             "hybrid_search": retrieval_available,
             "weighted_fusion": retrieval_available,
             "parent_expansion": retrieval_available,
+            "filters": retrieval_available,
+            "explain": retrieval_available,
+            "batch": retrieval_available,
             "rerank": retrieval_available and bool(settings.retrieval.rerank_endpoints),
             "pipelines": False,
             "functions": False,
