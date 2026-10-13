@@ -32,7 +32,10 @@ class IngestionRuntimeSettings(BaseSettings):
     docling_assets_path: str = ""
     docling_manifest_path: str = ""
     docling_timeout_s: float = Field(default=600, gt=0, le=3600, allow_inf_nan=False)
-    docling_memory_bytes: int = Field(default=4 * 1024**3, gt=0)
+    # Linux applies this as an address-space ceiling (RLIMIT_AS); torch reserves far more
+    # virtual memory than it uses, so keep it generous and bound real memory with the
+    # container limit. Windows applies it as the job commit limit.
+    docling_memory_bytes: int = Field(default=12 * 1024**3, gt=0)
     docling_persistent: bool = True
     docling_scan_text_layer: bool = True
     docling_office: bool = True

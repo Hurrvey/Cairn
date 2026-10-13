@@ -203,8 +203,9 @@ services:
   # Docling CPU environment on cairn:local; build the model base image first:
   #   docker build -f deploy/pdf-worker/Dockerfile -t cairn-pdf-worker:2.135.0 .
   # Prepare the model assets and manifest once (docs/06-ops/11-pdf-parsing.md), then set
-  # CAIRN_PDF_MODELS_DIR and CAIRN_PDF_MANIFEST in .env. The Docling child is limited to
-  # 4 GiB; the container limit leaves room for the worker process itself.
+  # CAIRN_PDF_MODELS_DIR and CAIRN_PDF_MANIFEST in .env. mem_limit is the real memory bound;
+  # DOCLING_MEMORY_BYTES is only an address-space ceiling for the model child (torch
+  # reserves far more virtual memory than it uses; a 64-page manual peaks near 3 GB RSS).
   worker-parse:
     <<: *worker
     build:
@@ -222,7 +223,7 @@ services:
       CAIRN_INGESTION__DOCLING_PYTHON: /usr/local/bin/python
       CAIRN_INGESTION__DOCLING_ASSETS_PATH: /pdf-models
       CAIRN_INGESTION__DOCLING_MANIFEST_PATH: /pdf-manifest.json
-      CAIRN_INGESTION__DOCLING_MEMORY_BYTES: 4294967296
+      CAIRN_INGESTION__DOCLING_MEMORY_BYTES: 12884901888
       CAIRN_INGESTION__DOCLING_TIMEOUT_S: 600
       HF_HUB_OFFLINE: "1"
       TRANSFORMERS_OFFLINE: "1"

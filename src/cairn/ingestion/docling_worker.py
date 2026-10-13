@@ -134,8 +134,7 @@ def _convert_office(
     )
 
     result = converter.convert(DocumentStream(name=f"source.{fmt}", stream=io.BytesIO(source)))
-    if result.status != ConversionStatus.SUCCESS:
-        raise _WorkerError(EXIT_CORRUPT)
+    _check_conversion(result, ConversionStatus)
     document = result.document
     payload: dict[str, Any] = document.export_to_dict()
     if len(payload.get("pages", {})) > config["max_pages"]:
@@ -166,9 +165,25 @@ def _convert_office(
     return payload
 
 
+def _check_conversion(result: Any, status_type: Any) -> None:
+    """Surface Docling's own error messages; a memory failure is not a corrupt file."""
+    if result.status == status_type.SUCCESS:
+        return
+    messages = [
+        str(getattr(error, "error_message", error)) for error in getattr(result, "errors", [])
+    ]
+    joined = "; ".join(messages)[:1000]
+    print(f"docling conversion {result.status}: {joined}", file=sys.stderr)
+    sys.stderr.flush()
+    if any("MemoryError" in message for message in messages):
+        raise _WorkerError(EXIT_TOO_LARGE)
+    raise _WorkerError(EXIT_CORRUPT)
+
+
 def _collect_assets(document: Any, payload: dict[str, Any], config: dict[str, Any]) -> None:
     """Encode extracted pictures as PNG assets within the configured budgets."""
     assets: list[dict[str, object]] = []
+    seen: set[str] = set()
     total_asset_bytes = 0
     for picture in document.pictures:
         image = picture.get_image(document)
@@ -177,6 +192,13 @@ def _collect_assets(document: Any, payload: dict[str, Any], config: dict[str, An
         buffer = io.BytesIO()
         image.save(buffer, format="PNG")
         value = buffer.getvalue()
+        identity = hashlib.sha256(value).hexdigest()
+        if identity in seen:
+            # The same picture repeated on many pages (a header logo) is stored once.
+            for item in payload["items"]:
+                if item["self_ref"] == picture.self_ref:
+                    item["asset_id"] = identity
+            continue
         if (
             len(assets) >= config["max_assets"]
             or len(value) > config["max_asset_bytes"]
@@ -184,7 +206,7 @@ def _collect_assets(document: Any, payload: dict[str, Any], config: dict[str, An
         ):
             continue
         total_asset_bytes += len(value)
-        identity = hashlib.sha256(value).hexdigest()
+        seen.add(identity)
         assets.append(
             {
                 "name": identity,
@@ -245,8 +267,7 @@ def _convert_pdf(converter: Any, source: bytes, config: dict[str, Any]) -> dict[
         DocumentStream(name="source.pdf", stream=io.BytesIO(source)),
         max_num_pages=config["max_pages"],
     )
-    if result.status != ConversionStatus.SUCCESS:
-        raise _WorkerError(EXIT_CORRUPT)
+    _check_conversion(result, ConversionStatus)
     document = result.document
     payload: dict[str, Any] = document.export_to_dict()
     if len(payload["pages"]) != len(page_geometry):

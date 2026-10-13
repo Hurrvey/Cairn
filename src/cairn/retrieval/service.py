@@ -242,13 +242,20 @@ class RetrievalService:
             if isinstance(outcome, (PermissionDenied, KbRuntimeCorrupt)):
                 raise outcome
             if isinstance(outcome, BaseException):
-                failures.append(self._target_failure(kb_id, "KB_RUNTIME_UNAVAILABLE"))
+                failures.append(
+                    self._target_failure(
+                        kb_id, getattr(outcome, "code", None) or "KB_RUNTIME_UNAVAILABLE"
+                    )
+                )
             else:
                 active.append((outcome, weight))
         if failures and request.strict:
             raise UpstreamUnavailable("Retrieval failed for one or more knowledge bases.")
         if not active:
-            raise UpstreamUnavailable("Retrieval failed for every knowledge base.")
+            raise UpstreamUnavailable(
+                "Retrieval failed for every knowledge base: "
+                + "; ".join(f"{item.knowledge_base_id}={item.code}" for item in failures)
+            )
 
         runtimes = [runtime for runtime, _weight in active]
         degraded = self._validate_supported(request, runtimes)

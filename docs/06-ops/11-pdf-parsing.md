@@ -133,6 +133,18 @@ formula source text is preserved. The worker image needs the `format-docx` and
 `format-pptx` extras, so its manifest changes when the image is rebuilt; regenerate it.
 Office documents have no page preview.
 
+## Memory bounds for the model child
+
+`CAIRN_INGESTION__DOCLING_MEMORY_BYTES` (default 12 GiB) is applied on Linux as the
+child's address-space ceiling (`RLIMIT_AS`) and on Windows as the job commit limit. It is
+not a resident-memory budget: torch reserves far more virtual memory than it uses, and a
+4 GiB ceiling made a 64-page native manual fail inside the layout model with
+`MemoryError` while its real peak was 2.9 GB. Bound real memory with the container
+limit (`mem_limit: 6g` on `worker-parse`). When Docling reports a failed conversion the
+worker writes Docling's error messages to stderr; a memory failure is reported as
+`PDF_TOO_LARGE`, not as a corrupt file. Pictures repeated on many pages (a header logo)
+are stored once and referenced by every element that shows them.
+
 ## Reading order and paragraphs (pdfium baseline)
 
 The pdfium baseline keeps pypdfium2's own reading order. The worker records the
