@@ -27,8 +27,22 @@ The bundled MiniLM embedding server cannot rerank. Endpoint URLs and credentials
 are operator configuration, never supplied by retrieval clients. Each configured
 endpoint requires an explicit workspace UUID allowlist.
 
+The Compose file ships an optional `reranker` service (profile `reranker`) running
+`BAAI/bge-reranker-v2-m3` on TEI; `docker-compose.gpu.yml` moves it to the GPU. Prepare the
+weights once (SHA-256 verified), start it, and name it in the environment file the
+containers load:
+
+```text
+uv run python scripts/prepare_embedding_model.py --model bge-reranker-v2-m3
+docker compose --profile local-model --profile reranker up -d reranker
+```
+
+On an RTX 3060 the service scores 100 candidates in about 80-350 ms (fp16). TEI queues one
+entry per (query, document) pair, so `--max-concurrent-requests` must cover the largest
+candidate list and `--max-client-batch-size` must cover `max_candidates`.
+
 ```dotenv
-CAIRN_RETRIEVAL__RERANK_ENDPOINTS={"company-reranker":{"base_url":"http://reranker:80","dialect":"tei","workspace_ids":["00000000-0000-0000-0000-000000000001"],"allow_private":true,"max_candidates":100}}
+CAIRN_RETRIEVAL__RERANK_ENDPOINTS={"bge-reranker-v2-m3":{"base_url":"http://reranker:80","dialect":"tei","workspace_ids":["00000000-0000-0000-0000-000000000001"],"allow_private":true,"max_candidates":100}}
 ```
 
 Replace the illustrative workspace UUID with the actual owning workspace; do not
@@ -41,11 +55,12 @@ checks, no redirects, a response cap, and a per-stage deadline.
 Request selection uses the configured name, for example:
 
 ```json
-{"rerank":{"enabled":true,"model_id":"company-reranker","top_n":5,"timeout_s":1.5}}
+{"rerank":{"enabled":true,"model_id":"bge-reranker-v2-m3","top_n":5,"timeout_s":1.5}}
 ```
 
-An unavailable optional stage retains base retrieval with an explicit degradation
-notice. Workspace authorization failures remain permission failures. Tests of the
+A knowledge base selects its default under retrieval settings (`rerank.model_id`); a request
+may still name another configured endpoint. An unavailable optional stage retains base
+retrieval with an explicit degradation notice. Workspace authorization failures remain permission failures. Tests of the
 adapter protocol do not imply that an external cross-encoder has been deployed
 or that retrieval-quality improvements have been measured.
 

@@ -119,6 +119,30 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
 
+  # Optional, started on demand: cross-encoder reranking (bge-reranker-v2-m3) for the
+  # retrieval rerank stage. Prepare weights first:
+  #   uv run python scripts/prepare_embedding_model.py --model bge-reranker-v2-m3
+  # Start: docker compose --profile local-model --profile reranker up -d reranker
+  # then name it in CAIRN_RETRIEVAL__RERANK_ENDPOINTS (docs/06-ops/07-pdf-and-retrieval.md).
+  # About 3 GB of memory on CPU; docker-compose.gpu.yml runs it on the GPU.
+  reranker:
+    image: ghcr.io/huggingface/text-embeddings-inference@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07
+    profiles: [reranker]
+    restart: unless-stopped
+    command: ["--model-id", "/model", "--max-client-batch-size", "128", "--max-batch-tokens", "65536", "--max-concurrent-requests", "256"]
+    environment:
+      HF_HUB_OFFLINE: "1"
+    volumes:
+      - type: bind
+        source: ${CAIRN_RERANKER_DIR:-./data/models/bge-reranker-v2-m3}
+        target: /model
+        read_only: true
+    cpus: 2
+    mem_limit: 6g
+    pids_limit: 256
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
   # Optional, started on demand: learned sparse vectors (and dense bge-m3 embeddings) for
   # keyword search. Not needed for BM25. About 3 GB of memory while running.
   # Prepare weights first: uv run python scripts/prepare_embedding_model.py --model bge-m3

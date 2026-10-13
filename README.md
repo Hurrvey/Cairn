@@ -108,6 +108,11 @@ docker compose --profile local-model up -d --build
 docker compose logs migrate
 ```
 
+For Chinese or multilingual content register the bge-m3 sidecar instead of the bundled
+English-only MiniLM, and optionally start the `reranker` service; both run on an NVIDIA GPU
+through `docker-compose.gpu.yml` ([embedding providers](docs/06-ops/08-embedding-providers.md),
+[reranking](docs/06-ops/07-pdf-and-retrieval.md#reranking-endpoint-configuration)).
+
 Open `http://127.0.0.1:8080` and complete the initial password change. The overview lists the three
 setup steps (model, storage, knowledge base); then upload documents, watch them move through the
 pipeline, and search from the knowledge base's **Search** section. Press Ctrl+K to jump anywhere.

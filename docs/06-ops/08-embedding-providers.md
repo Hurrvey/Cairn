@@ -40,6 +40,9 @@ produces both.
 
 ## bge-m3 sidecar (optional, on demand)
 
+The bundled MiniLM is English-only: on Chinese text its dense scores do not separate chunks,
+so Chinese or multilingual deployments should register bge-m3 as their embedding model.
+
 The sidecar is **off by default**. The normal start command does not run it, and nothing needs it
 unless a knowledge base uses bge-m3: without it, keyword search uses built-in BM25 and dense
 vectors come from the provider you registered (for example the bundled TEI MiniLM).

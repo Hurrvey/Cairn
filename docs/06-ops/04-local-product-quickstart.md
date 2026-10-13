@@ -35,6 +35,13 @@ Remote deployments require HTTPS, secure cookies, proper network controls and a 
 
 ## Configure through the UI
 
+The bundled MiniLM is an English model: on Chinese text its dense scores do not separate
+chunks at all and retrieval falls back to keyword matching. For Chinese or multilingual
+content start the bge-m3 sidecar first and register it instead of MiniLM (steps 1-4 of
+[Embedding providers](08-embedding-providers.md#bge-m3-sidecar-optional-on-demand)); on an
+NVIDIA GPU add `-f docker-compose.gpu.yml` to its commands. The MiniLM steps below remain the
+smallest English-only setup.
+
 1. **Models → Add provider**: name `Local MiniLM`, TEI endpoint `http://embedding:80`, enable trusted
    private networking, immutable deployment revision `minilm-1110a243`, batch limit16.
 2. **Register model**: `sentence-transformers/all-MiniLM-L6-v2`, dimension384, input token limit256,
@@ -45,6 +52,11 @@ Remote deployments require HTTPS, secure cookies, proper network controls and a 
 4. **Knowledge bases**: create one with the model and both bindings, upload supported documents,
    watch each document move through the pipeline, open it to inspect/edit chunks, and query in the
    **Search** section. The overview page lists these setup steps until they are complete.
+
+Optional reranking: the `reranker` service (profile `reranker`, bge-reranker-v2-m3 on TEI)
+re-scores the top candidates with a cross-encoder. Prepare its weights, start it, name it in
+`CAIRN_RETRIEVAL__RERANK_ENDPOINTS` and select it in the knowledge base's retrieval settings;
+see [PDF/OCR and extended retrieval](07-pdf-and-retrieval.md#reranking-endpoint-configuration).
 
 Supported uploads: TXT, Markdown, HTML, JSON, DOCX, PPTX, XLSX, CSV, PDF, PNG, JPEG and single-page
 TIFF, subject to parser safety and size limits. Scanned pages use bounded local Tesseract OCR

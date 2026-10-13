@@ -2,6 +2,7 @@
 
     uv run python scripts/prepare_embedding_model.py            # MiniLM + bge-m3 tokenizer
     uv run python scripts/prepare_embedding_model.py --model bge-m3   # bge-m3 weights (2.3 GB)
+    uv run python scripts/prepare_embedding_model.py --model bge-reranker-v2-m3
 
 The bge-m3 tokenizer is always prepared (17 MB): Cairn counts tokens with it for
 bge-m3 and uses it as the budget estimate for hosted models whose tokenizers are
@@ -61,6 +62,28 @@ MODELS: dict[str, dict[str, object]] = {
             "sparse_linear.pt": "45c93804d2142b8f6d7ec6914ae23a1eee9c6a1d27d83d908a20d2afb3595ad9",
             "colbert_linear.pt": "19bfbae397c2b7524158c919d0e9b19393c5639d098f0a66932c91ed8f5f9abb",
             "pytorch_model.bin": "b5e0ce3470abf5ef3831aa1bd5553b486803e83251590ab7ff35a117cf6aad38",
+        },
+    },
+    # Cross-encoder for the optional `reranker` Compose service (TEI loads the safetensors).
+    "bge-reranker-v2-m3": {
+        "repo": "BAAI/bge-reranker-v2-m3",
+        "revision": "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e",
+        "output": Path("data/models/bge-reranker-v2-m3"),
+        "files": {
+            "config.json": "13dcd6c31d9fec9d1d8e158702072f62d7fa7d312a64b9fe057bec9a08cfe41a",
+            "tokenizer_config.json": (
+                "7e4c1cc848840aeccdd763458c18dd525eb0f795c992e00ebe9c28554e7db2d4"
+            ),
+            "special_tokens_map.json": (
+                "8c785abebea9ae3257b61681b4e6fd8365ceafde980c21970d001e834cf10835"
+            ),
+            "tokenizer.json": "69564b696052886ed0ac63fa393e928384e0f8caada38c1f4864a9bfbf379c15",
+            "sentencepiece.bpe.model": (
+                "cfc8146abe2a0488e9e2a0c56de7952f7c11ab059eca145a0a727afce0db2865"
+            ),
+            "model.safetensors": (
+                "d9e3e081faff1eefb84019509b2f5558fd74c1a05a2c7db22f74174fcedb5286"
+            ),
         },
     },
 }

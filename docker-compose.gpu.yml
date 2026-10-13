@@ -1,6 +1,7 @@
-# NVIDIA GPU for the bge-m3 sidecar (fp16, CUDA torch):
+# NVIDIA GPU for the bge-m3 sidecar (fp16, CUDA torch) and the TEI reranker:
 #
 #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile bge-m3 up -d --build bge-m3
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile reranker up -d reranker
 #
 # Needs the NVIDIA container runtime (Docker Desktop with WSL 2 on Windows, or
 # nvidia-container-toolkit on Linux). The CUDA image is several gigabytes.
@@ -12,6 +13,17 @@ services:
     image: cairn-bge-m3:cuda
     environment:
       BGE_M3_DEVICE: cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+  # TEI image built for Ampere (compute capability 8.6: RTX 30 series, A10, A40); other
+  # generations use the matching TEI tag (80-, 89-, 90-).
+  reranker:
+    image: ghcr.io/huggingface/text-embeddings-inference:86-1.9.3
     deploy:
       resources:
         reservations:
