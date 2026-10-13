@@ -71,9 +71,11 @@ text layer now bypass Docling OCR (`pdf_routing.py`, rule `scan-text-layer/1`).
    missed, dense scores 0.44-0.50 for every Chinese chunk). Fixed on the way: Docling child
    address-space ceiling 12 GiB with honest failure codes; embedding deadline per batch with the
    worker's read timeout following it and compose knob `CAIRN_EMBEDDING_DOCUMENT_TIMEOUT_S`;
-   sidecar warm-up before `/health` is ready. Open: a dead-lettered embed leaves the index
-   version `building` without a KB-level error (retry recovers); the reindex estimate ignores
-   CPU throughput; no reranker is registered locally; the PDF gold annotation is still pending.
+   sidecar warm-up before `/health` is ready; a terminal document failure names the blocked
+   build on its index version and activation clears the note; the bge-reranker-v2-m3
+   cross-encoder is bundled (TEI service with pinned, SHA-256-verified weights) and the pilot
+   knowledge base reranks by default, sharpening the margins (annual leave: 0.99 vs 0.25).
+   Open: the reindex estimate ignores CPU throughput; the PDF gold annotation is still pending.
 
 ## Ordered development queue
 

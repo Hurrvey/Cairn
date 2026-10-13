@@ -65,10 +65,12 @@ format and rules. Formula recognition is not implemented (formula text is kept v
 Docling occasionally merges two values into one table cell, and the production M12
 custom-function sandbox is not built; the default custom worker fails closed unless an
 explicit scoped executor is injected. `docs/` and `tests/` were git-ignored between
-2026-09-23 and 2026-10-12 and are tracked again. A document whose embed task dead-letters
-leaves its index version in `building` with no knowledge-base-level error (the document's
-retry resumes the failed stage); the reindex estimate assumes GPU-class embedding throughput;
-the local stack registers no reranker. The current restart point is the
+2026-09-23 and 2026-10-12 and are tracked again. A document whose embed task dead-letters now
+names the failed document and stage on the building index version (the Versions panel renders
+it; retry resumes the failed stage) and activation clears the note; the reindex estimate
+assumes GPU-class embedding throughput; reranking runs only where the optional `reranker`
+service is started and named in `CAIRN_RETRIEVAL__RERANK_ENDPOINTS`. The current restart point
+is the
 [completion map](docs/04-plan/37-current-completion-map.md).
 
 **Start here → [`docs/README.md`](docs/README.md)** (documentation map and reading order)
