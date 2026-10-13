@@ -5,7 +5,7 @@
 > the **server** that produces, stores, indexes, and serves knowledge.
 
 **Status:** Qdrant knowledge product with advanced retrieval, MCP directory/document tools, Dify compatibility, S3-compatible object storage, a session-authorised model gateway with usage accounting, and Python/TypeScript client SDKs. PDF parsing runs **Docling 2.135.0 by default** with a persistent model worker; scans that already carry a text layer are read by the pypdfium2 baseline instead of being OCR'd again ([PDF parsing](docs/06-ops/11-pdf-parsing.md)). The independent-human PDF quality gate remains **open**; the annotation kit is ready ([guide](docs/05-quality/05-pdf-annotation-guide.md)).
-**Documentation baseline date:** 2026-08-28 · **Code status date:** 2026-10-12
+**Documentation baseline date:** 2026-08-28 · **Code status date:** 2026-10-13
 
 ---
 
@@ -46,6 +46,18 @@ retrieved real PDFs end to end. Earlier checkpoints and their counts are recorde
 [execution ledger](docs/04-plan/15-execution-ledger.md) and the acceptance documents under
 `docs/04-plan/`.
 
+**Verification (2026-10-13):** a pilot with two of the project owner's real documents, a
+64-page HR manual (PDF, native text) and a duty roster (XLSX), ran through the product stack.
+Docling parsed the manual into 907 elements and 470 chunks and the roster into one table; after
+the knowledge base was rebuilt from the bundled MiniLM onto the bge-m3 sidecar (dense +
+learned sparse, CUDA on an RTX 3060: about 45 chunks/s, 45 ms per query) all seven test
+questions return the correct passage at rank 1 (MiniLM: four of seven within the top three,
+three missed). MiniLM is English-only and scored every Chinese chunk alike (0.44-0.50), so
+Chinese retrieval had depended on BM25 alone. The pilot surfaced and fixed a 4 GiB address-space
+ceiling that failed the Docling child with `MemoryError`, an embedding deadline that covered a
+whole document call instead of one batch, and the sidecar reporting healthy before its first,
+slow CUDA forward pass.
+
 **Still open:** the PDF quality gate needs independent human annotation of the 30-document
 corpus; `scripts/prepare_pdf_annotations.py` generates the empty gold skeleton and page
 templates and the [annotation guide](docs/05-quality/05-pdf-annotation-guide.md) fixes the
@@ -53,7 +65,10 @@ format and rules. Formula recognition is not implemented (formula text is kept v
 Docling occasionally merges two values into one table cell, and the production M12
 custom-function sandbox is not built; the default custom worker fails closed unless an
 explicit scoped executor is injected. `docs/` and `tests/` were git-ignored between
-2026-09-23 and 2026-10-12 and are tracked again. The current restart point is the
+2026-09-23 and 2026-10-12 and are tracked again. A document whose embed task dead-letters
+leaves its index version in `building` with no knowledge-base-level error (the document's
+retry resumes the failed stage); the reindex estimate assumes GPU-class embedding throughput;
+the local stack registers no reranker. The current restart point is the
 [completion map](docs/04-plan/37-current-completion-map.md).
 
 **Start here → [`docs/README.md`](docs/README.md)** (documentation map and reading order)

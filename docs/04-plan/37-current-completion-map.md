@@ -64,6 +64,16 @@ text layer now bypass Docling OCR (`pdf_routing.py`, rule `scan-text-layer/1`).
    product purge all pass. Reviewed SDK increment is accepted; broader CI/publication remain open.
    Sync timeout remains explicitly soft aggregate plus per-I/O limits; async/TS require hard overall
    cancellation. No external registry publication or full SDK module completion is claimed.
+4. 2026-10-13 real-document pilot (the owner's 64-page HR manual PDF and duty-roster XLSX)
+   through the product stack: Docling parse 907 elements / 470 chunks, roster one table. The
+   knowledge base was rebuilt from MiniLM to the bge-m3 sidecar (CUDA, RTX 3060, ~45 chunks/s,
+   ~45 ms per query); 7/7 questions correct at rank 1 (MiniLM: 4/7 within the top three, 3
+   missed, dense scores 0.44-0.50 for every Chinese chunk). Fixed on the way: Docling child
+   address-space ceiling 12 GiB with honest failure codes; embedding deadline per batch with the
+   worker's read timeout following it and compose knob `CAIRN_EMBEDDING_DOCUMENT_TIMEOUT_S`;
+   sidecar warm-up before `/health` is ready. Open: a dead-lettered embed leaves the index
+   version `building` without a KB-level error (retry recovers); the reindex estimate ignores
+   CPU throughput; no reranker is registered locally; the PDF gold annotation is still pending.
 
 ## Ordered development queue
 
