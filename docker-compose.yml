@@ -16,6 +16,9 @@ x-app: &app
     # bge-m3's tokenizer also budgets hosted models whose tokenizers are unpublished.
     CAIRN_INGESTION__TOKENIZERS_JSON: '{"minilm":"hf:/models/minilm/tokenizer.json","bge-m3":"hf:/models/bge-m3/tokenizer.json"}'
     CAIRN_RETRIEVAL__TOKENIZER_FILES: '{"minilm":"/models/minilm/tokenizer.json","bge-m3":"/models/bge-m3/tokenizer.json"}'
+    # Deadline for one batch of document embeddings. CPU bge-m3 hosts raise it
+    # (docs/06-ops/08-embedding-providers.md).
+    CAIRN_EMBEDDING__DOCUMENT_TIMEOUT_S: ${CAIRN_EMBEDDING_DOCUMENT_TIMEOUT_S:-30}
     CAIRN_MCP__MANAGED: "true"
     CAIRN_MCP__PORT_MIN: ${CAIRN_MCP_PORT_MIN:-8081}
     CAIRN_MCP__PORT_MAX: ${CAIRN_MCP_PORT_MAX:-8090}
