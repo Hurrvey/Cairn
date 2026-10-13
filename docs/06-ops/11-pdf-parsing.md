@@ -43,7 +43,7 @@ path; import-only or native-only testing does not establish scan support. Packag
 and model license declarations and bundled notices are recorded in the acceptance
 directory; redistribution review remains a separate operator responsibility.
 
-The product Compose file builds the parse worker from `deploy/pdf-worker/Dockerfile.parse`
+The product Compose file builds the parse worker from `deploy/pdf-worker/Dockerfile.parse` on top of the application image, which it builds first (a named build context)
 (the regular product image plus the pinned model environment) and starts it with
 `CAIRN_INGESTION__PDF_ENGINE=docling`. Build the regular product image and the model
 base image first, then set `CAIRN_PDF_MODELS_DIR` and `CAIRN_PDF_MANIFEST` in `.env` to

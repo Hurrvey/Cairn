@@ -1,5 +1,8 @@
 FROM cairn-pdf-worker:2.135.0 AS pdfmodels
-FROM cairn:local
+# cairn-base is the application image, passed by compose as a named build context
+# (additional_contexts) so the two builds are ordered. By hand:
+#   docker build --build-context cairn-base=docker-image://cairn:local -f deploy/pdf-worker/Dockerfile.parse .
+FROM cairn-base
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends libglib2.0-0 libgl1 && rm -rf /var/lib/apt/lists/*
 COPY --from=pdfmodels /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages

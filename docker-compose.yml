@@ -214,6 +214,11 @@ services:
     build:
       context: .
       dockerfile: deploy/pdf-worker/Dockerfile.parse
+      # The base image is handed over as a named context, so compose builds
+      # api-control first instead of racing it (a bare `build` runs in parallel
+      # and layered this image on the previous cairn:local).
+      additional_contexts:
+        cairn-base: service:api-control
     image: cairn-pdf-parse:local
     mem_limit: 6g
     cpus: 2
