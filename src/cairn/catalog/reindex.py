@@ -63,6 +63,8 @@ async def activate_build_if_ready(
     kb.config_version += 1
     kb.chunk_count = total
     kb.last_indexed_at = utcnow()
+    # A note left by a failed document (since retried) no longer applies.
+    version.error = None
     await repository.set_index_state(session, kb.id, version.version, "active")
     if previous is not None and previous != version.version:
         retire_after = utcnow() + _INDEX_RETENTION

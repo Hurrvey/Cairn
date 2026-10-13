@@ -988,7 +988,7 @@ class CatalogIngestionFacade:
             locked = await self._lock_current(session, context)
             if locked is None:
                 return
-            document, run, _kb = locked
+            document, run, kb = locked
             if run.state == "failed":
                 return
             document.stage_detail = stage
@@ -999,6 +999,20 @@ class CatalogIngestionFacade:
                 run.previous_committed_state = run.state
                 document.state = "failed"
                 run.state = "failed"
+                if run.index_version == kb.building_index_version:
+                    # The build cannot activate until this document succeeds; say so
+                    # on the version instead of leaving it "building" unexplained.
+                    await self._repo.set_index_state(
+                        session,
+                        kb.id,
+                        run.index_version,
+                        "building",
+                        error=(
+                            f"Document {document.title or document.id} failed at the "
+                            f"{stage} stage ({error_code}); the build resumes once it "
+                            "is retried from its document page."
+                        ),
+                    )
 
     async def publish_runtime(self, kb_id: UUID) -> None:
         from cairn.catalog.service import get_catalog_service

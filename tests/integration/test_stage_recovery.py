@@ -493,3 +493,70 @@ async def test_publication_failure_retry_does_not_embed_or_reindex(
     assert len(provider.calls) == provider_calls
     assert upsert_calls == index_upserts
     assert publish_calls == 2
+
+
+@pytest.mark.anyio
+async def test_terminal_failure_notes_the_blocked_build_on_the_version(
+    pipeline_admin: Principal, tmp_path: Path
+) -> None:
+    _catalog, kb, registration, _source, _object_key = await _create_pipeline_document(
+        pipeline_admin, tmp_path
+    )
+    assert registration.document is not None
+    context = await _claim_parse_context()
+    await CatalogIngestionFacade().record_failure(
+        context,
+        stage="parse",
+        error_code="INGESTION_ARTIFACT_INVALID",
+        detail="The ingestion artifact is invalid.",
+        terminal=True,
+    )
+
+    async with session_scope() as session:
+        state, error = (
+            await session.execute(
+                text("SELECT state, error FROM kb_index_version WHERE kb_id=:kb_id AND version=1"),
+                {"kb_id": kb.id},
+            )
+        ).one()
+
+    assert state == "building"
+    assert error is not None
+    assert "INGESTION_ARTIFACT_INVALID" in error
+    assert "retried" in error
+
+
+@pytest.mark.anyio
+async def test_activation_clears_the_blocked_build_note(
+    pipeline_admin: Principal, tmp_path: Path
+) -> None:
+    catalog, kb, registration, _source, _object_key = await _create_pipeline_document(
+        pipeline_admin, tmp_path
+    )
+    assert registration.document is not None
+    context = await _claim_parse_context()
+    await CatalogIngestionFacade().record_failure(
+        context,
+        stage="parse",
+        error_code="INGESTION_ARTIFACT_INVALID",
+        detail="The ingestion artifact is invalid.",
+        terminal=True,
+    )
+    await catalog.retry_document(pipeline_admin, registration.document.id)
+
+    pipeline = (await _test_pipeline(kb, tmp_path))[0]
+    for queue in ("parse", "chunk", "embed", "index"):
+        worker = TaskWorker(queue, concurrency=1, poll_interval=0.01)
+        register_pipeline_handlers(worker, pipeline)
+        await _execute_one(worker)
+
+    async with session_scope() as session:
+        state, error = (
+            await session.execute(
+                text("SELECT state, error FROM kb_index_version WHERE kb_id=:kb_id AND version=1"),
+                {"kb_id": kb.id},
+            )
+        ).one()
+
+    assert state == "active"
+    assert error is None
