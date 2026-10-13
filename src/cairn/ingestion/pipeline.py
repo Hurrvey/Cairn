@@ -736,6 +736,13 @@ class IngestionPipeline:
             code = "INGESTION_STAGE_ERROR"
             detail = "The ingestion stage could not be completed."
             retryable = True
+            # The generic code hides the cause; keep the exception identity in the log.
+            log.warning(
+                "ingestion.stage_error",
+                stage=stage,
+                error=type(exc).__name__,
+                message=str(exc)[:300],
+            )
         try:
             await self._catalog.record_failure(
                 context,

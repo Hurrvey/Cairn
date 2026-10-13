@@ -958,7 +958,7 @@ async def document_parse_summary(
         "revision": ir.revision,
         "pages": ir.pages,
         "producer": ir.producer,
-        "engine": ir.metadata.get("pdf_engine"),
+        "engine": ir.metadata.get("pdf_engine") or ir.metadata.get("engine"),
         "warnings": ir.warnings,
         "quality_status": ir.quality_status if ir.identity_version == 2 else "legacy",
         "element_count": len(ir.elements),
