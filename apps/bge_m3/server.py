@@ -37,6 +37,7 @@ from pydantic import BaseModel, Field, field_validator
 __all__ = ["Encoder", "SidecarSettings", "create_app"]
 
 MODEL_NAME = "BAAI/bge-m3"
+WARMUP_TEXT = "warm-up"
 
 
 class Encoder(Protocol):
@@ -170,9 +171,15 @@ def create_app(
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # Loading takes tens of seconds on CPU; do it off the event loop so
         # /health answers "loading" meanwhile instead of timing out.
-        state["encoder"] = (
-            encoder if encoder is not None else await asyncio.to_thread(FlagEncoder, config)
-        )
+        if encoder is not None:
+            loaded = encoder
+        else:
+            loaded = await asyncio.to_thread(FlagEncoder, config)
+            # The first forward pass on CUDA takes seconds (context, kernel
+            # selection); run it here so the first real queries, which have a
+            # two-second deadline, do not pay for it after /health turned green.
+            await asyncio.to_thread(loaded.encode, [WARMUP_TEXT], dense=True, sparse=True)
+        state["encoder"] = loaded
         yield
 
     app = FastAPI(title="bge-m3 sidecar", version="1.0.0", lifespan=lifespan, docs_url=None)

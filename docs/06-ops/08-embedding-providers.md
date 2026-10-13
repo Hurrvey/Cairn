@@ -94,6 +94,12 @@ chunks (16 per request for bge-m3), not for the whole document: a 64-page manual
 batches and each gets a full deadline. On this CPU a batch takes 6-14 s, so the default holds;
 raise it only if single batches exceed it. The worker's HTTP read timeout follows the same value.
 
+Measured on an RTX 3060 with `docker-compose.gpu.yml` (fp16, about 1.5 GB of VRAM): about 45
+chunks per second for 16-chunk batches of ~500-token Chinese text and 45 ms per query, so the
+default deadlines hold with room to spare. The first forward pass after a start takes seconds;
+the sidecar runs it itself before `/health` reports ready, so restarting it does not fail the
+first queries.
+
 Give Docker enough memory for everything you run: one full stack plus the sidecar needs roughly
 10 GB; the kernel stops the largest process when the VM runs out.
 
