@@ -98,6 +98,9 @@ class TaskSettings(BaseModel):
 class EmbeddingSettings(BaseModel):
     cache_ttl_s: int = Field(default=604800, ge=1)
     cache_enabled: bool = True
+    #: Deadline for one provider request (one batch of texts), including the
+    #: wait for a concurrency slot and retries. A document of many batches
+    #: gets a full deadline per batch.
     query_timeout_s: float = Field(default=2, gt=0)
     document_timeout_s: float = Field(default=30, gt=0)
     max_concurrency: int = Field(default=8, ge=1)

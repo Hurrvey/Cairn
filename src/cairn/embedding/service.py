@@ -138,11 +138,7 @@ class EmbeddingService:
         batch_size: int | None,
     ) -> list[Vector]:
         with metrics.duration.labels(purpose=purpose).time():
-            try:
-                async with asyncio.timeout(self._timeout(purpose)):
-                    return await self._embed(model, texts, purpose=purpose, batch_size=batch_size)
-            except TimeoutError as exc:
-                raise EmbeddingTimeout() from exc
+            return await self._embed(model, texts, purpose=purpose, batch_size=batch_size)
 
     async def _run_hybrid(
         self,
@@ -155,18 +151,14 @@ class EmbeddingService:
         batch_size: int | None,
     ) -> HybridEmbeddings:
         with metrics.duration.labels(purpose=purpose).time():
-            try:
-                async with asyncio.timeout(self._timeout(purpose)):
-                    return await self._embed_hybrid(
-                        model,
-                        texts,
-                        purpose=purpose,
-                        dense=dense,
-                        sparse=sparse,
-                        batch_size=batch_size,
-                    )
-            except TimeoutError as exc:
-                raise EmbeddingTimeout() from exc
+            return await self._embed_hybrid(
+                model,
+                texts,
+                purpose=purpose,
+                dense=dense,
+                sparse=sparse,
+                batch_size=batch_size,
+            )
 
     def _prepare(self, model: ModelRef, text: str, tokenizer: Tokenizer, purpose: Purpose) -> str:
         if not isinstance(text, str):
@@ -467,7 +459,25 @@ class EmbeddingService:
         request: Callable[[], Awaitable[_T]],
         validate: Callable[[_T], _R],
     ) -> _R:
-        """One provider request under the concurrency bound, retry policy and circuit."""
+        """One provider request: deadline, concurrency bound, retry policy and circuit.
+
+        The deadline covers one batch: waiting for a slot, the request and its
+        retries. A document call embeds many batches and each gets a full
+        deadline, so a slow local model finishes a large document instead of
+        timing out as a whole and starting over on every attempt.
+        """
+        try:
+            async with asyncio.timeout(self._timeout(purpose)):
+                return await self._attempt(purpose, request, validate)
+        except TimeoutError as exc:
+            raise EmbeddingTimeout() from exc
+
+    async def _attempt(
+        self,
+        purpose: Purpose,
+        request: Callable[[], Awaitable[_T]],
+        validate: Callable[[_T], _R],
+    ) -> _R:
         for attempt in range(self._settings.max_retries + 1):
             try:
                 async with self._semaphore:

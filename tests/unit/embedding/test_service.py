@@ -373,3 +373,41 @@ async def test_document_cache_uses_bulk_operations(
     await service.embed_documents(model, texts)
     assert cache.reads == 2
     assert len(provider.calls) == 1
+
+
+async def test_document_deadline_applies_per_batch_not_per_call(
+    provider: Provider,
+    cache: InMemoryCache,
+    tokenizers: TokenizerRegistry,
+    model: ModelRef,
+) -> None:
+    # Four batches of one text at 0.03 s each take 0.12 s in total; the 0.05 s
+    # document deadline must cover each batch, not the whole document.
+    provider.delay = 0.03
+    service = EmbeddingService(
+        provider=provider,
+        cache=cache,
+        tokenizers=tokenizers,
+        settings=EmbeddingSettings(cache_enabled=False, document_timeout_s=0.05),
+    )
+    vectors = await service.embed_documents(model, ["a", "b", "c", "d"], batch_size=1)
+    assert len(vectors) == 4
+    assert len(provider.calls) == 4
+
+
+async def test_document_deadline_still_bounds_one_slow_batch(
+    provider: Provider,
+    cache: InMemoryCache,
+    tokenizers: TokenizerRegistry,
+    model: ModelRef,
+) -> None:
+    provider.delay = 0.08
+    service = EmbeddingService(
+        provider=provider,
+        cache=cache,
+        tokenizers=tokenizers,
+        settings=EmbeddingSettings(cache_enabled=False, document_timeout_s=0.05),
+    )
+    with pytest.raises(EmbeddingTimeout):
+        await service.embed_documents(model, ["a"], batch_size=1)
+    assert provider.active == 0

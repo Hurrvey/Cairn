@@ -166,6 +166,7 @@ class _HTTPProvider:
         allow_private: bool = False,
         max_batch_size: int | None = None,
         max_response_bytes: int = 16 * 1024 * 1024,
+        timeout_s: float = 30.0,
     ) -> None:
         max_batch_size = self.default_batch_size if max_batch_size is None else max_batch_size
         try:
@@ -181,12 +182,14 @@ class _HTTPProvider:
             or not namespace
             or max_batch_size <= 0
             or max_response_bytes <= 0
+            or timeout_s <= 0
         ):
             raise EmbeddingConfigurationError("Invalid embedding endpoint configuration.")
         self._url = str(url).rstrip("/") + self.path
         self._allow_private = allow_private
         self._api_key = api_key
         self._max_response_bytes = max_response_bytes
+        self._timeout_s = timeout_s
         self.max_batch_size = max_batch_size
         self.cache_namespace = sha256(
             json.dumps([namespace, str(url), self.dialect]).encode()
@@ -205,7 +208,7 @@ class _HTTPProvider:
         self._client = httpx.AsyncClient(
             transport=SafeTransport(allow_private=self._allow_private, retries=0),
             headers=headers,
-            timeout=httpx.Timeout(30, connect=5),
+            timeout=httpx.Timeout(self._timeout_s, connect=5),
             follow_redirects=False,
         )
         return self
@@ -411,8 +414,13 @@ def build_provider(
     api_key: SecretStr | None = None,
     allow_private: bool = False,
     max_batch_size: int | None = None,
+    timeout_s: float = 30.0,
 ) -> HttpEmbeddingProvider:
-    """The one place a provider family becomes an adapter."""
+    """The one place a provider family becomes an adapter.
+
+    ``timeout_s`` is the HTTP read timeout of one request; callers that embed
+    documents pass the per-batch document deadline so the two agree.
+    """
     provider_type = _FAMILIES.get(family)
     if provider_type is None:
         raise EmbeddingConfigurationError(f"Embedding provider family {family!r} has no adapter.")
@@ -429,4 +437,5 @@ def build_provider(
         api_key=api_key,
         allow_private=allow_private,
         max_batch_size=max_batch_size,
+        timeout_s=timeout_s,
     )

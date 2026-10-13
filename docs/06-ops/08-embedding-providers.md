@@ -89,6 +89,11 @@ ingestion of a large corpus should use a GPU. If query encoding competes with in
 CPU, raise `CAIRN_EMBEDDING__QUERY_TIMEOUT_S` (and `CAIRN_RETRIEVAL__REQUEST_TIMEOUT_S`, at most 30)
 rather than letting hybrid search fall back to vector search.
 
+`CAIRN_EMBEDDING__DOCUMENT_TIMEOUT_S` (default 30) is the deadline for one batch of document
+chunks (16 per request for bge-m3), not for the whole document: a 64-page manual is about 15
+batches and each gets a full deadline. On this CPU a batch takes 6-14 s, so the default holds;
+raise it only if single batches exceed it. The worker's HTTP read timeout follows the same value.
+
 Give Docker enough memory for everything you run: one full stack plus the sidecar needs roughly
 10 GB; the kernel stops the largest process when the VM runs out.
 

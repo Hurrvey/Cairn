@@ -136,6 +136,8 @@ class PipelineRuntime:
                 api_key=api_key,
                 allow_private=allow_private,
                 max_batch_size=max_batch_size,
+                # One batch per request: the read timeout must not undercut the deadline.
+                timeout_s=get_settings().embedding.document_timeout_s,
             )
         except Exception as exc:
             raise ValidationFailed(
