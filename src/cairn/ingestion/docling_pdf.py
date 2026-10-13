@@ -11,13 +11,14 @@ import subprocess
 import sys
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Protocol
 
 from pydantic import ValidationError
 
 from cairn.core.document_ir import Element, Formula, Location, Provenance, Table, TableCell
 from cairn.core.native_process import kill_tree, spawn_supervised
-from cairn.ingestion.base import Asset, ParseContext, ParsedDocument
+from cairn.ingestion.base import Asset, ParseContext, ParsedDocument, Parser
+from cairn.ingestion.office_package import inspect_ooxml_package
 from cairn.ingestion.pdf import (
     PdfCorruptFile,
     PdfEngineUnavailable,
@@ -73,7 +74,17 @@ def _cell_locations(cell: dict[str, Any], table_locations: list[Location]) -> tu
     )
 
 
+_UNITS_PER_POINT = {"emu": 12700.0}
+
+
 def normalize_docling(payload: dict[str, Any]) -> ParsedDocument:
+    """Turn a worker payload (PDF, DOCX or PPTX) into parser-local elements and assets.
+
+    PDF elements must carry page provenance. Office elements may carry none (Word has
+    no pages) or PowerPoint slide geometry in EMU, which is converted to points.
+    """
+    fmt = str(payload.get("format", "pdf"))
+    scale = 1.0 / _UNITS_PER_POINT.get(str(payload.get("units", "points")), 1.0)
     try:
         pages = payload["pages"]
         if (
@@ -102,20 +113,15 @@ def normalize_docling(payload: dict[str, Any]) -> ParsedDocument:
                 page = prov["page_no"]
                 size = pages[str(page)]["size"]
                 box = prov["bbox"]
-                coords = (box["l"], box["b"], box["r"], box["t"])
+                width, height = size["width"] * scale, size["height"] * scale
+                coords = (box["l"] * scale, box["b"] * scale, box["r"] * scale, box["t"] * scale)
                 if box.get("coord_origin") == "TOPLEFT":
-                    coords = (
-                        box["l"],
-                        size["height"] - box["b"],
-                        box["r"],
-                        size["height"] - box["t"],
-                    )
+                    coords = (coords[0], height - coords[1], coords[2], height - coords[3])
                 geometry = (
                     payload.get("pdf_pages", [])[page - 1] if payload.get("pdf_pages") else None
                 )
                 crop = None
                 rotation = 0
-                width, height = size["width"], size["height"]
                 if geometry is not None:
                     crop, rotation = geometry["crop"], geometry["rotation"]
                     width, height = geometry["width"], geometry["height"]
@@ -143,8 +149,8 @@ def normalize_docling(payload: dict[str, Any]) -> ParsedDocument:
                             crop[0] + y1,
                             crop[1] + height - x0,
                         )
-                # Docling charspans are page-local; they cannot prove one global
-                # span across pages, so keep the geometry and drop the span.
+                # Docling charspans are page-local; they cannot prove one global span
+                # across pages, so keep the geometry and drop the span.
                 locations.append(
                     Location(
                         page=page,
@@ -155,7 +161,7 @@ def normalize_docling(payload: dict[str, Any]) -> ParsedDocument:
                         rotation=rotation,
                     )
                 )
-            if not locations:
+            if not locations and fmt == "pdf":
                 raise ValueError("PDF element lacks provenance")
             table = None
             formula = None
@@ -173,7 +179,7 @@ def normalize_docling(payload: dict[str, Any]) -> ParsedDocument:
                             col_end=cell["end_col_offset_idx"],
                             row_span=cell.get("row_span"),
                             col_span=cell.get("col_span"),
-                            locations=_cell_locations(cell, locations),
+                            locations=_cell_locations(cell, locations) if fmt == "pdf" else (),
                         )
                         for cell in grid["table_cells"]
                     ],
@@ -203,21 +209,29 @@ def normalize_docling(payload: dict[str, Any]) -> ParsedDocument:
                     asset_status=("available" if item.get("asset_id") else "unavailable")
                     if kind == "image"
                     else None,
-                    provenance=[Provenance(method="model-derived", producer="docling/2.135.0")],
+                    provenance=[
+                        Provenance(
+                            method="model-derived" if fmt == "pdf" else "native",
+                            producer="docling/2.135.0",
+                        )
+                    ],
                 )
             )
+        metadata: dict[str, Any] = {
+            "format": fmt,
+            "engine": "docling",
+            "resume_granularity": "document",
+            "warnings": ["Extraction quality is unscored."],
+            "pdf_pages": payload.get("pdf_pages", []),
+        }
+        if fmt == "pdf":
+            metadata["pdf_engine"] = "docling"
         return ParsedDocument(
             markdown="\n\n".join(item.search_text for item in elements),
             blocks=[],
-            pages=len(pages),
+            pages=len(pages) if pages else 1,
             elements=elements,
-            metadata={
-                "format": "pdf",
-                "pdf_engine": "docling",
-                "resume_granularity": "document",
-                "warnings": ["Extraction quality is unscored."],
-                "pdf_pages": payload.get("pdf_pages", []),
-            },
+            metadata=metadata,
             assets=[
                 Asset(
                     name=item["name"],
@@ -267,10 +281,12 @@ class _PersistentWorker:
             await self.kill()
             raise ProcessSupervisionUnavailable()
 
-    async def request(self, data: bytes, request_id: int, *, timeout_seconds: float) -> bytes:
+    async def request(
+        self, data: bytes, request_id: int, *, timeout_seconds: float, fmt: str = "pdf"
+    ) -> bytes:
         process = self._process
         assert process is not None and process.stdin is not None
-        meta = json.dumps({"request_id": request_id}).encode()
+        meta = json.dumps({"request_id": request_id, "format": fmt}).encode()
         try:
             async with asyncio.timeout(timeout_seconds):
                 process.stdin.write(struct.pack(">I", len(meta)) + meta)
@@ -446,7 +462,10 @@ class DoclingPdfParser:
             request_id = self._request_id
             try:
                 output = await self._child.request(
-                    data, request_id, timeout_seconds=self._limits.timeout_seconds
+                    data,
+                    request_id,
+                    timeout_seconds=self._limits.timeout_seconds,
+                    fmt=str(config.get("format", "pdf")),
                 )
             except ProcessTimedOut as exc:
                 raise PdfTimedOut() from exc
@@ -463,6 +482,10 @@ class DoclingPdfParser:
                 self._child = None
 
     async def parse(self, data: bytes, ctx: ParseContext) -> ParsedDocument:
+        return await self.convert(data, ctx, "pdf")
+
+    async def convert(self, data: bytes, ctx: ParseContext, fmt: str) -> ParsedDocument:
+        """Convert one document of ``fmt`` (pdf, docx or pptx) through the shared engine."""
         from cairn.ingestion.ocr_cache import current_hooks
 
         hooks = current_hooks.get()
@@ -470,7 +493,7 @@ class DoclingPdfParser:
             await hooks.progress(None, None, "converting")
         if len(data) > self._limits.max_input_bytes:
             raise PdfTooLarge()
-        if not data.startswith(b"%PDF-"):
+        if fmt == "pdf" and not data.startswith(b"%PDF-"):
             raise PdfCorruptFile()
         config = {
             "assets": self._assets,
@@ -493,6 +516,7 @@ class DoclingPdfParser:
             else []
         )
         config["ocr_psm"] = self._psm
+        config["format"] = fmt
         request_id: int | None = None
         if self._persistent:
             output, request_id = await self._request_persistent(data, config)
@@ -527,11 +551,12 @@ class DoclingPdfParser:
         if hooks:
             await hooks.progress(parsed.pages, parsed.pages, "normalized")
         parsed.language = ctx.language
-        parsed.metadata["pdf_budget_facts"] = payload.get("pdf_budget_facts")
-        parsed.metadata["ocr_transcripts"] = payload.get("ocr_transcripts", {})
-        parsed.metadata["ocr_transcription_status"] = payload.get(
-            "ocr_transcription_status", "unsupported"
-        )
+        if fmt == "pdf":
+            parsed.metadata["pdf_budget_facts"] = payload.get("pdf_budget_facts")
+            parsed.metadata["ocr_transcripts"] = payload.get("ocr_transcripts", {})
+            parsed.metadata["ocr_transcription_status"] = payload.get(
+                "ocr_transcription_status", "unsupported"
+            )
         parsed.metadata["worker_output_bytes"] = len(output)
         parsed.metadata["pdf_worker_pid"] = payload.get("worker_pid")
         parsed.elements = [
@@ -539,5 +564,64 @@ class DoclingPdfParser:
         ]
         if len(parsed.markdown) > self._limits.max_text_chars:
             raise PdfTooLarge()
-        validate_pdf_budget(parsed, self._limits)
+        if fmt == "pdf":
+            validate_pdf_budget(parsed, self._limits)
         return parsed
+
+
+class _DoclingEngine(Protocol):
+    identity: str | None
+
+    async def convert(self, data: bytes, ctx: ParseContext, fmt: str) -> ParsedDocument: ...
+
+
+class DoclingOfficeParser:
+    """DOCX or PPTX through the shared Docling engine; a failed conversion falls back to the
+    native parser and records why, so the result is never silently degraded.
+    """
+
+    supported_mimes: ClassVar[frozenset[str]]
+    format: ClassVar[str]
+
+    def __init__(self, *, engine: _DoclingEngine, fallback: Parser) -> None:
+        self._engine = engine
+        self._fallback = fallback
+        self.identity = engine.identity
+        self.fallback_implementation = f"cairn/{type(fallback).__name__}/3"
+
+    async def parse(self, data: bytes, ctx: ParseContext) -> ParsedDocument:
+        # The same OOXML safety preflight the native parsers apply (zip bombs, external
+        # relationships, encryption) runs before any bytes reach the model worker.
+        package = inspect_ooxml_package(data)
+        try:
+            return await self._engine.convert(package.data, ctx, self.format)
+        except (PdfCorruptFile, PdfEngineUnavailable, PdfTimedOut, PdfTooLarge) as exc:
+            reason = str(getattr(exc, "code", type(exc).__name__))
+            parsed = await self._fallback.parse(data, ctx)
+            parsed.metadata["docling_fallback"] = {
+                "reason": reason,
+                "parser": type(self._fallback).__name__,
+            }
+            notice = (
+                f"Docling conversion failed ({reason}); the native "
+                f"{type(self._fallback).__name__} output was used, without pictures."
+            )
+            warnings = parsed.metadata.get("warnings")
+            parsed.metadata["warnings"] = (
+                [*warnings, notice] if isinstance(warnings, list) else [notice]
+            )
+            return parsed
+
+
+class DoclingDocxParser(DoclingOfficeParser):
+    supported_mimes = frozenset(
+        {"application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
+    )
+    format = "docx"
+
+
+class DoclingPptxParser(DoclingOfficeParser):
+    supported_mimes = frozenset(
+        {"application/vnd.openxmlformats-officedocument.presentationml.presentation"}
+    )
+    format = "pptx"

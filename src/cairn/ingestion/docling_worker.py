@@ -102,13 +102,104 @@ def _prepare(config: dict[str, Any]) -> tuple[Any, Path]:
         )
     # Docling's default PDF backend. The explicit pypdfium2 backend duplicated
     # overlapping text runs inside table cells.
+    # One converter serves PDF (layout/table models) and Office formats (XML backends,
+    # no models), so a persistent worker loads weights once for every format.
     converter = DocumentConverter(
-        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)}
+        allowed_formats=[InputFormat.PDF, InputFormat.DOCX, InputFormat.PPTX],
+        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)},
     )
     return converter, root
 
 
-def _convert(converter: Any, source: bytes, config: dict[str, Any]) -> dict[str, Any]:
+OFFICE_FORMATS = ("docx", "pptx")
+
+
+def _convert(converter: Any, source: bytes, config: dict[str, Any], fmt: str) -> dict[str, Any]:
+    if fmt == "pdf":
+        return _convert_pdf(converter, source, config)
+    if fmt in OFFICE_FORMATS:
+        return _convert_office(converter, source, config, fmt)
+    raise _WorkerError(EXIT_CORRUPT)
+
+
+def _convert_office(
+    converter: Any, source: bytes, config: dict[str, Any], fmt: str
+) -> dict[str, Any]:
+    """Convert a DOCX or PPTX through Docling's XML backends: no models, no page geometry."""
+    if len(source) > config["max_input_bytes"]:
+        raise _WorkerError(EXIT_TOO_LARGE)
+    from docling.datamodel.base_models import (  # type: ignore[import-not-found, unused-ignore]
+        ConversionStatus,
+        DocumentStream,
+    )
+
+    result = converter.convert(DocumentStream(name=f"source.{fmt}", stream=io.BytesIO(source)))
+    if result.status != ConversionStatus.SUCCESS:
+        raise _WorkerError(EXIT_CORRUPT)
+    document = result.document
+    payload: dict[str, Any] = document.export_to_dict()
+    if len(payload.get("pages", {})) > config["max_pages"]:
+        raise _WorkerError(EXIT_TOO_LARGE)
+    payload["pdf_pages"] = []
+    payload["items"] = [
+        item.model_dump(mode="json")
+        for item, _level in document.iterate_items()
+        if hasattr(item, "prov")
+    ]
+    if (
+        len(payload["items"]) > config["max_elements"]
+        or sum(
+            item.get("data", {}).get("num_rows", 0) * item.get("data", {}).get("num_cols", 0)
+            for item in payload["items"]
+        )
+        > config["max_table_cells"]
+    ):
+        raise _WorkerError(EXIT_TOO_LARGE)
+    payload["pdf_budget_facts"] = {"schema": 1, "pages": [], "output_bytes": 0}
+    payload["ocr_transcripts"] = {}
+    payload["ocr_transcription_status"] = "disabled"
+    _collect_assets(document, payload, config)
+    payload["format"] = fmt
+    payload["units"] = "emu" if fmt == "pptx" else "points"
+    payload["identity"] = config["identity"]
+    payload["worker_pid"] = os.getpid()
+    return payload
+
+
+def _collect_assets(document: Any, payload: dict[str, Any], config: dict[str, Any]) -> None:
+    """Encode extracted pictures as PNG assets within the configured budgets."""
+    assets: list[dict[str, object]] = []
+    total_asset_bytes = 0
+    for picture in document.pictures:
+        image = picture.get_image(document)
+        if image is None:
+            continue
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        value = buffer.getvalue()
+        if (
+            len(assets) >= config["max_assets"]
+            or len(value) > config["max_asset_bytes"]
+            or total_asset_bytes + len(value) > config["max_total_asset_bytes"]
+        ):
+            continue
+        total_asset_bytes += len(value)
+        identity = hashlib.sha256(value).hexdigest()
+        assets.append(
+            {
+                "name": identity,
+                "mime_type": "image/png",
+                "data": base64.b64encode(value).decode(),
+                "page": picture.prov[0].page_no if picture.prov else None,
+            }
+        )
+        for item in payload["items"]:
+            if item["self_ref"] == picture.self_ref:
+                item["asset_id"] = identity
+    payload["assets"] = assets
+
+
+def _convert_pdf(converter: Any, source: bytes, config: dict[str, Any]) -> dict[str, Any]:
     """Convert one PDF into the worker payload, enforcing every configured bound."""
     if len(source) > config["max_input_bytes"]:
         raise _WorkerError(EXIT_TOO_LARGE)
@@ -222,35 +313,9 @@ def _convert(converter: Any, source: bytes, config: dict[str, Any]) -> dict[str,
     # for CER scoring, so report the missing evidence explicitly.
     payload["ocr_transcripts"] = {}
     payload["ocr_transcription_status"] = "unsupported" if config["ocr"] else "disabled"
-    assets: list[dict[str, object]] = []
-    total_asset_bytes = 0
-    for picture in document.pictures:
-        image = picture.get_image(document)
-        if image is None:
-            continue
-        buffer = io.BytesIO()
-        image.save(buffer, format="PNG")
-        value = buffer.getvalue()
-        if (
-            len(assets) >= config["max_assets"]
-            or len(value) > config["max_asset_bytes"]
-            or total_asset_bytes + len(value) > config["max_total_asset_bytes"]
-        ):
-            continue
-        total_asset_bytes += len(value)
-        identity = hashlib.sha256(value).hexdigest()
-        assets.append(
-            {
-                "name": identity,
-                "mime_type": "image/png",
-                "data": base64.b64encode(value).decode(),
-                "page": picture.prov[0].page_no if picture.prov else None,
-            }
-        )
-        for item in payload["items"]:
-            if item["self_ref"] == picture.self_ref:
-                item["asset_id"] = identity
-    payload["assets"] = assets
+    _collect_assets(document, payload, config)
+    payload["format"] = "pdf"
+    payload["units"] = "points"
     payload["identity"] = config["identity"]
     payload["worker_pid"] = os.getpid()
     return payload
@@ -299,9 +364,11 @@ def _serve(converter: Any, config: dict[str, Any]) -> int:
         source = _read_frame(stdin, config["max_input_bytes"])
         if source is None:
             return 0
-        request_id = json.loads(meta).get("request_id")
+        request = json.loads(meta)
+        request_id = request.get("request_id")
+        fmt = str(request.get("format", "pdf"))
         try:
-            payload = _convert(converter, source, config)
+            payload = _convert(converter, source, config, fmt)
             payload["request_id"] = request_id
             response = _encode(payload, config)
         except _WorkerError as error:
@@ -332,7 +399,7 @@ def main() -> int:
         if config.get("persistent"):
             return _serve(converter, config)
         source = sys.stdin.buffer.read(config["max_input_bytes"] + 1)
-        payload = _convert(converter, source, config)
+        payload = _convert(converter, source, config, str(config.get("format", "pdf")))
         sys.stdout.buffer.write(_encode(payload, config))
         return 0
     except _WorkerError as error:

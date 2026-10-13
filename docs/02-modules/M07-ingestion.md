@@ -110,8 +110,8 @@ class ParsedDocument:
 | MIME | Parser | Notes |
 | --- | --- | --- |
 | `application/pdf` | `DoclingPdfParser` (product default) or `PdfParser` (pypdfium2 baseline) | Selected by `CAIRN_INGESTION__PDF_ENGINE` — see §4.2 |
-| `…wordprocessingml…` | `DocxParser` | python-docx; heading levels preserved |
-| `…presentationml…` | `PptxParser` | One block per slide |
+| `…wordprocessingml…` | `DoclingDocxParser` (Docling engine) with `DocxParser` fallback | Headings, lists, tables and pictures as assets; no page geometry |
+| `…presentationml…` | `DoclingPptxParser` (Docling engine) with `PptxParser` fallback | Per-slide elements with slide geometry; pictures as assets |
 | `…spreadsheetml…` | `XlsxParser` | openpyxl; each sheet a table block, formulas kept as source text |
 | `text/csv` | `CsvParser` | Delimiter sniffing; one table block |
 | `text/html` | `HtmlParser` | trafilatura main-content extraction |

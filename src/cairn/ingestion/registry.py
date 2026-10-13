@@ -140,7 +140,12 @@ class ParserRegistry:
 
 
 def get_parser_registry() -> ParserRegistry:
-    from cairn.ingestion.docling_pdf import DoclingPdfParser
+    from cairn.ingestion.docling_pdf import (
+        DoclingDocxParser,
+        DoclingOfficeParser,
+        DoclingPdfParser,
+        DoclingPptxParser,
+    )
     from cairn.ingestion.pdf import PdfLimits, PdfParser
 
     registry = ParserRegistry()
@@ -156,6 +161,7 @@ def get_parser_registry() -> ParserRegistry:
         if settings.ocr_enabled
         else None
     )
+    docling: DoclingPdfParser | None = None
     pdf: Parser
     if settings.pdf_engine == "docling":
         from cairn.ingestion.pdf_routing import ScanTextLayerRoutedPdfParser
@@ -182,6 +188,13 @@ def get_parser_registry() -> ParserRegistry:
         )
     else:
         pdf = PdfParser(ocr=ocr)
+    docx_parser: Parser = DocxParser()
+    pptx_parser: Parser = PptxParser()
+    if docling is not None and settings.docling_office:
+        # Word and PowerPoint go through the same warm Docling child as PDFs, which
+        # also extracts their pictures; XLSX stays on openpyxl to keep formula source.
+        docx_parser = DoclingDocxParser(engine=docling, fallback=docx_parser)
+        pptx_parser = DoclingPptxParser(engine=docling, fallback=pptx_parser)
     pdf_routing_rule = (
         "docling+scan-text-layer/1"
         if settings.pdf_engine == "docling" and settings.docling_scan_text_layer
@@ -192,8 +205,8 @@ def get_parser_registry() -> ParserRegistry:
         MarkdownParser(),
         JsonParser(),
         HtmlParser(),
-        DocxParser(),
-        PptxParser(),
+        docx_parser,
+        pptx_parser,
         XlsxParser(),
         CsvParser(),
         pdf,
@@ -223,6 +236,12 @@ def get_parser_registry() -> ParserRegistry:
                     else ocr_fp,
                 }
                 if parser is pdf
+                else {
+                    "engine": "docling",
+                    "model_manifest": parser.identity,
+                    "fallback": parser.fallback_implementation,
+                }
+                if isinstance(parser, DoclingOfficeParser)
                 else {},
             ),
         )

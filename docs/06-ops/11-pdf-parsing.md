@@ -117,6 +117,22 @@ Docling as well. The decision and page counts are recorded in
 `docling+scan-text-layer/1` is part of the parser descriptor, so changing the policy
 reparses on the next reindex. Set the variable to `false` to send every PDF to Docling.
 
+## Word and PowerPoint through Docling
+
+With `CAIRN_INGESTION__DOCLING_OFFICE=true` (the default when the engine is Docling) DOCX
+and PPTX uploads go through the same warm Docling child as PDFs. Docling's Office backends
+are XML parsers, not models, so a document converts in well under a second and the worker
+extracts embedded pictures as PNG assets, headings, lists and full table grids. Word
+elements carry no page geometry (Word has no pages); PowerPoint elements carry the slide
+number and a box converted from EMU to points in the stored bottom-left space. The OOXML
+safety preflight that protects the native parsers (zip bombs, external relationships,
+encryption) runs first. If Docling fails on a document, the native python-docx or
+python-pptx parser produces the result and `metadata.docling_fallback` plus a warning
+record the reason; text and tables are kept, pictures are not. XLSX stays on openpyxl so
+formula source text is preserved. The worker image needs the `format-docx` and
+`format-pptx` extras, so its manifest changes when the image is rebuilt; regenerate it.
+Office documents have no page preview.
+
 ## Reading order and paragraphs (pdfium baseline)
 
 The pdfium baseline keeps pypdfium2's own reading order. The worker records the
