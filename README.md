@@ -51,9 +51,10 @@ retrieved real PDFs end to end. Earlier checkpoints and their counts are recorde
 Docling parsed the manual into 907 elements and 470 chunks and the roster into one table; after
 the knowledge base was rebuilt from the bundled MiniLM onto the bge-m3 sidecar (dense +
 learned sparse, CUDA on an RTX 3060: about 45 chunks/s, 45 ms per query) all seven test
-questions return the correct passage at rank 1 (MiniLM: four of seven within the top three,
-three missed). MiniLM is English-only and scored every Chinese chunk alike (0.44-0.50), so
-Chinese retrieval had depended on BM25 alone. The pilot surfaced and fixed a 4 GiB address-space
+questions return the correct passage at rank 1 (MiniLM: five of seven within the top three, but
+only two at rank one and two missed). MiniLM is English-only and scored every Chinese chunk
+alike (0.44-0.50), so Chinese retrieval had depended on BM25 alone. The pilot surfaced and fixed
+a 4 GiB address-space
 ceiling that failed the Docling child with `MemoryError`, an embedding deadline that covered a
 whole document call instead of one batch, and the sidecar reporting healthy before its first,
 slow CUDA forward pass.

@@ -7,6 +7,50 @@ before dispatching work. Preserve the dirty worktree; do not infer completion fr
 
 ## Latest checkpoint (read before historical steps)
 
+October13: owner-directed real-document pilot on the running local product stack. Two of the
+owner's real documents (64-page HR manual PDF; duty-roster XLSX) were uploaded, parsed, indexed
+and queried end to end in pilot KB kb_01M4SN21DPEY9AHW7Z0C9J1VRX ("试点-知服科技", kept for the
+owner). Docling parse of the manual: engine docling,64 pages,907 elements,470 chunks (bge-m3
+tokenizer); the roster is one table carrying the whole weekly rotation. The poor Chinese
+retrieval was configuration, not the parser: the local stack had registered the English-only
+sentence-transformers/all-MiniLM-L6-v2 (384d), whose dense scores were 0.44-0.50 for every
+Chinese chunk (no separation), so ranking rested on BM25 alone. The pilot KB was rebuilt by
+blue-green reindex (embedding_model_id) onto the bundled bge-m3 sidecar (dense 1024d + learned
+sparse) on the RTX 3060. All seven test questions then return the correct passage at rank 1;
+under MiniLM only five of seven reached the top three, only two at rank one, and two were
+missed (the 试用期规定 page p16 and both roster questions). The bge-reranker-v2-m3 cross-encoder
+is now bundled as an optional TEI service (profile reranker; docker-compose.gpu.yml runs the
+Ampere image); weights are pinned and SHA-256-verified in scripts/prepare_embedding_model.py;
+the pilot KB reranks by default and the margins sharpen (annual leave 0.99 vs 0.25, roster 0.98
+vs 0.01). Measured on the RTX 3060:100 candidates rerank in 80-350 ms, about 45 chunks/s
+embedding,45 ms per query.
+
+Defects found and fixed during the pilot (branch dev, unpushed): 251df3a Docling child
+address-space ceiling 4->12 GiB (a 64-page manual failed with MemoryError misreported as
+PDF_CORRUPT_FILE), honest conversion-failure codes and clearer retrieval failure codes; 8665c22
+the embedding deadline wrapped a whole document call instead of one provider request, so a
+multi-batch document on the CPU sidecar timed out on every attempt and dead-lettered - now per
+batch with the worker's HTTP read timeout following it; daaa776 compose knob
+CAIRN_EMBEDDING__DOCUMENT_TIMEOUT_S; 0564b82 the bge-m3 sidecar warms the model before /health
+reports ready; 92f9ee6 compose build ordering (a bare `up -d --build` could layer
+cairn-pdf-parse:local on the previous cairn:local); ceb5075 a terminal document failure now
+names the blocked build on its index version (the Versions panel renders it) and activation
+clears the note; 1627ced bundle the reranker; b897f4a/08e21f7 docs.
+
+Evidence: full unit suite929 passed; tests/unit/embedding + test_bge_m3_server98 passed;
+tests/unit/ingestion + tests/unit/retrieval572 passed; tests/integration/test_stage_recovery.py
+15 passed against disposable PG16/Redis/Qdrant (tmpfs, fsync off), including two new
+blocked-build tests. Ruff and mypy --strict clean on the changed files. Branch dev at 08e21f7,
+twelve commits ahead of origin/dev (c9745ac), unpushed; worktree clean except the owner's two
+untracked source files. Stack cairn-continuation is running (bge-m3 + reranker on GPU); the
+admin must_change_password flag is armed.
+
+Gates unchanged: the PDF quality gate (genuine30 human gold) remains OPEN; this pilot
+demonstrates the product path, not measured parsing accuracy. Next action: independent human
+annotation of the30 documents (scripts/prepare_pdf_annotations.py skeleton and
+05-quality/05-pdf-annotation-guide.md), then M14 evaluation on that gold. No developer/subagent
+dispatched; root did this work directly.
+
 October10 while REWORK-01 is running: root did not contact developer or inspect its in-progress
 code/tests. Prepared separate independent reference materials under data/pdf-reference-research-20261010.
 Original reviewer approved publisher XML/official annotation as a separately reported reference,
