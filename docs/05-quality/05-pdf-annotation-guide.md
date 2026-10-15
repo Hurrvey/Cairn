@@ -25,7 +25,9 @@ This writes two files under `data/annotations/` (local, not committed):
   file and counts zero gold.
 - `page-templates.json` — every page of every document with its size in PDF points and
   empty `tables`, `order` and `geometry` lists. Copy a page template into the document's
-  `pages` array when you annotate that page.
+  `pages` array when you annotate that page. Each entry also carries `resolved_path`, the
+  absolute path of the source PDF as found on this machine (the manifest references some
+  documents by a corpus-relative `local_pdf` and others by an absolute `path`).
 
 ## 2. File format
 

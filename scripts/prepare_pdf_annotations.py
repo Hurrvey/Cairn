@@ -88,6 +88,9 @@ def main() -> None:
                 "category": item.get("primary_category") or item.get("category"),
                 "source_sha256": item["sha256"],
                 "local_pdf": item.get("local_pdf"),
+                # The manifest points some documents at a corpus-relative local_pdf and
+                # others at an absolute path; this is where the PDF was actually found.
+                "resolved_path": str(pdf),
                 "pages": [
                     {
                         "page": size["page"],

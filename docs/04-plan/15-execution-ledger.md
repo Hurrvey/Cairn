@@ -1586,7 +1586,10 @@ browser harness also used wrong ElementPlus input selectors; observed live DOM a
 New document-pagination polling test reproduced stale progress whenever next_cursor existed;
 parent is fixing refresh while retaining loaded pages. No full five-part completion claimed.
 
-## Concrete next action (current September15 delivery)
+## Concrete next action (superseded - September15 delivery)
+
+Superseded by the October checkpoints above; the current restart point is the top of this
+file. Kept for history only.
 
 L127 CLEANUP COMPLETE: Verified `cairn.task=mainproduct-20260915` before removing exactly the three
 completion PG/Redis/TEI containers. Verified Compose project labels and ran down (without `-v`) only
