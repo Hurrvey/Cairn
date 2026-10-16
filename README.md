@@ -61,8 +61,9 @@ slow CUDA forward pass.
 
 **Still open:** the PDF quality gate needs independent human annotation of the 30-document
 corpus; `scripts/prepare_pdf_annotations.py` generates the empty gold skeleton and page
-templates and the [annotation guide](docs/05-quality/05-pdf-annotation-guide.md) fixes the
-format and rules. Formula recognition is not implemented (formula text is kept verbatim),
+templates, `scripts/annotation_studio.py` is a local browser UI for the annotation itself,
+and the [annotation guide](docs/05-quality/05-pdf-annotation-guide.md) fixes the format and
+rules. Formula recognition is not implemented (formula text is kept verbatim),
 Docling occasionally merges two values into one table cell, and the production M12
 custom-function sandbox is not built; the default custom worker fails closed unless an
 explicit scoped executor is injected. `docs/` and `tests/` were git-ignored between

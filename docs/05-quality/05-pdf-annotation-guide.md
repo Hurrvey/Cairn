@@ -29,6 +29,21 @@ This writes two files under `data/annotations/` (local, not committed):
   absolute path of the source PDF as found on this machine (the manifest references some
   documents by a corpus-relative `local_pdf` and others by an absolute `path`).
 
+The interactive studio is the primary way to annotate: it renders pages in the browser
+and runs every save through the frozen validator.
+
+```powershell
+uv run python scripts/annotation_studio.py
+```
+
+It serves `http://127.0.0.1:39310/` (localhost only) and opens the browser. Draw a table
+box, set its rows and columns, generate cells and type their text; draw order boxes in
+reading order and geometry boxes (or copy order to geometry); add the whole-page OCR
+transcription on scanned pages; tick the covered checkbox for pages you examined and
+found empty. Every change is validated and autosaved to the working file; a save that
+would fail validation is refused with a visible error. `scripts/annotation_studio_smoke.py`
+drives the studio end to end against a scratch copy when you want to verify the tool.
+
 A local helper covers the mechanical parts (it never annotates for you):
 
 ```powershell

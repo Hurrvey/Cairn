@@ -7,6 +7,20 @@ before dispatching work. Preserve the dirty worktree; do not infer completion fr
 
 ## Latest checkpoint (read before historical steps)
 
+October16: annotation kit closed out and the interactive studio shipped, all pushed. The
+kit's page templates now carry resolved_path (all 30 documents resolve to a PDF; 23 came
+from absolute manifest paths, not local_pdf); scripts/pdf_annotation_helper.py
+(render/scaffold/status, commit a6f4d73) covers the CLI route; and the studio
+scripts/annotation_studio.py + scripts/annotation_studio.html serves a localhost browser
+UI: draw table/order/geometry boxes in stored PDF-point space, cell-grid editor with
+merges and per-cell text, whole-page OCR transcription, covered toggles, undo/redo, and
+debounced autosave that runs every save through the frozen validator and writes
+atomically (keeping a .bak). Verified by tests/unit/test_annotation_studio.py (11 passed)
+and scripts/annotation_studio_smoke.py, a Playwright end-to-end run against a scratch copy
+(draw, cells, undo/redo, OCR, autosave, validator) that never touches the working file.
+Branch dev pushed, origin/dev current. PDF quality gate still OPEN: the owner annotates
+the 30 documents (studio or CLI helper), then M14 evaluation on that gold.
+
 October13: owner-directed real-document pilot on the running local product stack. Two of the
 owner's real documents (64-page HR manual PDF; duty-roster XLSX) were uploaded, parsed, indexed
 and queried end to end in pilot KB kb_01M4SN21DPEY9AHW7Z0C9J1VRX ("试点-知服科技", kept for the

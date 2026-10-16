@@ -1,0 +1,1483 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cairn 标注台 · PDF 人工金标</title>
+<style>
+  :root {
+    --bg: #f3f4f6; --panel: #ffffff; --line: #d1d5db; --line-soft: #e5e7eb;
+    --text: #111827; --muted: #6b7280; --accent: #2563eb; --danger: #dc2626;
+    --green: #16a34a; --amber: #f59e0b;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; display: flex; flex-direction: column; color: var(--text);
+    background: var(--bg);
+    font: 13px/1.5 system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  [hidden] { display: none !important; }
+  header { display: flex; align-items: center; gap: 12px; padding: 8px 14px; background: #111827; color: #f9fafb; }
+  .brand { font-weight: 700; letter-spacing: 0.5px; }
+  .doc-title { color: #9ca3af; }
+  .grow { flex: 1; }
+  .stats { color: #d1d5db; font-size: 12px; }
+  header label.ver { color: #9ca3af; font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
+  header input { background: #1f2937; border: 1px solid #374151; color: #f9fafb; border-radius: 4px; padding: 2px 6px; font-size: 12px; width: 70px; }
+  .save { font-size: 12px; color: #86efac; min-width: 120px; text-align: right; }
+  #saveError { background: #fef2f2; color: #991b1b; border-bottom: 1px solid #fecaca; padding: 6px 14px; font-size: 12px; }
+  main { flex: 1; display: flex; min-height: 0; }
+  #docList { width: 252px; flex: none; overflow-y: auto; border-right: 1px solid var(--line); background: var(--panel); }
+  .cat { padding: 9px 12px 3px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+  .doc { padding: 6px 12px 8px; border-bottom: 1px solid var(--line-soft); cursor: pointer; }
+  .doc:hover { background: #f9fafb; }
+  .doc.active { background: #eff6ff; box-shadow: inset 3px 0 0 var(--accent); }
+  .doc .row1 { display: flex; justify-content: space-between; font-weight: 600; }
+  .doc .cnt { color: var(--muted); font-weight: 400; font-variant-numeric: tabular-nums; }
+  .doc .bar { height: 4px; background: var(--line-soft); border-radius: 2px; margin: 4px 0; overflow: hidden; }
+  .doc .bar i { display: block; height: 100%; width: 0; background: var(--accent); }
+  .doc.gold .bar i { background: var(--green); }
+  .doc .row2 { font-size: 11px; color: var(--muted); }
+  #workspace { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #toolbar { display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  button { font: inherit; padding: 3px 10px; border: 1px solid var(--line); background: #fff; border-radius: 5px; cursor: pointer; }
+  button:hover { border-color: #9ca3af; }
+  button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.mini { padding: 1px 6px; font-size: 12px; }
+  button.danger { color: var(--danger); }
+  .sep { width: 1px; height: 20px; background: var(--line); margin: 0 4px; }
+  .muted { color: var(--muted); }
+  .mono { font-family: ui-monospace, Consolas, monospace; }
+  .chk, .rng { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 12px; }
+  #zoomRange { width: 110px; }
+  #pageInput { width: 58px; }
+  #canvasWrap { position: relative; flex: 1; overflow: auto; background: #e5e7eb; }
+  #stage { position: relative; margin: 16px auto; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18); background: #fff; }
+  #stage img { position: absolute; inset: 0; width: 100%; height: 100%; user-select: none; -webkit-user-drag: none; }
+  #overlay { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: default; }
+  .hint { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 15px; pointer-events: none; }
+  #inspector { width: 368px; flex: none; overflow-y: auto; border-left: 1px solid var(--line); background: var(--panel); padding: 0 12px 24px; }
+  #inspector h3 { font-size: 13px; margin: 12px 0 6px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+  #inspector section:first-child h3 { border-top: none; padding-top: 2px; }
+  .row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+  .num { width: 62px; }
+  input[type="number"], input[type="text"], textarea { font: inherit; padding: 2px 6px; border: 1px solid var(--line); border-radius: 4px; min-width: 0; }
+  .grow { flex: 1; }
+  textarea { width: 100%; resize: vertical; }
+  .item { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border: 1px solid var(--line-soft); border-radius: 5px; margin: 4px 0; cursor: pointer; }
+  .item:hover { border-color: #9ca3af; }
+  .item.sel { border-color: var(--amber); background: #fffbeb; }
+  .item .id { font-family: ui-monospace, Consolas, monospace; font-weight: 600; }
+  .item .meta { color: var(--muted); font-size: 12px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .idx { background: var(--green); color: #fff; border-radius: 50%; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; flex: none; }
+  .cells { display: grid; gap: 2px; margin: 8px 0; }
+  .cell { padding: 2px 3px; min-height: 26px; font-size: 11px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; border: 1px dashed var(--line); background: #f9fafb; border-radius: 3px; }
+  .cell.has { border-style: solid; background: #fff; }
+  .cell.sel { outline: 2px solid var(--amber); outline-offset: -2px; background: #fffbeb; }
+  #toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); background: rgba(17, 24, 39, 0.92); color: #fff; padding: 7px 16px; border-radius: 6px; font-size: 13px; z-index: 50; }
+  .keys { margin-top: 18px; color: var(--muted); font-size: 11px; border-top: 1px solid var(--line-soft); padding-top: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">Cairn 标注台</div>
+  <div class="doc-title" id="docTitle">选择左侧文档开始</div>
+  <div class="grow"></div>
+  <div class="stats" id="globalStats">加载中…</div>
+  <label class="ver">版本 <input id="version" data-test="version" size="8" value="r1"></label>
+  <div class="save" id="saveState" data-test="save-state">—</div>
+</header>
+<div id="saveError" class="banner" hidden></div>
+<main>
+  <aside id="docList"></aside>
+  <section id="workspace">
+    <div id="toolbar">
+      <button data-tool="select" data-test="tool-select" class="tool active">选择</button>
+      <button data-tool="table" data-test="tool-table" class="tool">画表格</button>
+      <button data-tool="order" data-test="tool-order" class="tool">画顺序区</button>
+      <button data-tool="geometry" data-test="tool-geometry" class="tool">画几何区</button>
+      <span class="sep"></span>
+      <button id="undo" data-test="undo" title="Ctrl+Z">撤销</button>
+      <button id="redo" data-test="redo" title="Ctrl+Shift+Z">重做</button>
+      <span class="sep"></span>
+      <label class="chk"><input type="checkbox" id="gridToggle" data-test="grid-toggle" checked> 网格</label>
+      <label class="rng">缩放 <input type="range" id="zoomRange" min="0.3" max="4" step="0.05" value="1"></label>
+      <button id="fitZoom" data-test="fit-zoom">适应宽度</button>
+      <span class="sep"></span>
+      <button id="prevPage" data-test="prev-page">◀</button>
+      <input id="pageInput" data-test="page-input" type="number" min="1" value="1">
+      <span id="pageTotal" class="muted">/ 0</span>
+      <button id="nextPage" data-test="next-page">▶</button>
+      <div class="grow"></div>
+      <span id="cursorPt" class="muted mono">—</span>
+    </div>
+    <div id="canvasWrap">
+      <div id="stage">
+        <img id="pageImg" alt="">
+        <canvas id="overlay"></canvas>
+      </div>
+      <div id="emptyHint" class="hint">选择左侧文档开始标注</div>
+    </div>
+  </section>
+  <aside id="inspector">
+    <section id="pageInfo"></section>
+    <section id="selectionPanel"></section>
+    <section id="tablesPanel"></section>
+    <section id="cellEditor"></section>
+    <section id="orderPanel"></section>
+    <section id="geometryPanel"></section>
+    <section id="ocrPanel"></section>
+    <div class="keys">拖拽画框 · 点选移动 · 角点缩放 · Delete 删除 · 方向键微调（Shift ×10）· Ctrl+Z 撤销 · Ctrl+S 保存 · PgUp/PgDn 翻页</div>
+  </aside>
+</main>
+<div id="toast" hidden></div>
+<script>
+"use strict";
+(() => {
+const $ = (id) => document.getElementById(id);
+const clone = (o) => structuredClone(o);
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const round1 = (v) => Math.round(v * 10) / 10;
+const clampInt = (raw, lo, hi, fallback) => {
+  const v = Math.round(Number(raw));
+  return Number.isFinite(v) ? clamp(v, lo, hi) : fallback;
+};
+
+function h(tag, attrs = {}, ...children) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v === null || v === undefined || v === false) continue;
+    if (k === "class") el.className = v;
+    else if (k === "text") el.textContent = v;
+    else if (k === "data") Object.assign(el.dataset, v);
+    else if (k.startsWith("on") && typeof v === "function") el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, String(v));
+  }
+  for (const c of children.flat()) {
+    if (c !== null && c !== undefined && c !== false) el.append(c);
+  }
+  return el;
+}
+
+// Inspector buttons act on mousedown: the click would otherwise be lost when a
+// focused input's change event re-renders the panel before mouseup.
+function btn(text, cls, test, fn) {
+  return h("button", {
+    type: "button",
+    class: "mini" + (cls ? " " + cls : ""),
+    "data-test": test || null,
+    text,
+    onmousedown: (ev) => { ev.stopPropagation(); fn(); },
+  });
+}
+
+let state = null;
+let docId = null;
+let doc = null;
+let ann = null;
+let templates = {};
+let page = 1;
+let zoom = 1;
+let tool = "select";
+let selection = null;
+let drag = null;
+let gridOn = true;
+let history = [];
+let future = [];
+let dirty = false;
+let saving = false;
+let saveTimer = null;
+let changeSeq = 0;
+let imgToken = 0;
+let cellSel = null;
+let cellAnchor = null;
+let cellTableId = null;
+let toastTimer = null;
+
+// ---------------------------------------------------------------- server IO
+
+async function getJSON(url) {
+  const r = await fetch(url);
+  if (!r.ok) {
+    let msg = r.statusText;
+    try { msg = (await r.json()).error || msg; } catch (err) { /* keep statusText */ }
+    throw new Error(msg);
+  }
+  return r.json();
+}
+
+async function putJSON(url, body) {
+  const r = await fetch(url, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || r.statusText);
+  return data;
+}
+
+// ------------------------------------------------------------------ chrome
+
+function toast(msg) {
+  const el = $("toast");
+  el.textContent = msg;
+  el.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.hidden = true; }, 2600);
+}
+
+function showError(msg) {
+  const el = $("saveError");
+  el.textContent = "保存被拒绝：" + msg;
+  el.hidden = false;
+}
+
+function hideError() { $("saveError").hidden = true; }
+
+function setSaveState(text) { $("saveState").textContent = text; }
+
+function renderGlobal() {
+  if (!state) return;
+  const t = state.totals;
+  $("globalStats").textContent =
+    "文档 " + t.gold + "/" + t.documents + " · 页 " + t.covered + "/" + t.pages +
+    " · 表格 " + t.tables + "（" + t.cells + " 格）";
+}
+
+function renderDocList() {
+  const list = $("docList");
+  list.replaceChildren();
+  if (!state) return;
+  let currentCat = null;
+  for (const d of state.documents) {
+    if (d.category !== currentCat) {
+      currentCat = d.category;
+      list.append(h("div", { class: "cat", text: String(currentCat || "未分类") }));
+    }
+    const pct = d.pages ? Math.round((d.covered / d.pages) * 100) : 0;
+    const item = h("div", {
+      class: "doc" + (d.id === docId ? " active" : "") +
+        (d.method === "independent_human" ? " gold" : ""),
+      "data-test": "doc-item",
+      "data-id": d.id,
+      onclick: () => { openDoc(d.id); },
+    },
+      h("div", { class: "row1" }, h("span", { text: d.id }),
+        h("span", { class: "cnt", text: d.covered + "/" + d.pages })),
+      h("div", { class: "bar" }, h("i", {})),
+      h("div", {
+        class: "row2",
+        text: "表格 " + d.tables + " · 顺序 " + d.order + " · 几何 " + d.geometry +
+          (d.ocr ? " · OCR " + d.ocr : ""),
+      })
+    );
+    item.querySelector(".bar i").style.width = pct + "%";
+    list.append(item);
+  }
+}
+
+// ------------------------------------------------------------ document flow
+
+async function openDoc(id) {
+  if (id === docId) return;
+  await flushSave();
+  let payload;
+  try {
+    payload = await getJSON("/api/doc/" + encodeURIComponent(id));
+  } catch (err) {
+    toast("打开失败：" + (err && err.message ? err.message : err));
+    return;
+  }
+  docId = id;
+  doc = payload;
+  templates = doc.templates || {};
+  ann = doc.annotation || {
+    source_sha256: doc.sha256,
+    annotation_version: "draft-0",
+    method: "pending",
+    covered_pages: [],
+    pages: [],
+  };
+  history = [];
+  future = [];
+  selection = null;
+  cellSel = null;
+  cellTableId = null;
+  dirty = false;
+  hideError();
+  setSaveState("—");
+  try { localStorage.setItem("studio.doc", id); } catch (err) { /* ignore */ }
+  $("docTitle").textContent = id + " · " + (doc.category || "") + " · " + doc.pages + " 页";
+  $("pageInput").max = String(doc.pages);
+  renderDocList();
+  let saved = 1;
+  try { saved = Number(localStorage.getItem("studio.page." + id) || 1) || 1; } catch (err) { saved = 1; }
+  await loadPage(clamp(Math.round(saved), 1, doc.pages));
+}
+
+async function loadPage(n) {
+  if (!doc) return;
+  page = clamp(Math.round(Number(n) || 1), 1, doc.pages);
+  try { localStorage.setItem("studio.page." + docId, String(page)); } catch (err) { /* ignore */ }
+  selection = null;
+  cellSel = null;
+  drag = null;
+  $("pageInput").value = String(page);
+  $("pageTotal").textContent = "/ " + doc.pages;
+  const token = ++imgToken;
+  const img = $("pageImg");
+  img.src = "/api/page/" + encodeURIComponent(docId) + "/" + page + ".png?scale=2";
+  await new Promise((resolve) => {
+    if (img.complete && img.naturalWidth) { resolve(); return; }
+    img.onload = () => resolve();
+    img.onerror = () => resolve();
+  });
+  if (token !== imgToken) return;
+  if (!img.naturalWidth) { toast("页面图片加载失败（服务端渲染错误）"); return; }
+  $("emptyHint").hidden = true;
+  fitZoom();
+  layout();
+  redraw();
+  renderInspector();
+}
+
+async function goPage(n) {
+  if (!doc) return;
+  n = clamp(Math.round(Number(n) || 1), 1, doc.pages);
+  if (n === page && $("pageImg").naturalWidth) return;
+  await flushSave();
+  await loadPage(n);
+}
+
+// -------------------------------------------------------------- page model
+
+function pageSize(n) {
+  const t = templates[String(n)];
+  if (t) return t;
+  const e = ann ? ann.pages.find((x) => x.page === n) : null;
+  if (e) return e;
+  return { width: 612, height: 792, rotation: 0 };
+}
+
+function pageEntryOrNull(n) {
+  return ann ? ann.pages.find((e) => e.page === n) || null : null;
+}
+
+function ensurePage(n) {
+  let entry = pageEntryOrNull(n);
+  if (!entry) {
+    const t = pageSize(n);
+    entry = {
+      page: n, width: t.width, height: t.height, rotation: t.rotation || 0,
+      tables: [], order: [], geometry: [],
+    };
+    ann.pages.push(entry);
+    ann.pages.sort((a, b) => a.page - b.page);
+  }
+  if (!ann.covered_pages.includes(n)) {
+    ann.covered_pages.push(n);
+    ann.covered_pages.sort((a, b) => a - b);
+  }
+  return entry;
+}
+
+function finalize() {
+  if (!ann) return;
+  if (ann.covered_pages.length && ann.method !== "independent_human") {
+    ann.method = "independent_human";
+    ann.annotation_version = ($("version").value || "r1").trim() || "r1";
+  }
+  ann.pages.sort((a, b) => a.page - b.page);
+  ann.covered_pages.sort((a, b) => a - b);
+}
+
+function mutate(fn) {
+  if (!ann) return;
+  history.push(clone(ann));
+  if (history.length > 80) history.shift();
+  future = [];
+  fn();
+  afterChange();
+}
+
+function afterChange() {
+  finalize();
+  renderInspector();
+  redraw();
+  scheduleSave();
+}
+
+// ------------------------------------------------------------------- saving
+
+function scheduleSave() {
+  dirty = true;
+  changeSeq += 1;
+  setSaveState("未保存…");
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveNow, 700);
+}
+
+async function saveNow() {
+  if (!ann || !docId) return;
+  if (saving) { scheduleSave(); return; }
+  if (!dirty) return;
+  clearTimeout(saveTimer);
+  const seq = changeSeq;
+  saving = true;
+  setSaveState("保存中…");
+  finalize();
+  try {
+    const res = await putJSON("/api/doc/" + encodeURIComponent(docId), { annotation: ann });
+    saving = false;
+    hideError();
+    if (changeSeq === seq) {
+      dirty = false;
+      setSaveState("已保存 " + new Date().toLocaleTimeString("zh-CN", { hour12: false }));
+    } else {
+      scheduleSave();
+    }
+    if (res.state) { state = res.state; renderGlobal(); renderDocList(); }
+  } catch (err) {
+    saving = false;
+    setSaveState("保存失败");
+    showError(err && err.message ? err.message : String(err));
+  }
+}
+
+async function flushSave() {
+  for (let i = 0; i < 60 && dirty; i++) {
+    if (saving) { await new Promise((r) => setTimeout(r, 100)); continue; }
+    clearTimeout(saveTimer);
+    await saveNow();
+  }
+}
+
+function undo() {
+  if (!history.length) return;
+  future.push(clone(ann));
+  ann = history.pop();
+  selection = null;
+  cellSel = null;
+  cellTableId = null;
+  afterChange();
+}
+
+function redo() {
+  if (!future.length) return;
+  history.push(clone(ann));
+  if (history.length > 80) history.shift();
+  ann = future.pop();
+  selection = null;
+  cellSel = null;
+  cellTableId = null;
+  afterChange();
+}
+
+// --------------------------------------------------------------- selection
+
+function isSelected(kind, id) {
+  return selection && selection.kind === kind && selection.id === id;
+}
+
+function selectedBox() {
+  if (!selection || !ann) return null;
+  const entry = pageEntryOrNull(page);
+  if (!entry) return null;
+  const list = selection.kind === "table" ? entry.tables
+    : selection.kind === "order" ? entry.order : entry.geometry;
+  return list.find((b) => b.id === selection.id) || null;
+}
+
+function deleteSelection() {
+  if (!selection) return;
+  const entry = pageEntryOrNull(page);
+  if (!entry) return;
+  mutate(() => {
+    if (selection.kind === "table") entry.tables = entry.tables.filter((x) => x.id !== selection.id);
+    if (selection.kind === "order") entry.order = entry.order.filter((x) => x.id !== selection.id);
+    if (selection.kind === "geometry") entry.geometry = entry.geometry.filter((x) => x.id !== selection.id);
+    selection = null;
+    cellSel = null;
+  });
+}
+
+function nextId(list, prefix) {
+  let max = 0;
+  for (const b of list) {
+    const m = /^([a-z])(\d+)$/.exec(b.id || "");
+    if (m && m[1] === prefix) max = Math.max(max, Number(m[2]));
+  }
+  return prefix + (max + 1);
+}
+
+function normalizeBox(bbox, t) {
+  let [x0, y0, x1, y1] = bbox;
+  x0 = clamp(x0, 0, t.width);
+  x1 = clamp(x1, 0, t.width);
+  y0 = clamp(y0, 0, t.height);
+  y1 = clamp(y1, 0, t.height);
+  if (x1 - x0 < 1) x1 = Math.min(t.width, x0 + 1);
+  if (y1 - y0 < 1) y1 = Math.min(t.height, y0 + 1);
+  if (x1 - x0 < 1) x0 = Math.max(0, x1 - 1);
+  if (y1 - y0 < 1) y0 = Math.max(0, y1 - 1);
+  bbox[0] = round1(x0);
+  bbox[1] = round1(y0);
+  bbox[2] = round1(x1);
+  bbox[3] = round1(y1);
+}
+
+const fmtBbox = (b) => b.map(round1).join(", ");
+
+// -------------------------------------------------------------- canvas draw
+
+function layout() {
+  if (!doc) return;
+  const t = pageSize(page);
+  const stage = $("stage");
+  stage.style.width = (t.width * zoom).toFixed(1) + "px";
+  stage.style.height = (t.height * zoom).toFixed(1) + "px";
+}
+
+function fitZoom() {
+  const wrap = $("canvasWrap");
+  const t = pageSize(page);
+  const z = (wrap.clientWidth - 40) / t.width;
+  zoom = clamp(Number.isFinite(z) ? z : 1, 0.3, 4);
+  $("zoomRange").value = String(zoom);
+}
+
+function redraw() {
+  const img = $("pageImg");
+  const canvas = $("overlay");
+  if (!doc || !img.naturalWidth) return;
+  const t = pageSize(page);
+  const ppp = img.naturalWidth / t.width;
+  const s = ppp / zoom;
+  if (canvas.width !== img.naturalWidth || canvas.height !== img.naturalHeight) {
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+  }
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const X = (x) => x * ppp;
+  const Y = (y) => (t.height - y) * ppp;
+  if (gridOn) drawGrid(ctx, t, X, Y, s);
+  const entry = pageEntryOrNull(page);
+  if (entry) {
+    for (const b of entry.geometry) drawBox(ctx, b, "#9333ea", X, Y, s, isSelected("geometry", b.id));
+    for (const b of entry.order) drawBox(ctx, b, "#16a34a", X, Y, s, isSelected("order", b.id));
+    entry.order.forEach((b, i) => drawBadge(ctx, b, String(i + 1), X, Y, s));
+    for (const tb of entry.tables) drawBox(ctx, tb, "#2563eb", X, Y, s, isSelected("table", tb.id));
+    const sel = selectedBox();
+    if (sel && selection.kind === "table") drawTableGrid(ctx, sel, X, Y, s);
+    if (sel) drawHandles(ctx, sel, X, Y, s);
+  }
+  if (drag && drag.mode === "create" && drag.cur) drawPreview(ctx, drag.start, drag.cur, X, Y, s);
+}
+
+function drawGrid(ctx, t, X, Y, s) {
+  ctx.save();
+  ctx.font = Math.round(10 * s) + "px ui-monospace, Consolas, monospace";
+  ctx.textBaseline = "top";
+  ctx.textAlign = "left";
+  for (let x = 0; x <= t.width + 0.5; x += 50) {
+    const major = Math.abs(x % 100) < 1e-6;
+    ctx.strokeStyle = major ? "rgba(120,120,120,0.55)" : "rgba(140,140,140,0.22)";
+    ctx.lineWidth = Math.max(1, (major ? 1.4 : 1) * s);
+    ctx.beginPath();
+    ctx.moveTo(X(x), 0);
+    ctx.lineTo(X(x), ctx.canvas.height);
+    ctx.stroke();
+    if (major && x > 0) {
+      const label = String(Math.round(x));
+      const w = ctx.measureText(label).width + 6 * s;
+      ctx.fillStyle = "rgba(255,255,255,0.85)";
+      ctx.fillRect(X(x) + 1, 1, w, 12 * s);
+      ctx.fillStyle = "#b91c1c";
+      ctx.fillText(label, X(x) + 3 * s, 1.5 * s);
+    }
+  }
+  for (let y = 0; y <= t.height + 0.5; y += 50) {
+    const major = Math.abs(y % 100) < 1e-6;
+    ctx.strokeStyle = major ? "rgba(120,120,120,0.55)" : "rgba(140,140,140,0.22)";
+    ctx.lineWidth = Math.max(1, (major ? 1.4 : 1) * s);
+    ctx.beginPath();
+    ctx.moveTo(0, Y(y));
+    ctx.lineTo(ctx.canvas.width, Y(y));
+    ctx.stroke();
+    if (major && y > 0) {
+      const label = String(Math.round(y));
+      const w = ctx.measureText(label).width + 6 * s;
+      ctx.fillStyle = "rgba(255,255,255,0.85)";
+      ctx.fillRect(1, Y(y) - 13 * s, w, 12 * s);
+      ctx.fillStyle = "#b91c1c";
+      ctx.fillText(label, 3 * s, Y(y) - 12.5 * s);
+    }
+  }
+  ctx.restore();
+}
+
+function drawBox(ctx, box, color, X, Y, s, selected) {
+  const [x0, y0, x1, y1] = box.bbox;
+  const rx = X(x0);
+  const ry = Y(y1);
+  const rw = X(x1) - rx;
+  const rh = Y(y0) - ry;
+  ctx.save();
+  ctx.lineWidth = Math.max(1.5, (selected ? 3 : 1.8) * s);
+  ctx.strokeStyle = selected ? "#f59e0b" : color;
+  ctx.fillStyle = selected ? "rgba(245,158,11,0.12)" : "rgba(37,99,235,0.05)";
+  ctx.fillRect(rx, ry, rw, rh);
+  ctx.strokeRect(rx, ry, rw, rh);
+  ctx.font = Math.round(11 * s) + "px ui-monospace, Consolas, monospace";
+  ctx.textBaseline = "top";
+  ctx.textAlign = "left";
+  const label = box.id;
+  const w = ctx.measureText(label).width + 8 * s;
+  ctx.fillStyle = selected ? "#b45309" : color;
+  ctx.fillRect(rx, ry, w, 14 * s);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(label, rx + 4 * s, ry + 2 * s);
+  ctx.restore();
+}
+
+function drawBadge(ctx, box, text, X, Y, s) {
+  const [x0, , x1, y1] = box.bbox;
+  const cx = (X(x0) + X(x1)) / 2;
+  const r = 10 * s;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, Y(y1) + r + 3 * s, r, 0, Math.PI * 2);
+  ctx.fillStyle = "#16a34a";
+  ctx.fill();
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold " + Math.round(12 * s) + "px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, cx, Y(y1) + r + 4 * s);
+  ctx.restore();
+}
+
+function drawTableGrid(ctx, table, X, Y, s) {
+  const [x0, y0, x1, y1] = table.bbox;
+  ctx.save();
+  ctx.strokeStyle = "rgba(37,99,235,0.5)";
+  ctx.lineWidth = Math.max(1, 1 * s);
+  ctx.setLineDash([5 * s, 4 * s]);
+  for (let c = 1; c < table.cols; c++) {
+    const x = x0 + ((x1 - x0) * c) / table.cols;
+    ctx.beginPath();
+    ctx.moveTo(X(x), Y(y1));
+    ctx.lineTo(X(x), Y(y0));
+    ctx.stroke();
+  }
+  for (let r = 1; r < table.rows; r++) {
+    const y = y0 + ((y1 - y0) * r) / table.rows;
+    ctx.beginPath();
+    ctx.moveTo(X(x0), Y(y));
+    ctx.lineTo(X(x1), Y(y));
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function handlePoints(x0, y0, x1, y1) {
+  const cx = (x0 + x1) / 2;
+  const cy = (y0 + y1) / 2;
+  return [[x0, y1], [cx, y1], [x1, y1], [x1, cy], [x1, y0], [cx, y0], [x0, y0], [x0, cy]];
+}
+
+const HANDLE_NAMES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
+
+function drawHandles(ctx, box, X, Y, s) {
+  const [x0, y0, x1, y1] = box.bbox;
+  const size = 7 * s;
+  ctx.save();
+  ctx.fillStyle = "#ffffff";
+  ctx.strokeStyle = "#f59e0b";
+  ctx.lineWidth = Math.max(1, 1.5 * s);
+  for (const [x, y] of handlePoints(x0, y0, x1, y1)) {
+    ctx.fillRect(X(x) - size / 2, Y(y) - size / 2, size, size);
+    ctx.strokeRect(X(x) - size / 2, Y(y) - size / 2, size, size);
+  }
+  ctx.restore();
+}
+
+function drawPreview(ctx, a, b, X, Y, s) {
+  const x0 = Math.min(a.x, b.x);
+  const x1 = Math.max(a.x, b.x);
+  const y0 = Math.min(a.y, b.y);
+  const y1 = Math.max(a.y, b.y);
+  ctx.save();
+  ctx.strokeStyle = "#ef4444";
+  ctx.lineWidth = Math.max(1.5, 2 * s);
+  ctx.setLineDash([6 * s, 4 * s]);
+  ctx.strokeRect(X(x0), Y(y1), X(x1) - X(x0), Y(y0) - Y(y1));
+  ctx.restore();
+}
+
+// ------------------------------------------------------------ pointer input
+
+function toPt(ev) {
+  const t = pageSize(page);
+  const rect = $("overlay").getBoundingClientRect();
+  const x = ((ev.clientX - rect.left) / rect.width) * t.width;
+  const y = t.height - ((ev.clientY - rect.top) / rect.height) * t.height;
+  return { x: clamp(x, 0, t.width), y: clamp(y, 0, t.height) };
+}
+
+function hitHandle(box, pt) {
+  const [x0, y0, x1, y1] = box.bbox;
+  const tol = 7 / zoom;
+  const points = handlePoints(x0, y0, x1, y1);
+  for (let i = 0; i < points.length; i++) {
+    const [hx, hy] = points[i];
+    if (Math.abs(pt.x - hx) <= tol && Math.abs(pt.y - hy) <= tol) return HANDLE_NAMES[i];
+  }
+  return null;
+}
+
+function hitTest(pt) {
+  const entry = pageEntryOrNull(page);
+  if (!entry) return null;
+  const tol = 2 / zoom;
+  const groups = [["table", entry.tables], ["order", entry.order], ["geometry", entry.geometry]];
+  for (const [kind, list] of groups) {
+    for (let i = list.length - 1; i >= 0; i--) {
+      const b = list[i].bbox;
+      if (pt.x >= b[0] - tol && pt.x <= b[2] + tol && pt.y >= b[1] - tol && pt.y <= b[3] + tol) {
+        return { kind, id: list[i].id };
+      }
+    }
+  }
+  return null;
+}
+
+function pushHistory() {
+  history.push(clone(ann));
+  if (history.length > 80) history.shift();
+  future = [];
+}
+
+function onPointerDown(ev) {
+  if (!doc || !ann || ev.button !== 0) return;
+  const pt = toPt(ev);
+  $("overlay").setPointerCapture(ev.pointerId);
+  if (tool !== "select") {
+    drag = { mode: "create", start: pt, cur: pt };
+    redraw();
+    return;
+  }
+  const box = selectedBox();
+  if (box) {
+    const handle = hitHandle(box, pt);
+    if (handle) {
+      pushHistory();
+      drag = { mode: "resize", handle, orig: box.bbox.slice(), start: pt };
+      redraw();
+      return;
+    }
+  }
+  const hit = hitTest(pt);
+  if (hit) {
+    selection = { kind: hit.kind, id: hit.id };
+    if (hit.kind !== "table" || cellTableId !== hit.id) {
+      cellSel = null;
+      cellTableId = hit.kind === "table" ? hit.id : null;
+    }
+    pushHistory();
+    drag = { mode: "move", orig: selectedBox().bbox.slice(), start: pt };
+    renderInspector();
+    redraw();
+    return;
+  }
+  selection = null;
+  cellSel = null;
+  renderInspector();
+  redraw();
+}
+
+function onPointerMove(ev) {
+  if (!doc) return;
+  const pt = toPt(ev);
+  $("cursorPt").textContent = "x=" + pt.x.toFixed(1) + "  y=" + pt.y.toFixed(1) + " pt";
+  if (!drag) return;
+  const t = pageSize(page);
+  if (drag.mode === "create") {
+    drag.cur = pt;
+    redraw();
+    return;
+  }
+  const box = selectedBox();
+  if (!box) return;
+  if (drag.mode === "move") {
+    const dx = pt.x - drag.start.x;
+    const dy = pt.y - drag.start.y;
+    const [x0, y0, x1, y1] = drag.orig;
+    const w = x1 - x0;
+    const hgt = y1 - y0;
+    const nx = clamp(x0 + dx, 0, t.width - w);
+    const ny = clamp(y0 + dy, 0, t.height - hgt);
+    box.bbox = [round1(nx), round1(ny), round1(nx + w), round1(ny + hgt)];
+  } else if (drag.mode === "resize") {
+    let [x0, y0, x1, y1] = drag.orig;
+    const handle = drag.handle;
+    if (handle.includes("w")) x0 = clamp(pt.x, 0, x1 - 2);
+    if (handle.includes("e")) x1 = clamp(pt.x, x0 + 2, t.width);
+    if (handle.includes("s")) y0 = clamp(pt.y, 0, y1 - 2);
+    if (handle.includes("n")) y1 = clamp(pt.y, y0 + 2, t.height);
+    box.bbox = [round1(x0), round1(y0), round1(x1), round1(y1)];
+  }
+  syncSelectionInputs();
+  redraw();
+}
+
+function syncSelectionInputs() {
+  const box = selectedBox();
+  if (!box) return;
+  for (let i = 0; i < 4; i++) {
+    const inp = document.querySelector('[data-test="bbox-' + i + '"]');
+    if (inp && document.activeElement !== inp) inp.value = String(box.bbox[i]);
+  }
+}
+
+function onPointerUp() {
+  if (!drag) return;
+  const t = pageSize(page);
+  if (drag.mode === "create") {
+    const a = drag.start;
+    const b = drag.cur || a;
+    const x0 = round1(Math.min(a.x, b.x));
+    const x1 = round1(Math.max(a.x, b.x));
+    const y0 = round1(Math.min(a.y, b.y));
+    const y1 = round1(Math.max(a.y, b.y));
+    const kind = tool;
+    drag = null;
+    if (x1 - x0 < 3 || y1 - y0 < 3) { redraw(); return; }
+    mutate(() => {
+      const entry = ensurePage(page);
+      if (kind === "table") {
+        const id = nextId(entry.tables, "t");
+        entry.tables.push({ id, bbox: [x0, y0, x1, y1], rows: 1, cols: 1, cells: [] });
+        selection = { kind: "table", id };
+        cellSel = null;
+        cellTableId = id;
+      } else if (kind === "order") {
+        const id = nextId(entry.order, "o");
+        entry.order.push({ id, bbox: [x0, y0, x1, y1] });
+        selection = { kind: "order", id };
+      } else {
+        const id = nextId(entry.geometry, "g");
+        entry.geometry.push({ id, bbox: [x0, y0, x1, y1] });
+        selection = { kind: "geometry", id };
+      }
+    });
+    return;
+  }
+  const box = selectedBox();
+  const changed = !!(box && drag.orig && box.bbox.some((v, i) => Math.abs(v - drag.orig[i]) >= 0.05));
+  drag = null;
+  if (changed) { afterChange(); } else { history.pop(); redraw(); }
+}
+
+// -------------------------------------------------------------- inspector
+
+function renderInspector() {
+  const sections = ["pageInfo", "selectionPanel", "tablesPanel", "cellEditor", "orderPanel", "geometryPanel", "ocrPanel"];
+  if (!doc || !ann) {
+    for (const id of sections) $(id).replaceChildren();
+    return;
+  }
+  renderPageInfo();
+  renderSelection();
+  renderTables();
+  renderCellEditor();
+  renderOrder();
+  renderGeometry();
+  renderOcr();
+}
+
+function renderPageInfo() {
+  const root = $("pageInfo");
+  root.replaceChildren();
+  const entry = pageEntryOrNull(page);
+  const covered = ann.covered_pages.includes(page);
+  const cb = h("input", { type: "checkbox", "data-test": "covered-toggle" });
+  cb.checked = covered;
+  cb.addEventListener("change", () => {
+    if (cb.checked) {
+      mutate(() => ensurePage(page));
+      return;
+    }
+    const hasContent = entry && (entry.tables.length || entry.order.length ||
+      entry.geometry.length || typeof entry.ocr_text === "string");
+    if (hasContent && !confirm("该页有标注内容，取消“已查看”会删除本页全部标注。继续？")) {
+      cb.checked = true;
+      return;
+    }
+    mutate(() => {
+      ann.pages = ann.pages.filter((e) => e.page !== page);
+      ann.covered_pages = ann.covered_pages.filter((p) => p !== page);
+    });
+  });
+  const counts = entry
+    ? "表格 " + entry.tables.length + " · 顺序 " + entry.order.length + " · 几何 " + entry.geometry.length
+    : "尚无标注";
+  root.append(
+    h("h3", { text: "第 " + page + " 页 / " + doc.pages }),
+    h("div", { class: "row" }, cb, "已查看", h("span", { class: "meta muted", text: counts }))
+  );
+}
+
+function renderSelection() {
+  const root = $("selectionPanel");
+  root.replaceChildren();
+  const box = selectedBox();
+  if (!box) {
+    root.append(h("p", { class: "muted", text: "未选中对象。用“选择”工具点击页面上的框，或从下面列表点选。" }));
+    return;
+  }
+  const kindName = selection.kind === "table" ? "表格" : selection.kind === "order" ? "顺序" : "几何";
+  root.append(h("h3", { text: "所选：" + box.id + "（" + kindName + "）" }));
+  const labels = ["x0", "y0", "x1", "y1"];
+  const inputs = [];
+  for (let i = 0; i < 4; i++) {
+    const inp = h("input", {
+      type: "number", step: "0.5", value: String(box.bbox[i]), class: "num",
+      "data-test": "bbox-" + i,
+    });
+    inp.addEventListener("change", () => {
+      const v = Number(inp.value);
+      if (!Number.isFinite(v)) return;
+      mutate(() => {
+        box.bbox[i] = v;
+        normalizeBox(box.bbox, pageSize(page));
+      });
+    });
+    inputs.push(inp);
+  }
+  root.append(h("div", { class: "row" },
+    labels[0], inputs[0], labels[1], inputs[1], labels[2], inputs[2], labels[3], inputs[3],
+    btn("删除", "danger", "delete-box", deleteSelection)
+  ));
+}
+
+function renderTables() {
+  const root = $("tablesPanel");
+  root.replaceChildren();
+  const entry = pageEntryOrNull(page);
+  const list = entry ? entry.tables : [];
+  root.append(h("h3", { text: "表格（" + list.length + "）" }));
+  if (!list.length) {
+    root.append(h("p", { class: "muted", text: "本页暂无表格。选“画表格”后在页面上拖拽。" }));
+    return;
+  }
+  for (const t of list) {
+    root.append(h("div", {
+      class: "item" + (isSelected("table", t.id) ? " sel" : ""),
+      onmousedown: () => {
+        selection = { kind: "table", id: t.id };
+        cellSel = null;
+        cellTableId = t.id;
+        renderInspector();
+        redraw();
+      },
+    },
+      h("span", { class: "id", text: t.id }),
+      h("span", { class: "meta", text: fmtBbox(t.bbox) + " · " + t.rows + "×" + t.cols + " · " + (t.cells || []).length + " 格" }),
+      btn("删除", "danger", null, () => {
+        mutate(() => {
+          entry.tables = entry.tables.filter((x) => x.id !== t.id);
+          if (selection && selection.id === t.id) selection = null;
+        });
+      })
+    ));
+  }
+}
+
+function cellAt(t, r, c) {
+  return (t.cells || []).find((cell) =>
+    cell.row_start <= r && r < cell.row_end && cell.col_start <= c && c < cell.col_end) || null;
+}
+
+function inSel(r, c) {
+  return !!cellSel && r >= cellSel.r0 && r <= cellSel.r1 && c >= cellSel.c0 && c <= cellSel.c1;
+}
+
+function selSingleCell(t) {
+  if (!cellSel || cellSel.r0 !== cellSel.r1 || cellSel.c0 !== cellSel.c1) return null;
+  return cellAt(t, cellSel.r0, cellSel.c0);
+}
+
+function moveCellNext(t) {
+  if (!cellSel) return;
+  let r = cellSel.r0;
+  let c = cellSel.c0 + 1;
+  if (c >= t.cols) { c = 0; r += 1; }
+  if (r >= t.rows) { r = 0; c = 0; }
+  cellSel = { r0: r, c0: c, r1: r, c1: c };
+}
+
+function pruneCells(t) {
+  let dropped = 0;
+  const kept = [];
+  for (const cell of t.cells || []) {
+    if (cell.row_start >= t.rows || cell.col_start >= t.cols) { dropped += 1; continue; }
+    cell.row_end = Math.min(cell.row_end, t.rows);
+    cell.col_end = Math.min(cell.col_end, t.cols);
+    kept.push(cell);
+  }
+  t.cells = kept;
+  if (dropped) toast("有 " + dropped + " 个单元格超出新的行列范围，已移除");
+}
+
+function fillGaps(t) {
+  let added = 0;
+  for (let r = 0; r < t.rows; r++) {
+    for (let c = 0; c < t.cols; c++) {
+      if (!cellAt(t, r, c)) {
+        t.cells.push({ row_start: r, row_end: r + 1, col_start: c, col_end: c + 1, text: "" });
+        added += 1;
+      }
+    }
+  }
+  if (!added) toast("所有位置都已有单元格");
+}
+
+function rectBounds() {
+  return {
+    R0: cellSel.r0, R1: cellSel.r1 + 1, C0: cellSel.c0, C1: cellSel.c1 + 1,
+  };
+}
+
+function containedBy(cell, b) {
+  return cell.row_start >= b.R0 && cell.row_end <= b.R1 && cell.col_start >= b.C0 && cell.col_end <= b.C1;
+}
+
+function mergeSel(t) {
+  if (!cellSel) { toast("先在网格里选择范围"); return; }
+  const b = rectBounds();
+  const intersects = t.cells.filter((cell) =>
+    cell.row_start < b.R1 && cell.row_end > b.R0 && cell.col_start < b.C1 && cell.col_end > b.C0);
+  if (intersects.some((cell) => !containedBy(cell, b))) {
+    toast("有单元格跨出所选范围，先拆分它再合并");
+    return;
+  }
+  mutate(() => {
+    const texts = intersects.map((cell) => (cell.text || "").trim()).filter(Boolean);
+    t.cells = t.cells.filter((cell) => !containedBy(cell, b));
+    t.cells.push({ row_start: b.R0, row_end: b.R1, col_start: b.C0, col_end: b.C1, text: texts.join(" ") });
+  });
+}
+
+function splitSel(t) {
+  if (!cellSel) { toast("先在网格里选择范围"); return; }
+  const b = rectBounds();
+  mutate(() => {
+    const texts = t.cells.filter((cell) => containedBy(cell, b))
+      .map((cell) => (cell.text || "").trim()).filter(Boolean);
+    t.cells = t.cells.filter((cell) => !containedBy(cell, b));
+    for (let r = b.R0; r < b.R1; r++) {
+      for (let c = b.C0; c < b.C1; c++) {
+        t.cells.push({
+          row_start: r, row_end: r + 1, col_start: c, col_end: c + 1,
+          text: r === b.R0 && c === b.C0 ? texts.join(" ") : "",
+        });
+      }
+    }
+  });
+}
+
+function clearSel(t) {
+  if (!cellSel) { toast("先在网格里选择范围"); return; }
+  const b = rectBounds();
+  const targets = t.cells.filter((cell) => containedBy(cell, b));
+  if (!targets.length) { toast("所选范围内没有完整单元格"); return; }
+  mutate(() => { t.cells = t.cells.filter((cell) => !containedBy(cell, b)); });
+}
+
+function renderCellEditor() {
+  const root = $("cellEditor");
+  root.replaceChildren();
+  if (!selection || selection.kind !== "table") return;
+  const entry = pageEntryOrNull(page);
+  const t = entry ? entry.tables.find((x) => x.id === selection.id) : null;
+  if (!t) return;
+  if (!Array.isArray(t.cells)) t.cells = [];
+  if (cellTableId !== t.id) { cellSel = null; cellTableId = t.id; }
+
+  root.append(h("h3", { text: "编辑表格 " + t.id }));
+
+  const rowsIn = h("input", { type: "number", min: "1", max: "60", value: String(t.rows), "data-test": "rows", class: "num" });
+  const colsIn = h("input", { type: "number", min: "1", max: "30", value: String(t.cols), "data-test": "cols", class: "num" });
+  const commitSize = () => {
+    const rows = clampInt(rowsIn.value, 1, 60, t.rows);
+    const cols = clampInt(colsIn.value, 1, 30, t.cols);
+    if (rows !== t.rows || cols !== t.cols) {
+      t.rows = rows;
+      t.cols = cols;
+      pruneCells(t);
+    }
+  };
+  rowsIn.addEventListener("change", () => {
+    const rows = clampInt(rowsIn.value, 1, 60, t.rows);
+    const cols = clampInt(colsIn.value, 1, 30, t.cols);
+    if (rows === t.rows && cols === t.cols) return;
+    mutate(() => { t.rows = rows; t.cols = cols; pruneCells(t); });
+  });
+  colsIn.addEventListener("change", () => {
+    const rows = clampInt(rowsIn.value, 1, 60, t.rows);
+    const cols = clampInt(colsIn.value, 1, 30, t.cols);
+    if (rows === t.rows && cols === t.cols) return;
+    mutate(() => { t.rows = rows; t.cols = cols; pruneCells(t); });
+  });
+
+  const act = (fn) => mutate(() => { commitSize(); fn(); });
+
+  root.append(h("div", { class: "row" },
+    "行 ", rowsIn, " 列 ", colsIn,
+    btn("生成全部", "", "gen-cells", () => act(() => fillGaps(t))),
+    btn("合并", "", "merge-cells", () => act(() => mergeSel(t))),
+    btn("拆分", "", "split-cells", () => act(() => splitSel(t))),
+    btn("删除所选格", "danger", null, () => act(() => clearSel(t)))
+  ));
+
+  const grid = h("div", { class: "cells", "data-test": "cell-grid" });
+  grid.style.gridTemplateColumns = "repeat(" + t.cols + ", minmax(0, 1fr))";
+  const buttons = new Map();
+  const input = h("input", {
+    id: "cellText", class: "grow", "data-test": "cell-text",
+    placeholder: "所选单元格文字（回车提交并跳到下一格）",
+  });
+  let editing = false;
+  const beginEdit = () => {
+    if (!editing) {
+      pushHistory();
+      editing = true;
+    }
+  };
+  const refresh = () => {
+    for (const [key, b] of buttons) {
+      const parts = key.split(",");
+      const r = Number(parts[0]);
+      const c = Number(parts[1]);
+      const cell = cellAt(t, r, c);
+      b.className = "cell" + (cell ? " has" : "") + (inSel(r, c) ? " sel" : "");
+      b.textContent = cell && cell.row_start === r && cell.col_start === c ? (cell.text || "·") : "";
+      b.title = cell
+        ? "r" + cell.row_start + "-" + cell.row_end + " c" + cell.col_start + "-" + cell.col_end +
+          "  " + (cell.text || "")
+        : "";
+    }
+    const single = selSingleCell(t);
+    if (document.activeElement !== input) input.value = single ? (single.text || "") : "";
+    input.disabled = !single;
+  };
+  for (let r = 0; r < t.rows; r++) {
+    for (let c = 0; c < t.cols; c++) {
+      const b = h("button", { type: "button", class: "cell" });
+      b.dataset.r = String(r);
+      b.dataset.c = String(c);
+      b.addEventListener("mousedown", (ev) => {
+        ev.preventDefault();
+        cellAnchor = { r, c };
+        cellSel = { r0: r, c0: c, r1: r, c1: c };
+        refresh();
+        if (!input.disabled) input.focus({ preventScroll: true });
+      });
+      b.addEventListener("mouseenter", (ev) => {
+        if (ev.buttons && cellAnchor) {
+          cellSel = {
+            r0: Math.min(cellAnchor.r, r), r1: Math.max(cellAnchor.r, r),
+            c0: Math.min(cellAnchor.c, c), c1: Math.max(cellAnchor.c, c),
+          };
+          refresh();
+        }
+      });
+      buttons.set(r + "," + c, b);
+      grid.append(b);
+    }
+  }
+  root.append(grid);
+
+  input.addEventListener("input", () => {
+    const cell = selSingleCell(t);
+    if (!cell) return;
+    beginEdit();
+    cell.text = input.value;
+    const b = buttons.get(cell.row_start + "," + cell.col_start);
+    if (b) b.textContent = cell.text || "·";
+    dirty = true;
+    changeSeq += 1;
+    setSaveState("未保存…");
+    scheduleSave();
+  });
+  input.addEventListener("blur", () => {
+    if (editing) {
+      editing = false;
+      afterChange();
+    }
+  });
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter") return;
+    ev.preventDefault();
+    const cell = selSingleCell(t);
+    if (cell) cell.text = input.value;
+    moveCellNext(t);
+    refresh();
+    input.focus({ preventScroll: true });
+  });
+  root.append(h("div", { class: "row" }, input));
+  root.append(h("p", {
+    class: "muted",
+    text: "单击选格，按住拖拽划选范围；合并/拆分调整跨格；文字修改后回车跳到下一格。",
+  }));
+  refresh();
+}
+
+function renderOrder() {
+  const root = $("orderPanel");
+  root.replaceChildren();
+  const entry = pageEntryOrNull(page);
+  const list = entry ? entry.order : [];
+  root.append(h("h3", { text: "阅读顺序（" + list.length + "）" }));
+  if (!list.length) {
+    root.append(h("p", { class: "muted", text: "用“画顺序区”按阅读先后依次拖拽；列表顺序即阅读顺序。" }));
+    return;
+  }
+  list.forEach((b, i) => {
+    root.append(h("div", {
+      class: "item" + (isSelected("order", b.id) ? " sel" : ""),
+      onmousedown: () => {
+        selection = { kind: "order", id: b.id };
+        renderInspector();
+        redraw();
+      },
+    },
+      h("span", { class: "idx", text: String(i + 1) }),
+      h("span", { class: "id", text: b.id }),
+      h("span", { class: "meta", text: fmtBbox(b.bbox) }),
+      btn("↑", "", null, () => {
+        if (i > 0) mutate(() => { const tmp = entry.order[i - 1]; entry.order[i - 1] = entry.order[i]; entry.order[i] = tmp; });
+      }),
+      btn("↓", "", null, () => {
+        if (i < list.length - 1) mutate(() => { const tmp = entry.order[i + 1]; entry.order[i + 1] = entry.order[i]; entry.order[i] = tmp; });
+      }),
+      btn("✕", "danger", null, () => {
+        mutate(() => {
+          entry.order.splice(i, 1);
+          if (selection && selection.id === b.id) selection = null;
+        });
+      })
+    ));
+  });
+  root.append(h("div", { class: "row" },
+    btn("复制到几何", "", "copy-order-geometry", () => {
+      mutate(() => { entry.geometry = entry.order.map((b, i) => ({ id: "g" + (i + 1), bbox: b.bbox.slice() })); });
+    }),
+    btn("清空", "danger", null, () => { mutate(() => { entry.order = []; }); })
+  ));
+}
+
+function renderGeometry() {
+  const root = $("geometryPanel");
+  root.replaceChildren();
+  const entry = pageEntryOrNull(page);
+  const list = entry ? entry.geometry : [];
+  root.append(h("h3", { text: "几何区域（" + list.length + "）" }));
+  if (!list.length) {
+    root.append(h("p", { class: "muted", text: "用“画几何区”拖拽；若与阅读顺序一致，可直接用上面的“复制到几何”。" }));
+    return;
+  }
+  list.forEach((b, i) => {
+    root.append(h("div", {
+      class: "item" + (isSelected("geometry", b.id) ? " sel" : ""),
+      onmousedown: () => {
+        selection = { kind: "geometry", id: b.id };
+        renderInspector();
+        redraw();
+      },
+    },
+      h("span", { class: "id", text: b.id }),
+      h("span", { class: "meta", text: fmtBbox(b.bbox) }),
+      btn("✕", "danger", null, () => {
+        mutate(() => {
+          entry.geometry.splice(i, 1);
+          if (selection && selection.id === b.id) selection = null;
+        });
+      })
+    ));
+  });
+  root.append(h("div", { class: "row" },
+    btn("清空", "danger", null, () => { mutate(() => { entry.geometry = []; }); })
+  ));
+}
+
+function renderOcr() {
+  const root = $("ocrPanel");
+  root.replaceChildren();
+  const entry = pageEntryOrNull(page);
+  const has = !!(entry && typeof entry.ocr_text === "string");
+  root.append(h("h3", { text: "OCR 转写" }));
+  const cb = h("input", { type: "checkbox", "data-test": "ocr-toggle" });
+  cb.checked = has;
+  cb.addEventListener("change", () => {
+    mutate(() => {
+      const e = ensurePage(page);
+      if (cb.checked) {
+        if (typeof e.ocr_text !== "string") e.ocr_text = "";
+      } else {
+        delete e.ocr_text;
+      }
+    });
+  });
+  root.append(h("div", { class: "row" }, cb, "含整页转写（扫描件用）"));
+  if (has && document.activeElement !== $("ocrText")) {
+    const ta = h("textarea", {
+      id: "ocrText", rows: "8", "data-test": "ocr-text",
+      placeholder: "按阅读顺序逐字转写整页文字",
+    });
+    ta.value = entry.ocr_text;
+    let editing = false;
+    ta.addEventListener("input", () => {
+      if (!editing) {
+        pushHistory();
+        editing = true;
+      }
+      entry.ocr_text = ta.value;
+      dirty = true;
+      changeSeq += 1;
+      setSaveState("未保存…");
+      scheduleSave();
+    });
+    ta.addEventListener("blur", () => {
+      if (editing) {
+        editing = false;
+        afterChange();
+      }
+    });
+    root.append(ta);
+  }
+}
+
+// -------------------------------------------------------------- keyboard
+
+function onKeyDown(ev) {
+  const tag = (document.activeElement || {}).tagName;
+  const typing = tag === "INPUT" || tag === "TEXTAREA";
+  if (ev.key === "Escape") {
+    drag = null;
+    selection = null;
+    cellSel = null;
+    renderInspector();
+    redraw();
+    return;
+  }
+  if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "z") {
+    ev.preventDefault();
+    if (ev.shiftKey) redo(); else undo();
+    return;
+  }
+  if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "y") {
+    ev.preventDefault();
+    redo();
+    return;
+  }
+  if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "s") {
+    ev.preventDefault();
+    saveNow();
+    return;
+  }
+  if (typing) return;
+  if (ev.key === "Delete" || ev.key === "Backspace") {
+    ev.preventDefault();
+    deleteSelection();
+    return;
+  }
+  if (ev.key === "PageDown") {
+    ev.preventDefault();
+    goPage(page + 1);
+    return;
+  }
+  if (ev.key === "PageUp") {
+    ev.preventDefault();
+    goPage(page - 1);
+    return;
+  }
+  if (selection && ev.key.indexOf("Arrow") === 0) {
+    const box = selectedBox();
+    if (!box) return;
+    ev.preventDefault();
+    const d = ev.shiftKey ? 10 : 1;
+    const dx = ev.key === "ArrowLeft" ? -d : ev.key === "ArrowRight" ? d : 0;
+    const dy = ev.key === "ArrowUp" ? d : ev.key === "ArrowDown" ? -d : 0;
+    mutate(() => {
+      box.bbox = [box.bbox[0] + dx, box.bbox[1] + dy, box.bbox[2] + dx, box.bbox[3] + dy];
+      normalizeBox(box.bbox, pageSize(page));
+    });
+  }
+}
+
+// ------------------------------------------------------------------- boot
+
+function bindStaticEvents() {
+  document.querySelectorAll("#toolbar button[data-tool]").forEach((b) => {
+    b.addEventListener("click", () => {
+      tool = b.dataset.tool;
+      document.querySelectorAll("#toolbar button[data-tool]").forEach((x) => {
+        x.classList.toggle("active", x === b);
+      });
+      $("overlay").style.cursor = tool === "select" ? "default" : "crosshair";
+    });
+  });
+  $("undo").addEventListener("click", undo);
+  $("redo").addEventListener("click", redo);
+  $("gridToggle").addEventListener("change", (ev) => { gridOn = ev.target.checked; redraw(); });
+  $("zoomRange").addEventListener("input", (ev) => { zoom = Number(ev.target.value); layout(); redraw(); });
+  $("fitZoom").addEventListener("click", () => { fitZoom(); layout(); redraw(); });
+  $("prevPage").addEventListener("click", () => goPage(page - 1));
+  $("nextPage").addEventListener("click", () => goPage(page + 1));
+  $("pageInput").addEventListener("change", (ev) => goPage(Number(ev.target.value)));
+  const overlay = $("overlay");
+  overlay.addEventListener("pointerdown", onPointerDown);
+  overlay.addEventListener("pointermove", onPointerMove);
+  overlay.addEventListener("pointerup", onPointerUp);
+  overlay.addEventListener("pointercancel", onPointerUp);
+  window.addEventListener("resize", () => { layout(); redraw(); });
+  window.addEventListener("beforeunload", (ev) => {
+    if (dirty) {
+      ev.preventDefault();
+      ev.returnValue = "";
+    }
+  });
+  const version = $("version");
+  try { version.value = localStorage.getItem("studio.version") || "r1"; } catch (err) { /* ignore */ }
+  version.addEventListener("change", () => {
+    try { localStorage.setItem("studio.version", version.value); } catch (err) { /* ignore */ }
+  });
+  document.addEventListener("keydown", onKeyDown);
+}
+
+async function boot() {
+  bindStaticEvents();
+  try {
+    state = await getJSON("/api/state");
+  } catch (err) {
+    showError("无法读取 /api/state：" + (err && err.message ? err.message : err));
+    return;
+  }
+  renderGlobal();
+  renderDocList();
+  let last = null;
+  try { last = localStorage.getItem("studio.doc"); } catch (err) { last = null; }
+  if (last && state.documents.some((d) => d.id === last)) await openDoc(last);
+}
+
+boot();
+})();
+</script>
+</body>
+</html>
