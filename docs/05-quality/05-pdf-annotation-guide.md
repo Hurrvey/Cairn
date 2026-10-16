@@ -29,6 +29,23 @@ This writes two files under `data/annotations/` (local, not committed):
   absolute path of the source PDF as found on this machine (the manifest references some
   documents by a corpus-relative `local_pdf` and others by an absolute `path`).
 
+A local helper covers the mechanical parts (it never annotates for you):
+
+```powershell
+uv run python scripts/pdf_annotation_helper.py render cjk-06 --pages 1,3-5
+uv run python scripts/pdf_annotation_helper.py render financial_table_heavy-01 --pages 2 --crop 60 300 560 620
+uv run python scripts/pdf_annotation_helper.py scaffold cjk-06 --pages 1-3
+uv run python scripts/pdf_annotation_helper.py status
+```
+
+`render` writes PNGs into `data/annotations/renders/` with a grid every 50 PDF points
+(labels every 100) in the required bottom-left PDF-point space, so boxes can be read off
+the image; `--crop x0 y0 x1 y1` zooms into a region, in PDF points, and the crop goes to a
+distinct file name. `scaffold` copies the selected pages' templates into the working file
+(never overwriting pages already there) and marks the document `independent_human`; run it
+only for pages you are about to examine. `status` validates the working file and prints
+coverage per document.
+
 ## 2. File format
 
 ```json
